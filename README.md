@@ -7,6 +7,7 @@
   <a href="https://github.com/chgl42/openlaunch-connect/actions/workflows/build.yml"><img alt="Build" src="https://github.com/chgl42/openlaunch-connect/actions/workflows/build.yml/badge.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/macOS-Apple%20Silicon-blue">
   <img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green">
+  <a href="https://buymeacoffee.com/chgl42"><img alt="Buy me a coffee" src="https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd00?logo=buymeacoffee&logoColor=black"></a>
 </p>
 
 **OpenLaunch Connect** (formerly *OpenR10 Connect*) is a small, native macOS app that connects a **Garmin Approach R10** launch monitor
@@ -224,6 +225,12 @@ GitHub Actions builds the app on an Apple Silicon runner for every push. Tagging
 ```bash
 git tag v0.7.0 && git push origin v0.7.0
 ```
+
+## Support
+
+OpenLaunch Connect is free and open source. If it saves you the iPhone-and-E6 detour and you'd like to say thanks,
+you can [buy me a coffee](https://buymeacoffee.com/chgl42). Bug reports and ideas are just as welcome as
+[issues](https://github.com/chgl42/openlaunch-connect/issues).
 
 ## License
 
