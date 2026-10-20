@@ -1,0 +1,18 @@
+OpenLaunch Connect
+Copyright 2026 The OpenLaunch Connect contributors
+
+Licensed under either of the Apache License, Version 2.0 (LICENSE-APACHE)
+or the MIT license (LICENSE-MIT), at your option.
+
+This product includes a modified copy of "10over" (crate "tenover")
+by Eric Thill, https://github.com/divotmaker/10over, located in vendor/tenover
+and licensed under MIT OR Apache-2.0. See vendor/tenover/PATCHES.md for the
+changes made.
+
+Third-party Rust dependencies are listed with their licenses in
+THIRD_PARTY_LICENSES.html, which is shipped inside the app bundle
+(Contents/Resources) and attached to every release.
+
+Garmin and Approach are trademarks of Garmin Ltd. or its subsidiaries.
+GSPro is a trademark of its respective owner. This project is not
+affiliated with, endorsed by, or sponsored by Garmin or GSPro.

@@ -1,0 +1,533 @@
+//! Shot history: every real shot is kept for the session and appended to
+//! `shots.jsonl` next to the settings, so it survives restarts and can be
+//! exported as CSV.
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use serde::{Deserialize, Serialize};
+
+use crate::mapping::{GsBall, GsClub, Tempo};
+use crate::settings::Settings;
+
+/// Write shots to disk (off in demo mode, so screenshots don't pollute the history).
+pub static PERSIST: AtomicBool = AtomicBool::new(true);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ShotRecord {
+    /// Local time, RFC 3339.
+    pub time: String,
+    pub shot_number: u32,
+    /// Club selected in GSPro at the time of the shot (e.g. `DR`, `I7`).
+    pub club_code: Option<String>,
+    pub delivered: bool,
+    pub ball: GsBall,
+    pub club: Option<GsClub>,
+    /// Swing timing; missing in history files written before 0.9.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo: Option<Tempo>,
+}
+
+impl ShotRecord {
+    #[must_use]
+    pub fn new(ball: GsBall, club: Option<GsClub>, club_code: Option<String>, delivered: bool, shot_number: u32) -> Self {
+        Self {
+            time: chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+            shot_number,
+            club_code,
+            delivered,
+            ball,
+            club,
+            tempo: None,
+        }
+    }
+
+    /// Ball speed / club speed, if the club was tracked.
+    #[must_use]
+    pub fn smash(&self) -> Option<f64> {
+        smash(&self.ball, self.club.as_ref())
+    }
+
+    /// Clock time (`HH:MM:SS`) for display.
+    #[must_use]
+    pub fn clock(&self) -> &str {
+        self.time.get(11..19).unwrap_or(&self.time)
+    }
+}
+
+/// Smash factor: ball speed / club speed.
+#[must_use]
+pub fn smash(ball: &GsBall, club: Option<&GsClub>) -> Option<f64> {
+    club.filter(|c| c.speed > 0.0).map(|c| ball.speed / c.speed)
+}
+
+fn path() -> Option<PathBuf> {
+    Some(Settings::data_dir()?.join("shots.jsonl"))
+}
+
+/// Append one shot to `shots.jsonl`.
+///
+/// # Errors
+/// Returns a message if the file cannot be written.
+pub fn append(rec: &ShotRecord) -> Result<(), String> {
+    if !PERSIST.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    let path = path().ok_or("HOME not set")?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut line = serde_json::to_string(rec).map_err(|e| e.to_string())?;
+    line.push('\n');
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(line.as_bytes()))
+        .map_err(|e| e.to_string())
+}
+
+/// All shots ever recorded (skips unreadable lines).
+#[must_use]
+pub fn load_all() -> Vec<ShotRecord> {
+    path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+        .unwrap_or_default()
+}
+
+const CSV_HEADER: &str = "time,shot_number,club,delivered,ball_speed_mph,vla_deg,hla_deg,total_spin_rpm,\
+spin_axis_deg,back_spin_rpm,side_spin_rpm,club_speed_mph,aoa_deg,path_deg,face_to_target_deg,face_to_path_deg,smash,\
+backswing_s,downswing_s,tempo";
+
+/// Shots as CSV (speeds in mph, angles in degrees, as sent to GSPro).
+#[must_use]
+pub fn to_csv(shots: &[ShotRecord]) -> String {
+    let opt = |v: Option<f64>, digits: usize| v.map_or_else(String::new, |v| format!("{v:.digits$}"));
+    let mut out = String::from(CSV_HEADER);
+    out.push('\n');
+    for s in shots {
+        let b = &s.ball;
+        let c = s.club.as_ref();
+        let fields = [
+            s.time.clone(),
+            s.shot_number.to_string(),
+            s.club_code.clone().unwrap_or_default(),
+            s.delivered.to_string(),
+            format!("{:.1}", b.speed),
+            format!("{:.1}", b.vla),
+            format!("{:.1}", b.hla),
+            format!("{:.0}", b.total_spin),
+            format!("{:.1}", b.spin_axis),
+            format!("{:.0}", b.back_spin),
+            format!("{:.0}", b.side_spin),
+            opt(c.map(|c| c.speed), 1),
+            opt(c.map(|c| c.angle_of_attack), 1),
+            opt(c.map(|c| c.path), 1),
+            opt(c.map(|c| c.face_to_target), 1),
+            opt(c.map(|c| c.face_to_target - c.path), 1),
+            opt(s.smash(), 2),
+            opt(s.tempo.map(|t| t.backswing), 2),
+            opt(s.tempo.map(|t| t.downswing), 2),
+            opt(s.tempo.map(|t| t.ratio()), 1),
+        ];
+        out.push_str(&fields.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// CSV layouts for the export.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    /// Our own columns (see [`to_csv`]).
+    #[default]
+    OpenLaunch,
+    /// Garmin Golf app range session export (`DrivingRange-*.csv`).
+    GarminGolf,
+    /// Awesome Golf session export (`ags-shots-*.csv`).
+    AwesomeGolf,
+}
+
+impl ExportFormat {
+    pub const ALL: [Self; 3] = [Self::OpenLaunch, Self::GarminGolf, Self::AwesomeGolf];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OpenLaunch => "OpenLaunch",
+            Self::GarminGolf => "Garmin Golf",
+            Self::AwesomeGolf => "Awesome Golf",
+        }
+    }
+
+    /// File name in the style of the original app.
+    #[must_use]
+    pub fn file_name(self, now: chrono::DateTime<chrono::Local>) -> String {
+        match self {
+            Self::OpenLaunch => format!("openlaunch-shots-{}.csv", now.format("%Y-%m-%d")),
+            Self::GarminGolf => {
+                format!("DrivingRange-{}_+0000.csv", now.with_timezone(&chrono::Utc).format("%Y-%m-%d_%H-%M-%S"))
+            }
+            Self::AwesomeGolf => format!("ags-shots-{}.csv", now.format("%Y-%m-%d")),
+        }
+    }
+
+    /// File contents.
+    #[must_use]
+    pub fn export(self, shots: &[ShotRecord]) -> String {
+        match self {
+            Self::OpenLaunch => to_csv(shots),
+            Self::GarminGolf => to_garmin_csv(shots),
+            Self::AwesomeGolf => to_awesome_golf_csv(shots),
+        }
+    }
+}
+
+/// GSPro club code → club type as the Garmin Golf and Awesome Golf exports write it.
+fn club_type(code: Option<&str>) -> String {
+    let Some(code) = code else { return String::new() };
+    let num = code.get(1..).unwrap_or("");
+    match code {
+        "DR" => "Driver".into(),
+        "PW" => "Pitching Wedge".into(),
+        "GW" => "Gap Wedge".into(),
+        "SW" => "Sand Wedge".into(),
+        "LW" => "Lob Wedge".into(),
+        "PT" => "Putter".into(),
+        c if c.starts_with('W') && !num.is_empty() => format!("{num} Wood"),
+        c if c.starts_with('H') && !num.is_empty() => format!("{num} Hybrid"),
+        c if c.starts_with('I') && !num.is_empty() => format!("{num} Iron"),
+        c => c.to_string(),
+    }
+}
+
+/// Reformat the stored RFC 3339 time (falls back to the raw string).
+fn format_time(time: &str, fmt: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(time).map_or_else(|_| time.to_string(), |t| t.format(fmt).to_string())
+}
+
+const GARMIN_HEADER: &str = "Date,Player,Club Name,Brand/Model,Club Type,Club Speed,Attack Angle,Club Path,Club Face,\
+Face to Path,Ball Speed,Smash Factor,Launch Angle,Launch Direction,Backspin,Sidespin,Spin Rate,Spin Rate Type,Spin Axis,\
+Apex Height,Carry Distance,Carry Deviation Angle,Carry Deviation Distance,Total Distance,Total Deviation Angle,\
+Total Deviation Distance,Target Total Distance,Target Carry Distance,Note,Tag,Air Density,Temperature,Air Pressure,\
+Relative Humidity,Back Stroke Length,Target Backswing Time,Target Downswing Time,Forward Stroke Length,Backswing Time,\
+Downswing Time,Target Tempo,Swing Tempo";
+const GARMIN_UNITS: &str = ",,,,,[mph],[deg],[deg],[deg],[deg],[mph],,[deg],[deg],[rpm],[rpm],[rpm],,[deg],[yds],[Yards],\
+[deg],[Yards],[Yards],[deg],[Yards],[Yards],[Yards],,,[g/L],[deg F],[kPa],[%],[Inches],[sec],[sec],[Inches],[sec],[sec],,";
+
+/// Garmin Golf range export: UTF-8 BOM, header + units row, imperial units, R10 sign
+/// conventions (spin axis not inverted). Flight results (carry, apex, …) stay empty –
+/// the R10 only measures launch data, the Garmin app computes the rest.
+#[must_use]
+pub fn to_garmin_csv(shots: &[ShotRecord]) -> String {
+    let mut out = format!("\u{feff}{GARMIN_HEADER}\n{GARMIN_UNITS}\n");
+    let cols = GARMIN_HEADER.split(',').count();
+    for s in shots {
+        let b = &s.ball;
+        let c = s.club.as_ref();
+        let opt = |v: Option<f64>| v.map_or_else(String::new, |v| v.to_string());
+        let mut fields = vec![
+            format_time(&s.time, "%-m/%-d/%y %H:%M:%S"),
+            String::new(),
+            String::new(),
+            String::new(),
+            club_type(s.club_code.as_deref()),
+            opt(c.map(|c| c.speed)),
+            opt(c.map(|c| c.angle_of_attack)),
+            opt(c.map(|c| c.path)),
+            opt(c.map(|c| c.face_to_target)),
+            opt(c.map(|c| r2(c.face_to_target - c.path))),
+            b.speed.to_string(),
+            opt(s.smash().map(r2)),
+            b.vla.to_string(),
+            b.hla.to_string(),
+            b.back_spin.to_string(),
+            b.side_spin.to_string(),
+            b.total_spin.to_string(),
+            String::new(),
+            (-b.spin_axis).to_string(),
+        ];
+        fields.resize(cols, String::new());
+        if let Some(t) = &s.tempo {
+            // Despite the "[sec]" units row, Garmin writes these in milliseconds (e.g. 549.0) and the tempo with one decimal.
+            let col = |name: &str| GARMIN_HEADER.split(',').position(|h| h == name).expect("Garmin column");
+            fields[col("Backswing Time")] = format!("{:.1}", (t.backswing * 1000.0).round());
+            fields[col("Downswing Time")] = format!("{:.1}", (t.downswing * 1000.0).round());
+            fields[col("Swing Tempo")] = format!("{:.1}", t.ratio());
+        }
+        out.push_str(&fields.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+const AWESOME_HEADER: &str = "Date,Club Type,Club Description,Altitude,Club Speed,Ball Speed,Carry Distance,\
+Total Distance,Roll Distance,Smash,Vertical Launch,Peak Height,Descent Angle,Horizontal Launch,Carry Lateral Distance,\
+Total Lateral Distance,Carry Curve Distance,Total Curve Distance,Attack Angle,Dynamic Loft,Spin Loft,Spin Rate,\
+Spin Axis,Spin Reading,Low Point,Club Path,Face Path,Face Target,Swing Plane Tilt,Swing Plane Rotation,\
+Shot Classification";
+const AWESOME_UNITS: &str = ",,,[ft],[mph],[mph],[yd],[yd],[yd],,[deg],[ft],[deg],[deg],[yd],[yd],[yd],[yd],[deg],\
+[deg],[deg],[rpm],[deg],,[in],[deg],[deg],[deg],[deg],[deg],";
+
+/// Awesome Golf export: header + units row, imperial units, two decimals,
+/// spin axis positive = right (like GSPro). Flight results stay empty.
+#[must_use]
+pub fn to_awesome_golf_csv(shots: &[ShotRecord]) -> String {
+    let mut out = format!("{AWESOME_HEADER}\n{AWESOME_UNITS}\n");
+    let f2 = |v: f64| format!("{v:.2}");
+    let opt = |v: Option<f64>| v.map_or_else(String::new, f2);
+    for s in shots {
+        let b = &s.ball;
+        let c = s.club.as_ref();
+        let none = String::new;
+        let fields = [
+            format_time(&s.time, "%Y-%m-%d %H:%M:%S"),
+            club_type(s.club_code.as_deref()),
+            none(),
+            none(),
+            opt(c.map(|c| c.speed)),
+            f2(b.speed),
+            none(),
+            none(),
+            none(),
+            opt(s.smash()),
+            f2(b.vla),
+            none(),
+            none(),
+            f2(b.hla),
+            none(),
+            none(),
+            none(),
+            none(),
+            opt(c.map(|c| c.angle_of_attack)),
+            none(),
+            none(),
+            format!("{:.0}", b.total_spin),
+            f2(b.spin_axis),
+            none(),
+            none(),
+            opt(c.map(|c| c.path)),
+            opt(c.map(|c| c.face_to_target - c.path)),
+            opt(c.map(|c| c.face_to_target)),
+            none(),
+            none(),
+            none(),
+        ];
+        out.push_str(&fields.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+fn r2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
+}
+
+/// Mean and standard deviation of a series.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Stat {
+    pub mean: f64,
+    pub sd: f64,
+}
+
+impl Stat {
+    fn of(values: impl IntoIterator<Item = f64>) -> Option<Self> {
+        let v: Vec<f64> = values.into_iter().collect();
+        if v.is_empty() {
+            return None;
+        }
+        let n = v.len() as f64;
+        let mean = v.iter().sum::<f64>() / n;
+        let sd = if v.len() > 1 {
+            (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt()
+        } else {
+            0.0
+        };
+        Some(Self { mean, sd })
+    }
+}
+
+/// Averages and spread for one club.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClubStats {
+    /// GSPro club code, or `None` for shots before GSPro reported a club.
+    pub club_code: Option<String>,
+    pub shots: usize,
+    pub ball_speed: Option<Stat>,
+    pub club_speed: Option<Stat>,
+    pub smash: Option<Stat>,
+    pub vla: Option<Stat>,
+    pub total_spin: Option<Stat>,
+    pub hla: Option<Stat>,
+    pub face_to_path: Option<Stat>,
+    /// Backswing : downswing ratio.
+    pub tempo: Option<Stat>,
+}
+
+/// Per-club statistics, in order of first use.
+#[must_use]
+pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
+    let mut codes: Vec<Option<String>> = Vec::new();
+    for s in shots {
+        if !codes.contains(&s.club_code) {
+            codes.push(s.club_code.clone());
+        }
+    }
+    codes
+        .into_iter()
+        .map(|code| {
+            let group: Vec<&ShotRecord> = shots.iter().filter(|s| s.club_code == code).collect();
+            let clubs = || group.iter().filter_map(|s| s.club.as_ref());
+            ClubStats {
+                shots: group.len(),
+                ball_speed: Stat::of(group.iter().map(|s| s.ball.speed)),
+                club_speed: Stat::of(clubs().map(|c| c.speed)),
+                smash: Stat::of(group.iter().filter_map(|s| s.smash())),
+                vla: Stat::of(group.iter().map(|s| s.ball.vla)),
+                total_spin: Stat::of(group.iter().map(|s| s.ball.total_spin)),
+                hla: Stat::of(group.iter().map(|s| s.ball.hla)),
+                face_to_path: Stat::of(clubs().map(|c| c.face_to_target - c.path)),
+                tempo: Stat::of(group.iter().filter_map(|s| s.tempo.map(|t| t.ratio()))),
+                club_code: code,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rec(code: Option<&str>, speed: f64, club_speed: Option<f64>) -> ShotRecord {
+        let ball = GsBall {
+            speed,
+            spin_axis: 1.0,
+            total_spin: 6000.0,
+            back_spin: 5999.0,
+            side_spin: 105.0,
+            hla: 0.5,
+            vla: 18.0,
+        };
+        let club = club_speed.map(|speed| GsClub {
+            speed,
+            speed_at_impact: speed,
+            angle_of_attack: -3.0,
+            face_to_target: 1.0,
+            path: -1.0,
+        });
+        ShotRecord {
+            time: "2026-10-19T18:30:05+02:00".into(),
+            shot_number: 1,
+            club_code: code.map(Into::into),
+            delivered: true,
+            ball,
+            club,
+            tempo: club_speed.map(|_| Tempo { backswing: 0.81, downswing: 0.27 }),
+        }
+    }
+
+    #[test]
+    fn smash_factor() {
+        assert_eq!(rec(None, 120.0, Some(80.0)).smash(), Some(1.5));
+        assert_eq!(rec(None, 120.0, None).smash(), None);
+        assert_eq!(rec(None, 120.0, Some(0.0)).smash(), None);
+    }
+
+    #[test]
+    fn clock_is_extracted() {
+        assert_eq!(rec(None, 1.0, None).clock(), "18:30:05");
+    }
+
+    #[test]
+    fn stats_group_by_club() {
+        let shots = [
+            rec(Some("I7"), 118.0, Some(84.0)),
+            rec(Some("DR"), 150.0, Some(100.0)),
+            rec(Some("I7"), 122.0, None),
+        ];
+        let stats = club_stats(&shots);
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].club_code.as_deref(), Some("I7"));
+        assert_eq!(stats[0].shots, 2);
+        let bs = stats[0].ball_speed.unwrap();
+        assert!((bs.mean - 120.0).abs() < 1e-9);
+        assert!((bs.sd - 8f64.sqrt()).abs() < 1e-9);
+        // Club speed only from the tracked shot.
+        assert_eq!(stats[0].club_speed, Some(Stat { mean: 84.0, sd: 0.0 }));
+        assert_eq!(stats[1].face_to_path, Some(Stat { mean: 2.0, sd: 0.0 }));
+    }
+
+    #[test]
+    fn csv_has_header_and_one_row_per_shot() {
+        let csv = to_csv(&[rec(Some("PW"), 90.0, Some(70.0)), rec(None, 80.0, None)]);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 3);
+        let cols = lines[0].split(',').count();
+        assert!(lines.iter().all(|l| l.split(',').count() == cols));
+        assert!(lines[1].starts_with("2026-10-19T18:30:05+02:00,1,PW,true,90.0,"));
+        assert!(lines[1].ends_with(",1.29,0.81,0.27,3.0"), "{}", lines[1]);
+        assert!(lines[2].ends_with(",,,,,,,,,"));
+    }
+
+    #[test]
+    fn garmin_export_matches_layout() {
+        let csv = to_garmin_csv(&[rec(Some("I7"), 120.0, Some(84.0)), rec(None, 80.0, None)]);
+        assert!(csv.starts_with('\u{feff}'));
+        let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0].split(',').count(), 42);
+        assert!(lines.iter().all(|l| l.split(',').count() == 42), "{lines:?}");
+        assert!(lines[1].starts_with(",,,,,[mph],"));
+        let row: Vec<&str> = lines[2].split(',').collect();
+        assert_eq!(row[0], "10/19/26 18:30:05");
+        assert_eq!(row[4], "7 Iron");
+        assert_eq!(row[10], "120");
+        assert_eq!(row[11], "1.43");
+        assert_eq!(row[18], "-1", "spin axis back in R10 convention");
+        assert_eq!(&row[38..42], ["810.0", "270.0", "", "3.0"]);
+    }
+
+    #[test]
+    fn awesome_golf_export_matches_layout() {
+        let csv = to_awesome_golf_csv(&[rec(Some("DR"), 150.0, Some(100.0))]);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().all(|l| l.split(',').count() == 31), "{lines:?}");
+        let row: Vec<&str> = lines[2].split(',').collect();
+        assert_eq!(row[0], "2026-10-19 18:30:05");
+        assert_eq!(row[1], "Driver");
+        assert_eq!(row[5], "150.00");
+        assert_eq!(row[9], "1.50");
+        assert_eq!(row[21], "6000");
+        assert_eq!(row[22], "1.00");
+        assert_eq!(row[26], "2.00");
+    }
+
+    #[test]
+    fn club_types() {
+        assert_eq!(club_type(Some("W3")), "3 Wood");
+        assert_eq!(club_type(Some("H4")), "4 Hybrid");
+        assert_eq!(club_type(Some("I7")), "7 Iron");
+        assert_eq!(club_type(Some("SW")), "Sand Wedge");
+        assert_eq!(club_type(None), "");
+    }
+
+    #[test]
+    fn history_without_tempo_still_loads() {
+        let mut r = rec(Some("DR"), 150.0, None);
+        r.tempo = None;
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(!json.contains("tempo"));
+        assert_eq!(serde_json::from_str::<ShotRecord>(&json).unwrap(), r);
+    }
+
+    #[test]
+    fn record_roundtrips_as_json() {
+        let r = rec(Some("DR"), 150.0, Some(100.0));
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(serde_json::from_str::<ShotRecord>(&json).unwrap(), r);
+    }
+}

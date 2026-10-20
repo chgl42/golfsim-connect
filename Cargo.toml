@@ -1,0 +1,44 @@
+[package]
+name = "openlaunch-connect"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.94"
+description = "Open-source macOS bridge: Garmin Approach R10 (Bluetooth LE) -> GSPro OpenConnect API"
+repository = "https://github.com/chgl42/openlaunch-connect"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[[bin]]
+name = "openlaunch"
+path = "src/main.rs"
+
+[[bin]]
+name = "openlaunch-connect"
+path = "src/bin/openlaunch-connect.rs"
+
+[dependencies]
+tenover = { path = "vendor/tenover" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+eframe = "0.35.0"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+sys-locale = "0.3.2"
+ureq = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "0.6"
+objc2 = "0.6"
+block2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "block2"] }
+rfd = "0.17.2"
+
+[dev-dependencies]
+egui_kittest = { version = "0.35", features = ["wgpu", "snapshot", "eframe"] }
