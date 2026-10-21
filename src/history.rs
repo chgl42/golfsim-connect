@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
+use crate::flight::{self, Flight};
 use crate::mapping::{GsBall, GsClub, Tempo};
 use crate::settings::Settings;
 
@@ -416,6 +417,9 @@ pub struct ClubStats {
     pub face_to_path: Option<Stat>,
     /// Backswing : downswing ratio.
     pub tempo: Option<Stat>,
+    /// Estimated carry and total distance in metres (see `flight`).
+    pub carry: Option<Stat>,
+    pub total: Option<Stat>,
 }
 
 /// Per-club statistics of the shots that aren't excluded, in order of first use.
@@ -433,6 +437,7 @@ pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
         .map(|code| {
             let group: Vec<&ShotRecord> = shots.iter().copied().filter(|s| s.club_code == code).collect();
             let clubs = || group.iter().filter_map(|s| s.club.as_ref());
+            let flights: Vec<Flight> = group.iter().map(|s| flight::fly(&s.ball)).collect();
             ClubStats {
                 shots: group.len(),
                 ball_speed: Stat::of(group.iter().map(|s| s.ball.speed)),
@@ -443,6 +448,8 @@ pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
                 hla: Stat::of(group.iter().map(|s| s.ball.hla)),
                 face_to_path: Stat::of(clubs().map(|c| c.face_to_target - c.path)),
                 tempo: Stat::of(group.iter().filter_map(|s| s.tempo.map(|t| t.ratio()))),
+                carry: Stat::of(flights.iter().map(|f| f.carry)),
+                total: Stat::of(flights.iter().map(|f| f.total)),
                 club_code: code,
             }
         })
@@ -529,6 +536,10 @@ mod tests {
         // Club speed only from the tracked shot.
         assert_eq!(stats[0].club_speed, Some(Stat { mean: 84.0, sd: 0.0 }));
         assert_eq!(stats[1].face_to_path, Some(Stat { mean: 2.0, sd: 0.0 }));
+        // Estimated distances for every shot: the driver flies further.
+        let (iron, driver) = (stats[0].carry.unwrap(), stats[1].carry.unwrap());
+        assert!(iron.sd > 0.0 && driver.mean > iron.mean);
+        assert!(stats[1].total.unwrap().mean > driver.mean);
     }
 
     #[test]

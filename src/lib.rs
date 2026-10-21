@@ -4,6 +4,7 @@
 //! R10 ──BLE──> bridge ──TCP 127.0.0.1:921──> GSPro
 
 pub mod engine;
+pub mod flight;
 pub mod gspro;
 pub mod history;
 pub mod i18n;
