@@ -22,6 +22,8 @@ pub struct Settings {
     pub debug: bool,
     /// Always-on-top status overlay for playing with GSPro in full screen.
     pub overlay: OverlayPos,
+    /// Size, background and contents of the overlay.
+    pub overlay_style: OverlayStyle,
     /// Ask GitHub for a newer release on start.
     pub check_updates: bool,
     /// Last main window size in logical points (at zoom 1), restored on start.
@@ -32,6 +34,49 @@ pub struct Settings {
     pub language: Language,
     /// Last CSV layout chosen on the SHOTS page.
     pub export_format: ExportFormat,
+}
+
+/// What the overlay shows and how large it is. The status is always shown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct OverlayStyle {
+    /// Size factor on screen (0.75–1.5).
+    pub scale: f32,
+    /// Everything in one line instead of two.
+    pub one_line: bool,
+    /// Background opacity (0.7–1.0).
+    pub opacity: f32,
+    pub club: bool,
+    pub battery: bool,
+    pub tempo: bool,
+    pub ball_speed: bool,
+    pub vla: bool,
+    pub hla: bool,
+    pub spin: bool,
+    pub spin_axis: bool,
+    pub club_speed: bool,
+    pub smash: bool,
+}
+
+impl Default for OverlayStyle {
+    /// The overlay as it was before it could be configured.
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            one_line: false,
+            opacity: 0.85,
+            club: true,
+            battery: true,
+            tempo: true,
+            ball_speed: true,
+            vla: true,
+            hla: false,
+            spin: true,
+            spin_axis: false,
+            club_speed: false,
+            smash: true,
+        }
+    }
 }
 
 /// Where the overlay sits on the screen: a corner, the middle of an edge, or off.
@@ -80,6 +125,7 @@ impl Default for Settings {
             metric: true,
             debug: false,
             overlay: OverlayPos::default(),
+            overlay_style: OverlayStyle::default(),
             export_format: ExportFormat::default(),
             language: Language::default(),
             notifications: true,

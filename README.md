@@ -52,7 +52,7 @@ One app, a stable connection, no phone in the loop.
 - **Shot history** with per-club averages and spread (session or all time)
 - **CSV export** in three layouts: OpenLaunch, **Garmin Golf** app or **Awesome Golf** (same columns and units row as theirs)
 - **In-game overlay** on top of GSPro – also in full screen – with status, club, battery and the last shot;
-  place it in any corner or at the middle of any edge
+  place it in any corner or at the middle of any edge, choose its size, one or two lines and which values it shows
 - **Swing tempo** (backswing : downswing, e.g. 3.0 : 1) per shot, per club and in the overlay
 - **R10 battery level** and device warnings (tilted, overheating, radar saturation)
 - **macOS notifications** while GSPro is in front: low battery, R10 errors, lost connections, shots not delivered
@@ -134,8 +134,13 @@ e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none
 the shots shown, in the layout picked next to the button: OpenLaunch, Garmin Golf or Awesome Golf.
 
 **Overlay:** while GSPro runs in full screen, a small panel on top of it shows the status, club, battery,
-tempo and the last shot – or what's wrong. It ignores the mouse, so it never gets in the way; choose its
-position (or turn it off) in the settings.
+tempo and the last shot – or what's wrong. It ignores the mouse, so it never gets in the way. On the *Overlay*
+page you choose its position (or turn it off), size (75–150 %), one or two lines, how opaque its background is
+and which values it shows; a preview shows the result, and changes apply at once.
+
+<p align="center">
+  <img src="docs/images/screenshot-overlay-settings.png" alt="Overlay page with layout, contents and a preview" width="80%">
+</p>
 
 **Updates:** on start the app asks GitHub for the latest release (nothing else is sent) and shows *Update x.y.z*
 in the top bar when there is a newer one – click it to open the release page. You can turn the check off in the settings.
@@ -161,11 +166,11 @@ is sent after three seconds. GSPro only processes shots while its window is acti
 | R10 | **Distance to ball** | Sent to the R10 (default 2.10 m). Applies after restart. |
 | Display | **Language** | System (follows macOS), English or Deutsch. |
 | | **Units** | Metric (km/h) or imperial (mph) – display only; GSPro always gets mph. |
-| | **Overlay** | Position on the screen – any corner or the middle of any edge; the middle cell turns it off. |
 | Notifications & updates | **Notifications** | On/off. *Test* sends one right away – if none appears, allow notifications for OpenLaunch Connect in *System Settings → Notifications*. |
 | | **Updates** | Check GitHub for a newer release on start. |
 
-*Log GSPro messages* (every message exchanged with GSPro) is switched on the log page.
+*Log GSPro messages* (every message exchanged with GSPro) is switched on the log page, the overlay on its own
+*Overlay* page.
 
 Changes apply with **SAVE**; the notification and debug-log switches take effect immediately.
 
