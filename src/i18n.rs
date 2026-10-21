@@ -59,6 +59,12 @@ pub fn tr(en: &'static str) -> &'static str {
     if german() { de(en).unwrap_or(en) } else { en }
 }
 
+/// Whether `text` is `en` in any of the languages (e.g. a default name the user typed in German).
+#[must_use]
+pub fn is_text(en: &str, text: &str) -> bool {
+    text == en || de(en) == Some(text)
+}
+
 /// Translate a status text that may carry a trailing detail in parentheses,
 /// e.g. "Connected (127.0.0.1:921)" → "Verbunden (127.0.0.1:921)".
 #[must_use]

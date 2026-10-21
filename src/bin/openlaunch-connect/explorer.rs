@@ -159,8 +159,9 @@ fn page_name(page: &ExplorerPage, i: usize) -> String {
     if page.name.trim().is_empty() {
         return tr("Page {n}").replace("{n}", &(i + 1).to_string());
     }
-    // The default pages' names in the language shown.
-    DEFAULT_PAGE_NAMES.iter().find(|n| **n == page.name).map_or_else(|| page.name.clone(), |n| tr(n).to_string())
+    // The default pages' names (in either language) in the language shown.
+    let name = page.name.trim();
+    DEFAULT_PAGE_NAMES.iter().find(|n| i18n::is_text(n, name)).map_or_else(|| page.name.clone(), |n| tr(n).to_string())
 }
 
 /// Changes to a page from its tab's menu, applied afterwards.
@@ -1873,6 +1874,19 @@ mod tests {
             let ring = enclosing_ellipse(mean, &pts).unwrap();
             assert!(pts.iter().all(|q| inside(&ring, *q)), "{pts:?}");
         }
+    }
+
+    #[test]
+    fn default_page_names_follow_the_language() {
+        let page = |name: &str| ExplorerPage { name: name.into(), tiles: Vec::new() };
+        i18n::set(Language::German);
+        assert_eq!(page_name(&page("Ball flight"), 1), "Ballflug");
+        assert_eq!(page_name(&page("Daten"), 2), "Daten");
+        assert_eq!(page_name(&page("Driver only"), 0), "Driver only");
+        assert_eq!(page_name(&page(""), 3), "Seite 4");
+        i18n::set(Language::English);
+        assert_eq!(page_name(&page("Ballflug"), 1), "Ball flight", "typed in German, shown in English");
+        assert_eq!(page_name(&page("Daten"), 2), "Data");
     }
 
     #[test]
