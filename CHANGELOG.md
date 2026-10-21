@@ -22,11 +22,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   estimated flights with the roll-out, from the tee, from the side or from above. *Configure* adds tiles (the empty
   tile with +), picks what each tile shows and its size (1×1 up to the whole page), lets you drag tiles into place
   and removes them; the page shown is renamed, moved and removed (after asking) right in its tab, *+* adds a page
-  (also with a right-click on a tab). The layout is saved; *Reset shots view* in the settings brings back the
-  default pages (after asking). A filter by club (a menu when the clubs don't fit in a row; clubs in bag order, each
-  with its own colour) and *Hide excluded* apply to every tile; shots clicked in a table or chart are selected
-  everywhere and can be shown alone, excluded or counted again together. Larger windows (fixed interface size) fit
-  more tiles. *Export CSV* writes the shots shown and asks for the layout in a dialog.
+  (also with a right-click on a tab). It starts with three pages: *Range* (table, dispersion, flights from above),
+  *Ball flight* (from the tee, the side and above) and *Data* (table and details). The layout is saved; *Reset shots
+  view* in the settings brings back the default pages (after asking). A filter by club (a menu when the clubs don't
+  fit in a row; clubs in bag order, each with its own colour) and *Hide excluded* apply to every tile; shots clicked
+  in a table or chart are selected everywhere and can be shown alone, excluded or counted again together. Larger
+  windows (fixed interface size) fit more tiles. *Export CSV* writes the shots shown and asks for the layout in a
+  dialog.
 
 ### Changed
 - **Interface size** (Settings → Display): *Auto* zooms the interface with the window as before; a fixed size of

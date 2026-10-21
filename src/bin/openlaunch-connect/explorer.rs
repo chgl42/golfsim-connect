@@ -7,7 +7,7 @@ use openlaunch_connect::flight::{self, Flight};
 use openlaunch_connect::history::Stat;
 use std::rc::Rc;
 
-use openlaunch_connect::settings::{Camera, ExplorerPage, Metric, Tile, TileKind, TileSize};
+use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileSize};
 
 use super::*;
 
@@ -156,7 +156,11 @@ fn size_name(size: TileSize) -> &'static str {
 }
 
 fn page_name(page: &ExplorerPage, i: usize) -> String {
-    if page.name.trim().is_empty() { tr("Page {n}").replace("{n}", &(i + 1).to_string()) } else { page.name.clone() }
+    if page.name.trim().is_empty() {
+        return tr("Page {n}").replace("{n}", &(i + 1).to_string());
+    }
+    // The default pages' names in the language shown.
+    DEFAULT_PAGE_NAMES.iter().find(|n| **n == page.name).map_or_else(|| page.name.clone(), |n| tr(n).to_string())
 }
 
 /// Changes to a page from its tab's menu, applied afterwards.
@@ -249,7 +253,7 @@ impl App {
                 if i > 0 && link(ui, "◀", LABEL).on_hover_text(tr("Move the page left")).clicked() {
                     page_edit = Some(PageEdit::Move(i, -1));
                 }
-                let mut name = page.name.clone();
+                let mut name = if page.name.trim().is_empty() { String::new() } else { page_name(page, i) };
                 let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
                 let w = (text_width(ui, if name.is_empty() { &hint } else { &name }, 13.0) + 24.0).clamp(70.0, 180.0);
                 if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(w)).on_hover_text(tr("Name of the page")).changed() {
@@ -276,7 +280,7 @@ impl App {
             }
             // Stays open while typing the name; the entries close it themselves.
             egui::Popup::context_menu(&tab).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                let mut name = page.name.clone();
+                let mut name = if page.name.trim().is_empty() { String::new() } else { page_name(page, i) };
                 let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
                 if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(160.0)).changed() {
                     page_edit = Some(PageEdit::Rename(i, name));
@@ -1826,8 +1830,8 @@ mod tests {
         for _ in 0..3 {
             harness.step();
         }
-        // Default page: table 4×2 on the left, details 2×2 on the right (six columns).
-        let (from, to) = (pos2(250.0, 300.0), pos2(850.0, 300.0));
+        // Default page: table 3×2, dispersion 2×2, flight 1×2 (six columns).
+        let (from, to) = (pos2(250.0, 300.0), pos2(650.0, 300.0));
         let events = [
             egui::Event::PointerMoved(from),
             egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
@@ -1841,7 +1845,7 @@ mod tests {
         }
         harness.step();
         let kinds: Vec<TileKind> = harness.state().saved.explorer.pages[0].tiles.iter().map(|t| t.kind).collect();
-        assert_eq!(kinds, [TileKind::Details, TileKind::Table]);
+        assert_eq!(kinds, [TileKind::Dispersion, TileKind::Table, TileKind::Flight]);
     }
 
     #[test]

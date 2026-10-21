@@ -54,22 +54,41 @@ pub struct Explorer {
 }
 
 impl Default for Explorer {
-    /// A page with the shots table and the details of a shot, the table on a page of its own,
-    /// and the averages per club.
+    /// One row each: the range (table, dispersion, flights from above), the ball flight from the
+    /// tee, the side and above, and the data (table and details of a shot). The names are shown
+    /// translated (see `DEFAULT_PAGE_NAMES`).
     fn default() -> Self {
-        let tile = |kind, size, averages| Tile { kind, size, averages, ..Tile::default() };
+        let tile = |kind, size, camera| Tile { kind, size, camera, ..Tile::default() };
+        let page = |name: &str, tiles| ExplorerPage { name: name.into(), tiles };
         Self {
             pages: vec![
-                ExplorerPage {
-                    name: String::new(),
-                    tiles: vec![tile(TileKind::Table, TileSize::W4H2, false), tile(TileKind::Details, TileSize::W2H2, false)],
-                },
-                ExplorerPage { name: String::new(), tiles: vec![tile(TileKind::Table, TileSize::Page, false)] },
-                ExplorerPage { name: String::new(), tiles: vec![tile(TileKind::Table, TileSize::Page, true)] },
+                page(
+                    DEFAULT_PAGE_NAMES[0],
+                    vec![
+                        tile(TileKind::Table, TileSize::W3H2, Camera::Tee),
+                        tile(TileKind::Dispersion, TileSize::W2H2, Camera::Tee),
+                        tile(TileKind::Flight, TileSize::W1H2, Camera::Above),
+                    ],
+                ),
+                page(
+                    DEFAULT_PAGE_NAMES[1],
+                    vec![
+                        tile(TileKind::Flight, TileSize::W2H2, Camera::Tee),
+                        tile(TileKind::Flight, TileSize::W3H2, Camera::Side),
+                        tile(TileKind::Flight, TileSize::W1H2, Camera::Above),
+                    ],
+                ),
+                page(
+                    DEFAULT_PAGE_NAMES[2],
+                    vec![tile(TileKind::Table, TileSize::W4H2, Camera::Tee), tile(TileKind::Details, TileSize::W2H2, Camera::Tee)],
+                ),
             ],
         }
     }
 }
+
+/// Names of the default pages, in English; the app shows them translated.
+pub const DEFAULT_PAGE_NAMES: [&str; 3] = ["Range", "Ball flight", "Data"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
