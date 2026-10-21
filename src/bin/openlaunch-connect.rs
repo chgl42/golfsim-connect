@@ -1102,11 +1102,18 @@ impl eframe::App for App {
         if self.applied_scale != Some(scale) {
             if self.applied_scale.is_some() {
                 let min = min_size(scale);
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
-                let size = resized_window(logical, old_zoom, scale, screen_room(ui.ctx()));
-                if size != logical {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-                }
+                let room = screen_room(ui.ctx());
+                let size = resized_window(logical, old_zoom, scale, room);
+                log::info(&format!(
+                    "Interface size {}: window {:.0}×{:.0} → {:.0}×{:.0} (screen room {})",
+                    scale.map_or("auto".to_string(), |s| format!("{:.0} %", s * 100.0)),
+                    logical.x,
+                    logical.y,
+                    size.x,
+                    size.y,
+                    room.map_or("unknown".to_string(), |r| format!("{:.0}×{:.0}", r.x, r.y)),
+                ));
+                set_window_size(ui.ctx(), size, min, scale.unwrap_or(old_zoom));
             }
             self.applied_scale = Some(scale);
         }
@@ -1178,6 +1185,18 @@ fn resized_window(logical: egui::Vec2, zoom: f32, scale: Option<f32>, room: Opti
             vec2(w, window_height(w))
         }
     }
+}
+
+/// Resize the main window to `size` with the minimum `min` (both at zoom 1). egui's viewport
+/// commands take points at the zoom `zoom` the window will have; on macOS AppKit is told
+/// directly, keeping the window's top edge in place.
+fn set_window_size(ctx: &egui::Context, size: egui::Vec2, min: egui::Vec2, zoom: f32) {
+    #[cfg(target_os = "macos")]
+    if mac::set_content_size(APP_NAME, size, min) {
+        return;
+    }
+    ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min / zoom));
+    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size / zoom));
 }
 
 /// Largest window content on the current screen (at zoom 1): without the menu bar, the Dock and
@@ -1335,6 +1354,33 @@ mod mac {
         let frame = window.frame();
         let title_bar = frame.size.height - window.contentRectForFrameRect(frame).size.height;
         Some(eframe::egui::vec2(visible.size.width as f32, (visible.size.height - title_bar) as f32))
+    }
+
+    /// Set the content size and minimum content size (points) of the window titled `title`,
+    /// keeping its top edge and the window on the screen. False before the window exists.
+    pub fn set_content_size(title: &str, size: eframe::egui::Vec2, min: eframe::egui::Vec2) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let title = NSString::from_str(title);
+        let windows = NSApplication::sharedApplication(mtm).windows();
+        let Some(window) = windows.iter().find(|w| w.title().isEqualToString(&title)) else {
+            return false;
+        };
+        window.setContentMinSize(NSSize::new(min.x.into(), min.y.into()));
+        let frame = window.frame();
+        let mut content = window.contentRectForFrameRect(frame);
+        content.size = NSSize::new(size.x.into(), size.y.into());
+        let mut new = window.frameRectForContentRect(content);
+        // AppKit's origin is bottom-left: keep the top edge where it was.
+        new.origin.y = frame.origin.y + frame.size.height - new.size.height;
+        if let Some(screen) = window.screen() {
+            let v = screen.visibleFrame();
+            new.origin.x = new.origin.x.min(v.origin.x + v.size.width - new.size.width).max(v.origin.x);
+            new.origin.y = new.origin.y.max(v.origin.y).min(v.origin.y + v.size.height - new.size.height);
+        }
+        window.setFrame_display(new, true);
+        true
     }
 
     /// Let the window be resized only in the given aspect ratio (`None`: freely). macOS applies
