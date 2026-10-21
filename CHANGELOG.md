@@ -18,7 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Shot explorer** on the shots page: pages of tiles on a grid – a shots table, the averages per club, the details
   of a shot (all values, including the estimated flight), the **dispersion** of the landing points (carry or total)
   from above with the mean and an ellipse around all shots of each club, and a **correlation** chart of any two
-  values (e.g. face to path against spin axis) with the correlation coefficient. *Configure* adds tiles (the empty
+  values (e.g. face to path against spin axis) with the correlation coefficient. A **3D flight** tile shows the
+  estimated flights with the roll-out, from the tee, from the side or from above. *Configure* adds tiles (the empty
   tile with +), picks what each tile shows and its size (1×1 up to the whole page), lets you drag tiles into place
   and removes them; the page shown is renamed, moved and removed (after asking) right in its tab, *+* adds a page
   (also with a right-click on a tab). The layout is saved; *Reset shots view* in the settings brings back the

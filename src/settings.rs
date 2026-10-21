@@ -92,11 +92,38 @@ pub struct Tile {
     /// Scatter: values on the horizontal and vertical axis.
     pub x: Metric,
     pub y: Metric,
+    /// 3D flight: where the camera looks from.
+    pub camera: Camera,
+}
+
+/// Camera of a 3D flight tile.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Camera {
+    /// Behind the tee, looking down the range.
+    #[default]
+    Tee,
+    /// From the side: height over distance.
+    Side,
+    /// From above and behind, at an angle.
+    Above,
+}
+
+impl Camera {
+    pub const ALL: [Self; 3] = [Self::Tee, Self::Side, Self::Above];
 }
 
 impl Default for Tile {
     fn default() -> Self {
-        Self { kind: TileKind::Table, size: TileSize::W2H2, averages: false, total: false, x: Metric::Hla, y: Metric::SpinAxis }
+        Self {
+            kind: TileKind::Table,
+            size: TileSize::W2H2,
+            averages: false,
+            total: false,
+            x: Metric::Hla,
+            y: Metric::SpinAxis,
+            camera: Camera::Tee,
+        }
     }
 }
 
@@ -154,10 +181,12 @@ pub enum TileKind {
     Dispersion,
     /// Two values against each other.
     Scatter,
+    /// The estimated flights in 3D.
+    Flight,
 }
 
 impl TileKind {
-    pub const ALL: [Self; 4] = [Self::Table, Self::Details, Self::Dispersion, Self::Scatter];
+    pub const ALL: [Self; 5] = [Self::Table, Self::Details, Self::Dispersion, Self::Scatter, Self::Flight];
 }
 
 /// Tile sizes in cells (width × height), like widgets on a phone, or the whole page.
