@@ -116,6 +116,10 @@ fn de(en: &str) -> Option<&'static str> {
         "delivered to GSPro" => "an GSPro übergeben",
         "NOT delivered to GSPro" => "NICHT an GSPro übergeben",
         "Tempo" => "Tempo",
+        "Exclude" => "Ausblenden",
+        "Count" => "Mitzählen",
+        "Count this shot in the stats and exports again" => "Diesen Schlag wieder in Statistik und Export mitzählen",
+        "Leave this shot out of the stats and exports (e.g. a misread); it stays listed" => "Diesen Schlag nicht in Statistik und Export mitzählen (z. B. eine Fehlmessung); er bleibt in der Liste",
 
         "LAST SHOT" => "LETZTER SCHLAG",
         "{n} sent" => "{n} gesendet",

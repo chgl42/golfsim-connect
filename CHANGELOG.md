@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Overlay page:** choose the overlay's size (75–150 %), one or two lines, how opaque its background is and which
   values it shows (club, battery, tempo, ball speed, VLA, HLA, spin, spin axis, club speed, smash factor), with a
   preview. Changes apply at once. The overlay's position moved here from the settings.
+- **Exclude shots:** *Exclude* next to a shot on the shots page leaves it out of the averages and CSV exports
+  (e.g. a misread); it stays listed, struck through, and *Count* takes it back. Kept in the shot history.
 
 ### Fixed
 - A shot sent just as GSPro closed the connection was counted as delivered (and not reported as lost).
