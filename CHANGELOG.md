@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   so they are estimated from the launch data (no wind, sea level) and marked with *; GSPro may show other numbers.
 - **Shot explorer** on the shots page: pages of tiles on a grid – a shots table, the averages per club, the
   details of a shot (all values, including the estimated flight), the **dispersion** of the landing points (carry
-  or total) from above with mean and ±1 SD ellipse per club, and a **correlation** chart of any two values
+  or total) from above with the mean and an ellipse around all shots of each club, and a **correlation** chart of any two values
   (e.g. face to path against spin axis) with the correlation coefficient. Click dots to select shots. Right-click a page's tab to rename it, add tiles
   or pages, or remove it; *Arrange* picks what each tile shows and its size (1×1 up to the whole page), moves and
   removes tiles. The layout is saved; *Reset shots view* in the settings brings back the default pages (after asking). A filter by

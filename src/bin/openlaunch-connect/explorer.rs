@@ -682,7 +682,8 @@ fn draw_dots(ui: &mut egui::Ui, id: egui::Id, rect: Rect, dots: &[Dot]) -> Optio
     None
 }
 
-/// Mean (cross) and ±1 standard deviation (dashed ellipse) of each club's points that count.
+/// Mean (cross) and an ellipse around all of each club's points that count (dashed). The ellipse
+/// follows the spread of the points (its axes may be tilted) and is grown until every point is inside.
 fn draw_spread(p: &egui::Painter, groups: &[(Color32, Vec<egui::Pos2>)]) {
     for (color, pts) in groups {
         if pts.is_empty() {
@@ -690,18 +691,9 @@ fn draw_spread(p: &egui::Painter, groups: &[(Color32, Vec<egui::Pos2>)]) {
         }
         let n = pts.len() as f32;
         let mean = pts.iter().fold(egui::Vec2::ZERO, |a, q| a + q.to_vec2()) / n;
-        if pts.len() > 1 {
-            let var = pts.iter().fold(egui::Vec2::ZERO, |a, q| {
-                let d = q.to_vec2() - mean;
-                a + vec2(d.x * d.x, d.y * d.y)
-            }) / (n - 1.0);
-            let r = vec2(var.x.sqrt().max(2.0), var.y.sqrt().max(2.0));
-            let ring: Vec<egui::Pos2> = (0..=48)
-                .map(|k| {
-                    let a = k as f32 / 48.0 * std::f32::consts::TAU;
-                    (mean + vec2(a.cos() * r.x, a.sin() * r.y)).to_pos2()
-                })
-                .collect();
+        if pts.len() > 1
+            && let Some(ring) = enclosing_ellipse(mean, pts)
+        {
             p.extend(egui::Shape::dashed_line(&ring, Stroke::new(1.3, *color), 5.0, 4.0));
         }
         let c = mean.to_pos2();
@@ -709,6 +701,42 @@ fn draw_spread(p: &egui::Painter, groups: &[(Color32, Vec<egui::Pos2>)]) {
         p.line_segment([c - vec2(0.0, 7.0), c + vec2(0.0, 7.0)], Stroke::new(2.0, WHITE));
         p.circle_filled(c, 3.0, *color);
     }
+}
+
+/// Outline of an ellipse around `mean` that holds all `pts`, with a little room: shaped by the
+/// points' covariance (principal axes), scaled by the farthest point.
+fn enclosing_ellipse(mean: egui::Vec2, pts: &[egui::Pos2]) -> Option<Vec<egui::Pos2>> {
+    let (mut sxx, mut syy, mut sxy) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for q in pts {
+        let d = q.to_vec2() - mean;
+        sxx += d.x * d.x;
+        syy += d.y * d.y;
+        sxy += d.x * d.y;
+    }
+    let angle = 0.5 * (2.0 * sxy).atan2(sxx - syy);
+    let (cos, sin) = (angle.cos(), angle.sin());
+    // Spread along the two axes; a floor keeps a line of points from collapsing the ellipse.
+    let along = |q: &egui::Pos2| {
+        let d = q.to_vec2() - mean;
+        (d.x * cos + d.y * sin, -d.x * sin + d.y * cos)
+    };
+    let (mut a, mut b) = pts.iter().map(along).fold((0.0_f32, 0.0_f32), |(a, b), (u, v)| (a + u * u, b + v * v));
+    a = (a / pts.len() as f32).sqrt().max(3.0);
+    b = (b / pts.len() as f32).sqrt().max(3.0);
+    let k = pts.iter().map(along).map(|(u, v)| ((u / a).powi(2) + (v / b).powi(2)).sqrt()).fold(0.0_f32, f32::max);
+    if !k.is_finite() {
+        return None;
+    }
+    let (ra, rb) = (a * k + 6.0, b * k + 6.0);
+    Some(
+        (0..=64)
+            .map(|i| {
+                let t = i as f32 / 64.0 * std::f32::consts::TAU;
+                let (u, v) = (t.cos() * ra, t.sin() * rb);
+                (mean + vec2(u * cos - v * sin, u * sin + v * cos)).to_pos2()
+            })
+            .collect(),
+    )
 }
 
 /// Points of the shots that count, grouped by club in the order of the clubs.
@@ -1292,6 +1320,32 @@ mod tests {
                 harness.step();
             }
             super::super::tests::save(&harness.render().unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn ellipse_encloses_every_point() {
+        let inside = |ring: &[egui::Pos2], q: egui::Pos2| {
+            // Ray casting to the right.
+            let mut hit = false;
+            for w in ring.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if (a.y > q.y) != (b.y > q.y) && q.x < a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+                    hit = !hit;
+                }
+            }
+            hit
+        };
+        let sets: [Vec<egui::Pos2>; 3] = [
+            // A tilted cloud with an outlier, a straight line, two points.
+            vec![pos2(0.0, 0.0), pos2(10.0, 8.0), pos2(20.0, 17.0), pos2(30.0, 24.0), pos2(5.0, 30.0)],
+            vec![pos2(0.0, 0.0), pos2(10.0, 0.0), pos2(40.0, 0.0)],
+            vec![pos2(100.0, 50.0), pos2(104.0, 90.0)],
+        ];
+        for pts in sets {
+            let mean = pts.iter().fold(egui::Vec2::ZERO, |a, q| a + q.to_vec2()) / pts.len() as f32;
+            let ring = enclosing_ellipse(mean, &pts).unwrap();
+            assert!(pts.iter().all(|q| inside(&ring, *q)), "{pts:?}");
         }
     }
 
