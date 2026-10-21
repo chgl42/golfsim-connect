@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Fixed
+- A shot sent just as GSPro closed the connection was counted as delivered (and not reported as lost).
+- After a test shot without a connected R10, GSPro was told the launch monitor was ready.
 - Values that round to zero are shown as *0.0* instead of *-0.0* (play page, shots page, overlay, CSV exports).
 
 ## [1.0.0] – 2026-10-20
