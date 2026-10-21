@@ -7,6 +7,7 @@ use openlaunch_connect::flight::{self, Flight};
 use openlaunch_connect::history::Stat;
 use std::rc::Rc;
 
+use openlaunch_connect::shape::Shape;
 use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileSize};
 
 use super::*;
@@ -1378,7 +1379,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
     let carry = format!("{}*", tr("Carry"));
     let total = format!("{}*", tr("Total"));
     // Header, width of the values and priority (lower first) of every column.
-    let all: [(&str, f32, u8); 13] = [
+    let all: [(&str, f32, u8); 14] = [
         (tr("Time"), if ctx.all_time { 84.0 } else { 52.0 }, 0),
         (tr("Club"), 24.0, 0),
         (&carry, 28.0, 0),
@@ -1392,6 +1393,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
         (tr("Smash"), 30.0, 2),
         (tr("Face to Path"), 40.0, 7),
         (tr("Tempo"), 24.0, 8),
+        (tr("Shape"), 66.0, 3),
     ];
     let keep = fit_columns(ui, &all);
     let cols: Vec<(&str, f32)> = keep.iter().map(|&k| (all[k].0, all[k].1)).collect();
@@ -1414,6 +1416,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
             s.smash().map_or("–".into(), |v| format!("{v:.2}")),
             c.map_or("–".into(), |c| dir(c.face_to_target - c.path, "O", "C")),
             s.tempo.map_or("–".into(), |t| format!("{:.1}", t.ratio())),
+            shape_name(Shape::of(s.ball.hla, s.ball.spin_axis, false)),
         ];
         Row {
             cells: keep.iter().map(|&k| cells[k].clone()).collect(),
@@ -1539,6 +1542,7 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
         ("HLA".into(), deg(s.ball.hla)),
         (tr("Total Spin").into(), format!("{:.0} rpm", s.ball.total_spin)),
         (tr("Spin Axis").into(), deg(s.ball.spin_axis)),
+        (tr("Shape").into(), shape_name(Shape::of(s.ball.hla, s.ball.spin_axis, false))),
     ];
     if let Some(c) = c {
         values.extend([

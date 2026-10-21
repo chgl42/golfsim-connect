@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   default): next to the values, the club head arriving at the angle of attack and the ball leaving at the launch
   angle (side view), and a broad arrow for the club path with a narrow one for the start direction (top view, angles
   drawn three times larger), with the numbers underneath. Small and without numbers in the one-line overlay.
+- **Shot shape** (straight, draw, fade, hook, slice, push, pull and combinations like push-draw), from the start
+  direction and the spin axis: a column in the shots table, a value in the details, and in the overlay's top view
+  the start arrow continues as the ball's curving flight with the shape's name. Named for right-handers.
 - **Estimated carry and total distance** on the shots page, per shot and as averages per club (in metres or
   yards, chosen separately from the speed unit in Settings → Display). GSPro doesn't send its own results back,
   so they are estimated from the launch data (no wind, sea level) and marked with *; GSPro may show other numbers.
