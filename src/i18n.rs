@@ -136,9 +136,6 @@ fn de(en: &str) -> Option<&'static str> {
         "All time" => "Gesamt",
         "EXPORT CSV" => "CSV EXPORT",
         "No shots to export" => "Keine Schläge zum Exportieren",
-        "CSV layout: OpenLaunch, or as exported by the Garmin Golf app or Awesome Golf" => {
-            "CSV-Format: OpenLaunch oder wie der Export der Garmin-Golf-App bzw. von Awesome Golf"
-        }
         "No shots yet." => "Noch keine Schläge.",
         "Club" => "Schläger",
         "Shots" => "Schläge",
@@ -197,6 +194,11 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "Export {n} shots as CSV" => "{n} Schläge als CSV exportieren",
+        "The shots shown, with the filter. Choose the layout:" => "Die gezeigten Schläge, mit Filter. Format wählen:",
+        "All values of this app, one row per shot" => "Alle Werte dieser App, eine Zeile pro Schlag",
+        "Columns and units like the Garmin Golf app's export" => "Spalten und Einheiten wie der Export der Garmin-Golf-App",
+        "Columns like Awesome Golf's export" => "Spalten wie der Export von Awesome Golf",
         "Move the page left" => "Seite nach links",
         "Move the page right" => "Seite nach rechts",
         "Name of the page" => "Name der Seite",

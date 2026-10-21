@@ -50,6 +50,8 @@ pub(super) struct ExplorerState {
     selected: BTreeSet<Key>,
     /// Shot shown in the details tiles (the last one clicked).
     focus: Option<Key>,
+    /// The export dialog is open.
+    export_dialog: bool,
     /// Page whose removal waits for the answer to "Remove the page?".
     confirm_remove: Option<usize>,
     /// Estimated flight of every shot seen, computed once.
@@ -192,7 +194,6 @@ impl App {
         let units = Units { metric: self.saved.metric, meters: self.saved.meters };
 
         // Source, pages, arranging and export.
-        let mut export: Option<Vec<ShotRecord>> = None;
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
         let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
         let before = self.all_time;
@@ -319,25 +320,10 @@ impl App {
         }
         bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(150.0, 30.0), Sense::hover());
+            // Asks for the layout in a dialog (below).
             if button(ui, rect, tr("EXPORT CSV"), Icon::None, false, !shots.is_empty(), tr("No shots to export")) {
-                export = Some(Vec::new());
+                self.explorer.export_dialog = true;
             }
-            let before = self.saved.export_format;
-            egui::ComboBox::from_id_salt("export_format")
-                .selected_text(before.label())
-                .show_ui(ui, |ui| {
-                    for f in ExportFormat::ALL {
-                        ui.selectable_value(&mut self.saved.export_format, f, f.label());
-                    }
-                })
-                .response
-                .on_hover_text(tr("CSV layout: OpenLaunch, or as exported by the Garmin Golf app or Awesome Golf"));
-            if self.saved.export_format != before {
-                // Remember the choice without touching unsaved edits on the settings page.
-                self.edit.export_format = self.saved.export_format;
-                let _ = self.saved.save();
-            }
-            ui.add_space(4.0);
             let label = if self.explorer.arrange { tr("DONE") } else { tr("CONFIGURE") };
             let w = ui.painter().layout_no_wrap(tr("CONFIGURE").to_string(), cond(19.0), WHITE).size().x + 36.0;
             let (rect, _) = ui.allocate_exact_size(vec2(w.max(110.0), 30.0), Sense::hover());
@@ -372,9 +358,7 @@ impl App {
             .filter(|s| !(ex.hide_excluded && s.excluded))
             .filter(|s| !ex.only_selected || ex.selected.contains(&key(s)))
             .collect();
-        if let Some(list) = &mut export {
-            list.extend(shown.iter().map(|s| (*s).clone()));
-        }
+        let export: Vec<ShotRecord> = if ex.export_dialog { shown.iter().map(|s| (*s).clone()).collect() } else { Vec::new() };
         let flights: Vec<FlightSummary> = shown
             .iter()
             .map(|s| *ex.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball))))
@@ -562,8 +546,42 @@ impl App {
                 }
             }
         }
-        if let Some(list) = export {
-            self.export_note = Some(export_csv(&list, self.saved.export_format));
+        if self.explorer.export_dialog {
+            let mut picked = None;
+            let last = self.saved.export_format;
+            let modal = egui::Modal::new(egui::Id::new("export-csv"))
+                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
+                .show(ui.ctx(), |ui| {
+                    ui.set_width(380.0);
+                    let title = tr("Export {n} shots as CSV").replace("{n}", &export.len().to_string());
+                    ui.label(RichText::new(title).size(16.0).color(WHITE));
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(tr("The shots shown, with the filter. Choose the layout:")).size(13.0).color(SOFT));
+                    ui.add_space(10.0);
+                    for f in ExportFormat::ALL {
+                        if format_choice(ui, f, f == last) {
+                            picked = Some(f);
+                            ui.close();
+                        }
+                        ui.add_space(6.0);
+                    }
+                    ui.add_space(8.0);
+                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                    let cancel_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
+                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+                        ui.close();
+                    }
+                });
+            if modal.should_close() {
+                self.explorer.export_dialog = false;
+            }
+            if let Some(f) = picked {
+                // Remembered as the next default, without touching unsaved edits on the settings page.
+                self.saved.export_format = f;
+                self.edit.export_format = f;
+                let _ = self.saved.save();
+                self.export_note = Some(export_csv(&export, f));
+            }
         }
     }
 }
@@ -623,6 +641,22 @@ fn add_tile(ui: &mut egui::Ui, rect: Rect) -> Option<TileKind> {
         }
     });
     picked
+}
+
+/// One layout in the export dialog: its name and what it is for; the last one used is outlined.
+fn format_choice(ui: &mut egui::Ui, format: ExportFormat, last: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), Sense::click());
+    let p = ui.painter();
+    let fill = if resp.hovered() { BUTTON_HOVER } else { BUTTON };
+    p.rect(rect, 6.0, fill, Stroke::new(if last { 2.0 } else { 1.0 }, if last { ACCENT } else { BUTTON_LINE }), StrokeKind::Inside);
+    let what = match format {
+        ExportFormat::OpenLaunch => tr("All values of this app, one row per shot"),
+        ExportFormat::GarminGolf => tr("Columns and units like the Garmin Golf app's export"),
+        ExportFormat::AwesomeGolf => tr("Columns like Awesome Golf's export"),
+    };
+    p.text(rect.left_top() + vec2(14.0, 16.0), Align2::LEFT_CENTER, format.label(), FontId::proportional(14.0), WHITE);
+    p.text(rect.left_top() + vec2(14.0, 35.0), Align2::LEFT_CENTER, what, FontId::proportional(12.0), LABEL);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 /// What every tile draws from.
@@ -1495,7 +1529,7 @@ mod tests {
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
-        let states: [(&str, Setup); 5] = [
+        let states: [(&str, Setup); 6] = [
             ("explorer-averages.png", |app, _| app.explorer.page = 2),
             ("explorer-selection.png", |app, keys| {
                 app.explorer.selected = keys.iter().cloned().collect();
@@ -1518,6 +1552,7 @@ mod tests {
                 ];
                 app.explorer.selected = keys.iter().take(1).cloned().collect();
             }),
+            ("explorer-export.png", |app, _| app.explorer.export_dialog = true),
             ("explorer-reset.png", |app, _| {
                 app.page = Page::Settings;
                 app.saved.explorer.pages.pop();
