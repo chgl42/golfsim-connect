@@ -134,7 +134,7 @@ e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none
 
 **Shots page:** every shot of the session (or all time) on pages of tiles – a shots table, the averages and spread
 per club, the details of a shot. *CONFIGURE* adds tiles, sets what each tile shows and its size (1×1 up to the
-whole page) and lets you drag tiles into place; right-click a page's tab to rename it, add a page or remove it. Click shots to select them in every tile:
+whole page) and lets you drag tiles into place; while configuring, the page shown is renamed, moved or removed right in its tab. Click shots to select them in every tile:
 show only those, or exclude misreads from the stats and exports. Carry\* and total\* are estimated from the launch data – GSPro doesn't send its own numbers back. *EXPORT CSV*
 writes the shots shown, in the layout picked next to the button: OpenLaunch, Garmin Golf or Awesome Golf.
 

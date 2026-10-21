@@ -50,6 +50,8 @@ pub(super) struct ExplorerState {
     selected: BTreeSet<Key>,
     /// Shot shown in the details tiles (the last one clicked).
     focus: Option<Key>,
+    /// Page whose removal waits for the answer to "Remove the page?".
+    confirm_remove: Option<usize>,
     /// Estimated flight of every shot seen, computed once.
     flights: HashMap<Key, FlightSummary>,
 }
@@ -134,6 +136,7 @@ fn page_name(page: &ExplorerPage, i: usize) -> String {
 enum PageEdit {
     Rename(usize, String),
     AddPage,
+    Move(usize, isize),
     Remove(usize),
 }
 
@@ -206,7 +209,32 @@ impl App {
         // A page's tab: click shows it, right-click opens its settings.
         let mut page_edit: Option<PageEdit> = None;
         let removable = self.saved.explorer.pages.len() > 1;
+        let page_count = self.saved.explorer.pages.len();
         for (i, page) in self.saved.explorer.pages.iter().enumerate() {
+            // While configuring, the page shown is edited right in its tab: move, rename, remove.
+            if self.explorer.arrange && i == self.explorer.page {
+                let ui = &mut bar_ui;
+                if i > 0 && link(ui, "◀", LABEL).on_hover_text(tr("Move the page left")).clicked() {
+                    page_edit = Some(PageEdit::Move(i, -1));
+                }
+                let mut name = page.name.clone();
+                let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
+                let w = (text_width(ui, if name.is_empty() { &hint } else { &name }, 13.0) + 24.0).clamp(70.0, 180.0);
+                if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(w)).on_hover_text(tr("Name of the page")).changed() {
+                    page_edit = Some(PageEdit::Rename(i, name));
+                }
+                if i + 1 < page_count && link(ui, "▶", LABEL).on_hover_text(tr("Move the page right")).clicked() {
+                    page_edit = Some(PageEdit::Move(i, 1));
+                }
+                if removable {
+                    let remove = ui.add(egui::Button::new(RichText::new("×").size(19.0).color(RED)).frame(false));
+                    if remove.on_hover_text(tr("Remove page")).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        page_edit = Some(PageEdit::Remove(i));
+                    }
+                }
+                ui.add_space(6.0);
+                continue;
+            }
             let mut tab = page_tab(&mut bar_ui, &page_name(page, i), i == self.explorer.page);
             if self.explorer.arrange {
                 tab = tab.on_hover_text(tr("Right-click for the page's settings"));
@@ -240,12 +268,49 @@ impl App {
                     pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
                     self.explorer.page = pages.len() - 1;
                 }
-                PageEdit::Remove(i) => {
-                    pages.remove(i);
-                    self.explorer.page = self.explorer.page.min(pages.len() - 1);
+                PageEdit::Move(i, by) => {
+                    let j = i.saturating_add_signed(by);
+                    if j < pages.len() {
+                        pages.swap(i, j);
+                        self.explorer.page = j;
+                    }
                 }
+                // Asks first (below): the page's tiles go with it.
+                PageEdit::Remove(i) => self.explorer.confirm_remove = Some(i),
             }
             layout_changed = true;
+        }
+        if let Some(i) = self.explorer.confirm_remove {
+            let name = self.saved.explorer.pages.get(i).map(|p| page_name(p, i)).unwrap_or_default();
+            let mut remove = false;
+            let modal = egui::Modal::new(egui::Id::new("remove-page"))
+                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
+                .show(bar_ui.ctx(), |ui| {
+                    ui.set_width(360.0);
+                    ui.label(RichText::new(tr("Remove the page “{name}”?").replace("{name}", &name)).size(16.0).color(WHITE));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(tr("Its tiles go with it. Your shots are kept.")).size(13.0).color(SOFT));
+                    ui.add_space(16.0);
+                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                    let ok_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
+                    let cancel_r = Rect::from_min_max(pos2(ok_r.left() - 140.0, row.top()), pos2(ok_r.left() - 10.0, row.bottom()));
+                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+                        ui.close();
+                    }
+                    if button(ui, ok_r, tr("REMOVE"), Icon::None, true, true, "") {
+                        remove = true;
+                        ui.close();
+                    }
+                });
+            let pages = &mut self.saved.explorer.pages;
+            if remove && i < pages.len() && pages.len() > 1 {
+                pages.remove(i);
+                self.explorer.page = self.explorer.page.min(pages.len() - 1);
+                layout_changed = true;
+            }
+            if modal.should_close() {
+                self.explorer.confirm_remove = None;
+            }
         }
         if self.explorer.arrange && link(&mut bar_ui, "+", ICON).on_hover_text(tr("Add a page")).clicked() {
             self.saved.explorer.pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
