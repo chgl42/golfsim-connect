@@ -44,7 +44,9 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
   minimum of the base size at that zoom (`min_size`), and pages get the extra room. The overlay divides the zoom out
   (layer transform) so it keeps its size. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
-  `OverlayContent` builds what both the overlay window and the preview draw. Window size is saved in the settings (`window_size`).
+  `OverlayContent` builds what both the overlay window and the preview draw. The *Shots* page is the explorer
+  (`src/bin/openlaunch-connect/explorer.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
+  near-square cells (`grid`, `place`), shared filter and selection (`ExplorerState`, not saved). Window size is saved in the settings (`window_size`).
   Text in DIN Condensed (`cond()`) inside boxes/buttons always via `caps_text()`: the capitals sit ~¼ of the font size
   above the middle of the text box; `caps_text` centres the capitals on `pos.y` (measured).
   Controls (buttons, toggles, segments, stepper, cards) are drawn with the painter – see `button()`, `card()`, `toggle()`.

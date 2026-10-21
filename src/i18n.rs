@@ -88,7 +88,6 @@ fn de(en: &str) -> Option<&'static str> {
         "SETTINGS" => "EINSTELLUNGEN",
         "BALL" => "BALL",
         "CLUB" => "SCHLÄGER",
-        "BY CLUB" => "NACH SCHLÄGER",
         "STATUS" => "STATUS",
 
         // Play page
@@ -118,8 +117,6 @@ fn de(en: &str) -> Option<&'static str> {
         "Tempo" => "Tempo",
         "Exclude" => "Ausblenden",
         "Count" => "Mitzählen",
-        "Count this shot in the stats and exports again" => "Diesen Schlag wieder in Statistik und Export mitzählen",
-        "Leave this shot out of the stats and exports (e.g. a misread); it stays listed" => "Diesen Schlag nicht in Statistik und Export mitzählen (z. B. eine Fehlmessung); er bleibt in der Liste",
 
         "LAST SHOT" => "LETZTER SCHLAG",
         "{n} sent" => "{n} gesendet",
@@ -151,7 +148,6 @@ fn de(en: &str) -> Option<&'static str> {
         "Axis" => "Achse",
         "Time" => "Zeit",
         "Unknown" => "Unbekannt",
-        "Delivered to GSPro" => "An GSPro übergeben",
         "Not delivered to GSPro" => "Nicht an GSPro übergeben",
         "Export shots as CSV" => "Schläge als CSV exportieren",
         "Exported {n} shots to {path}" => "{n} Schläge exportiert nach {path}",
@@ -201,6 +197,39 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "CANCEL" => "ABBRECHEN",
+        "Reset the shots view?" => "Schläge-Ansicht zurücksetzen?",
+        "All pages and tiles go back to how they came. Your shots are kept." => "Alle Seiten und Kacheln kommen in den Auslieferungszustand. Deine Schläge bleiben erhalten.",
+        "RESET" => "ZURÜCKSETZEN",
+        "RESET SHOTS VIEW" => "SCHLÄGE-ANSICHT ZURÜCKSETZEN",
+        "The shots view is as it came" => "Die Schläge-Ansicht ist im Auslieferungszustand",
+        "Shots view reset." => "Schläge-Ansicht zurückgesetzt.",
+        "Table" => "Tabelle",
+        "Details" => "Details",
+        "Page" => "Seite",
+        "Page {n}" => "Seite {n}",
+        "Add a page" => "Seite hinzufügen",
+        "DONE" => "FERTIG",
+        "ARRANGE" => "ANORDNEN",
+        "Right-click for the page's settings" => "Rechtsklick für die Einstellungen der Seite",
+        "Remove page" => "Seite entfernen",
+        "Filter" => "Filter",
+        "Hide excluded" => "Ausgeblendete verbergen",
+        "Clear" => "Aufheben",
+        "Count these shots in the stats and exports again" => "Diese Schläge wieder in Statistik und Export mitzählen",
+        "Leave these shots out of the stats and exports (e.g. misreads); they stay listed" => "Diese Schläge nicht in Statistik und Export mitzählen (z. B. Fehlmessungen); sie bleiben in der Liste",
+        "Show all" => "Alle zeigen",
+        "Show only these" => "Nur diese zeigen",
+        "{n} selected" => "{n} ausgewählt",
+        "No tiles on this page – add some with ARRANGE." => "Keine Kacheln auf dieser Seite – über ANORDNEN hinzufügen.",
+        "Remove tile" => "Kachel entfernen",
+        "Move later" => "Nach hinten",
+        "Move earlier" => "Nach vorn",
+        "Averages" => "Durchschnitt",
+        "Side" => "Seitlich",
+        "Apex" => "Scheitelhöhe",
+        "Descent" => "Landewinkel",
+        "excluded" => "ausgeblendet",
         "Carry" => "Carry",
         "Total" => "Gesamt",
         "Estimated from the launch data (no wind, sea level); GSPro may show other numbers" => "Geschätzt aus den Abflugdaten (ohne Wind, auf Meereshöhe); GSPro kann andere Werte zeigen",
@@ -305,7 +334,9 @@ mod tests {
 
     #[test]
     fn every_ui_text_has_a_german_translation() {
-        let gui = include_str!("bin/openlaunch-connect.rs").replace("\\n", "\n");
+        let gui = [include_str!("bin/openlaunch-connect.rs"), include_str!("bin/openlaunch-connect/explorer.rs")]
+            .concat()
+            .replace("\\n", "\n");
         let mut missing: Vec<&str> =
             [literals(&gui, "tr("), literals(&gui, "send_now(")].concat().into_iter().filter(|t| de(t).is_none()).collect();
         // Status details set by the bridge threads.
