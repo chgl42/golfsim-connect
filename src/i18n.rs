@@ -389,6 +389,13 @@ mod tests {
     }
 
     #[test]
+    fn texts_are_recognised_in_both_languages() {
+        assert!(is_text("Ball flight", "Ball flight"));
+        assert!(is_text("Ball flight", "Ballflug"));
+        assert!(!is_text("Ball flight", "Range"));
+    }
+
+    #[test]
     fn details_keep_their_suffix() {
         GERMAN.store(true, Ordering::Relaxed);
         assert_eq!(tr_detail("Connected (127.0.0.1:921)"), "Verbunden (127.0.0.1:921)");
