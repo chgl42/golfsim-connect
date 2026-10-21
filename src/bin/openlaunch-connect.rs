@@ -741,7 +741,10 @@ impl App {
             setting_row(ui, tr("Interface"), |ui| {
                 let options = [(None, tr("Auto")), (Some(1.0), "100 %"), (Some(1.25), "125 %"), (Some(1.5), "150 %")];
                 let mut scale = self.saved.ui_scale;
-                if segments(ui, &mut scale, &options) {
+                // Sizes whose smallest window doesn't fit on the screen can't be chosen.
+                let room = screen_room(ui.ctx());
+                let fits = |s: Option<f32>| room.is_none_or(|r| min_size(s).x <= r.x + 0.5 && min_size(s).y <= r.y + 0.5);
+                if segments_where(ui, &mut scale, &options, fits, tr("Too large for this screen")) {
                     // Applies and saves at once, like the overlay's settings.
                     self.saved.ui_scale = scale;
                     self.edit.ui_scale = scale;
@@ -1094,17 +1097,13 @@ impl eframe::App for App {
         self.overlay(ui.ctx());
         self.capture.tick(ui.ctx(), self.saved.overlay != OverlayPos::Off);
         let scale = self.saved.ui_scale;
+        let old_zoom = ui.ctx().zoom_factor();
         let logical = apply_window_zoom(ui.ctx(), scale);
         if self.applied_scale != Some(scale) {
             if self.applied_scale.is_some() {
-                // Grow the window when the new interface size needs more room; back to fitting,
-                // it takes the base shape again.
                 let min = min_size(scale);
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min));
-                let size = match scale {
-                    None => vec2(logical.x.max(min.x), window_height(logical.x.max(min.x))),
-                    Some(_) => logical.max(min),
-                };
+                let size = resized_window(logical, old_zoom, scale, screen_room(ui.ctx()));
                 if size != logical {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
                 }
@@ -1165,6 +1164,30 @@ fn start_size(saved: Option<[f32; 2]>, scale: Option<f32>) -> egui::Vec2 {
         (Some([w, _]), None) => vec2(w, window_height(w)),
         (Some([w, h]), Some(_)) => vec2(w, h).max(min),
     }
+}
+
+/// Window size after switching the interface size to `scale`: the window grows or shrinks with
+/// the interface (from `zoom`), within the minimum for `scale` and the room on the screen. Back to
+/// fitting, it takes the base shape at the current zoom.
+fn resized_window(logical: egui::Vec2, zoom: f32, scale: Option<f32>, room: Option<egui::Vec2>) -> egui::Vec2 {
+    let room = room.unwrap_or(egui::Vec2::INFINITY);
+    match scale {
+        Some(s) => (logical * (s / zoom)).min(room).max(min_size(scale)),
+        None => {
+            let w = (BASE_SIZE.x * zoom).min(room.x).min(room.y * BASE_SIZE.x / BASE_SIZE.y).max(BASE_SIZE.x).round();
+            vec2(w, window_height(w))
+        }
+    }
+}
+
+/// Largest window content on the current screen (at zoom 1): without the menu bar, the Dock and
+/// the title bar on macOS.
+fn screen_room(ctx: &egui::Context) -> Option<egui::Vec2> {
+    #[cfg(target_os = "macos")]
+    if let Some(room) = mac::max_content_size(APP_NAME) {
+        return Some(room);
+    }
+    ctx.input(|i| i.viewport().monitor_size).map(|m| m * ctx.zoom_factor())
 }
 
 /// Window height for a width at the base aspect ratio, which the window keeps: the zoom
@@ -1300,6 +1323,19 @@ mod mac {
 
     /// Aspect ratio the main window keeps while resizing (`None`: none, e.g. in full screen).
     static ASPECT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+    /// Largest content size the window titled `title` can have on its screen: the visible frame
+    /// (without menu bar and Dock) minus the title bar, in points. `None` before the window exists.
+    pub fn max_content_size(title: &str) -> Option<eframe::egui::Vec2> {
+        let mtm = MainThreadMarker::new()?;
+        let title = NSString::from_str(title);
+        let windows = NSApplication::sharedApplication(mtm).windows();
+        let window = windows.iter().find(|w| w.title().isEqualToString(&title))?;
+        let visible = window.screen()?.visibleFrame();
+        let frame = window.frame();
+        let title_bar = frame.size.height - window.contentRectForFrameRect(frame).size.height;
+        Some(eframe::egui::vec2(visible.size.width as f32, (visible.size.height - title_bar) as f32))
+    }
 
     /// Let the window be resized only in the given aspect ratio (`None`: freely). macOS applies
     /// it during the drag itself, which is smooth; correcting the size afterwards makes the
@@ -1488,6 +1524,17 @@ fn segmented(ui: &mut egui::Ui, left_on: &mut bool, left: &str, right: &str) {
 
 /// Equal segments, one per option; the chosen one is filled. Returns true when it changed.
 fn segments<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
+    segments_where(ui, value, options, |_| true, "")
+}
+
+/// Like `segments`; options that aren't `enabled` are greyed out and explain why on hover.
+fn segments_where<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    options: &[(T, &str)],
+    enabled: impl Fn(T) -> bool,
+    why_disabled: &str,
+) -> bool {
     let text_w = options
         .iter()
         .map(|(_, label)| ui.painter().layout_no_wrap((*label).to_string(), FontId::proportional(13.0), WHITE).size().x)
@@ -1498,7 +1545,8 @@ fn segments<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T
     let mut changed = false;
     for (i, &(option, label)) in options.iter().enumerate() {
         let r = Rect::from_min_size(rect.min + vec2(i as f32 * seg, 0.0), vec2(seg, 34.0));
-        let resp = ui.interact(r, ui.id().with(("seg", label)), Sense::click());
+        let on = enabled(option);
+        let resp = ui.interact(r, ui.id().with(("seg", label)), if on { Sense::click() } else { Sense::hover() });
         if resp.clicked() && *value != option {
             *value = option;
             changed = true;
@@ -1516,9 +1564,13 @@ fn segments<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T
         } else if i > 0 && options[i - 1].0 != *value {
             p.line_segment([r.left_top() + vec2(0.0, 1.0), r.left_bottom() - vec2(0.0, 1.0)], Stroke::new(1.0, FIELD_LINE));
         }
-        let color = if selected { WHITE } else if resp.hovered() { SOFT } else { MUTED };
+        let color = if selected { WHITE } else if !on { FIELD_LINE } else if resp.hovered() { SOFT } else { MUTED };
         p.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(13.0), color);
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if on {
+            resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        } else {
+            resp.on_hover_text(why_disabled);
+        }
     }
     changed
 }
@@ -2179,6 +2231,19 @@ mod tests {
         assert_eq!(start_size(Some([1500.0, 900.0]), None), vec2(1500.0, 705.0));
         assert_eq!(start_size(Some([1600.0, 900.0]), Some(1.0)), vec2(1600.0, 900.0));
         assert_eq!(start_size(Some([1200.0, 900.0]), Some(1.5)), vec2(1500.0, 900.0));
+    }
+
+    #[test]
+    fn window_scales_with_the_interface_size() {
+        let room = Some(vec2(1470.0, 890.0));
+        // 100 % → 125 %: grows by the same factor, back down shrinks again.
+        assert_eq!(resized_window(vec2(1200.0, 600.0), 1.0, Some(1.25), room), vec2(1470.0, 750.0));
+        assert_eq!(resized_window(vec2(1250.0, 700.0), 1.25, Some(1.0), room), vec2(1000.0, 560.0));
+        // Never below the minimum of the new size.
+        assert_eq!(resized_window(vec2(1000.0, 470.0), 1.25, Some(1.0), room), BASE_SIZE);
+        // Auto: the base shape at the current zoom, within the screen.
+        assert_eq!(resized_window(vec2(1300.0, 800.0), 1.25, None, room), vec2(1250.0, 588.0));
+        assert_eq!(resized_window(vec2(1300.0, 800.0), 1.5, None, room), vec2(1470.0, 691.0));
     }
 
     #[test]
