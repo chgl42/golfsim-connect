@@ -37,7 +37,9 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
   - `log.rs` – timestamped log to stderr + `state`
 - `src/bin/openlaunch-connect.rs` – **the app** (egui/eframe), styled after GSPro's in-game look
   (navy, tiles, condensed figures, status panel with READY, battery glyph). Layout base size 1000×470 (`BASE_SIZE`);
-  larger windows zoom the whole UI uniformly (`apply_window_zoom`, `fit_zoom`), the overlay divides the zoom out
+  with the interface size *Auto* (`ui_scale: None`) larger windows zoom the whole UI uniformly (`apply_window_zoom`,
+  `fit_zoom`, aspect ratio locked); a fixed interface size (1.0–1.5) sets the zoom and leaves the window free, with a
+  minimum of the base size at that zoom (`min_size`), and pages get the extra room. The overlay divides the zoom out
   (layer transform) so it keeps its size. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
   `OverlayContent` builds what both the overlay window and the preview draw. Window size is saved in the settings (`window_size`).

@@ -200,6 +200,9 @@ fn de(en: &str) -> Option<&'static str> {
         }
         "Language" => "Sprache",
         "System" => "System",
+        "Interface" => "Oberfläche",
+        "Too large for this screen" => "Zu groß für diesen Bildschirm",
+        "Auto" => "Auto",
         "Units" => "Einheiten",
         "Metric (km/h)" => "Metrisch (km/h)",
         "Imperial (mph)" => "Imperial (mph)",
