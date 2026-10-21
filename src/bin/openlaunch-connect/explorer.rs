@@ -14,8 +14,8 @@ const GAP: f32 = 8.0;
 /// Cell size the grid aims for; the rows are fitted to the height.
 const CELL_TARGET: f32 = 170.0;
 const ROW_H: f32 = 21.0;
-/// Club colours, in the order the clubs were first used.
-const CLUB_COLORS: [Color32; 9] = [
+/// Club colours in bag order of the clubs played: fourteen, one per club of a full bag.
+const CLUB_COLORS: [Color32; 14] = [
     AMBER,
     ICON,
     Color32::from_rgb(0x4f, 0xd1, 0xc5),
@@ -24,6 +24,11 @@ const CLUB_COLORS: [Color32; 9] = [
     Color32::from_rgb(0xff, 0x8a, 0x65),
     Color32::from_rgb(0xb3, 0x9d, 0xff),
     Color32::from_rgb(0xf4, 0xe0, 0x6d),
+    Color32::from_rgb(0x5b, 0xc0, 0xeb),
+    RED,
+    Color32::from_rgb(0xb5, 0xe3, 0x5a),
+    Color32::from_rgb(0xff, 0x9e, 0xc4),
+    Color32::from_rgb(0xd9, 0xa0, 0x6a),
     LABEL,
 ];
 
@@ -128,7 +133,6 @@ fn page_name(page: &ExplorerPage, i: usize) -> String {
 /// Changes to a page from its tab's menu, applied afterwards.
 enum PageEdit {
     Rename(usize, String),
-    AddTile(usize, TileKind),
     AddPage,
     Remove(usize),
 }
@@ -143,6 +147,7 @@ enum Edit {
     Move(usize, isize),
     /// Dragged onto another tile's place.
     MoveTo(usize, usize),
+    Add(TileKind),
     Remove(usize),
 }
 
@@ -217,13 +222,6 @@ impl App {
                     page_edit = Some(PageEdit::Rename(i, name));
                 }
                 ui.separator();
-                for kind in TileKind::ALL {
-                    if ui.button(format!("+ {}", kind_name(kind))).clicked() {
-                        page_edit = Some(PageEdit::AddTile(i, kind));
-                        ui.close();
-                    }
-                }
-                ui.separator();
                 if ui.button(tr("Add a page")).clicked() {
                     page_edit = Some(PageEdit::AddPage);
                     ui.close();
@@ -238,7 +236,6 @@ impl App {
             let pages = &mut self.saved.explorer.pages;
             match edit {
                 PageEdit::Rename(i, name) => pages[i].name = name,
-                PageEdit::AddTile(i, kind) => pages[i].tiles.push(Tile { kind, ..Tile::default() }),
                 PageEdit::AddPage => {
                     pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
                     self.explorer.page = pages.len() - 1;
@@ -276,8 +273,9 @@ impl App {
                 let _ = self.saved.save();
             }
             ui.add_space(4.0);
-            let (rect, _) = ui.allocate_exact_size(vec2(110.0, 30.0), Sense::hover());
-            let label = if self.explorer.arrange { tr("DONE") } else { tr("ARRANGE") };
+            let label = if self.explorer.arrange { tr("DONE") } else { tr("CONFIGURE") };
+            let w = ui.painter().layout_no_wrap(tr("CONFIGURE").to_string(), cond(19.0), WHITE).size().x + 36.0;
+            let (rect, _) = ui.allocate_exact_size(vec2(w.max(110.0), 30.0), Sense::hover());
             if button(ui, rect, label, Icon::None, self.explorer.arrange, true, "") {
                 self.explorer.arrange = !self.explorer.arrange;
             }
@@ -287,13 +285,14 @@ impl App {
         });
         ui.add_space(6.0);
 
-        // Clubs in the order they were first used: their colours stay put while filtering.
+        // Clubs in bag order (driver to putter): their colours stay put while filtering.
         let mut codes: Vec<Option<String>> = Vec::new();
         for s in &shots {
             if !codes.contains(&s.club_code) {
                 codes.push(s.club_code.clone());
             }
         }
+        codes.sort_by_key(|c| club_rank(c.as_deref()));
         let color_of = |code: &Option<String>| {
             CLUB_COLORS[codes.iter().position(|c| c == code).unwrap_or(0) % CLUB_COLORS.len()]
         };
@@ -324,16 +323,32 @@ impl App {
         {
             row.label(RichText::new(tr("Filter")).size(13.0).color(LABEL));
             row.add_space(2.0);
-            for code in &codes {
-                let on = !ex.hidden_clubs.contains(code);
-                let name = code.as_deref().unwrap_or("–");
-                if chip(&mut row, name, Some(color_of(code)), on).clicked() {
-                    if on {
-                        ex.hidden_clubs.insert(code.clone());
-                    } else {
-                        ex.hidden_clubs.remove(code);
+            // One chip per club while they fit next to the other controls, else a menu.
+            let selection_w = if ex.selected.is_empty() {
+                0.0
+            } else {
+                let n = tr("{n} selected").replace("{n}", &ex.selected.len().to_string());
+                [n.as_str(), tr("Show only these"), tr("Exclude"), tr("Clear")]
+                    .iter()
+                    .map(|t| text_width(&row, t, 13.0) + 20.0)
+                    .sum::<f32>()
+            };
+            let chips_w: f32 = codes.iter().map(|c| chip_width(&row, c.as_deref().unwrap_or("–"), true) + 6.0).sum();
+            let room = row.available_width() - selection_w - chip_width(&row, tr("Hide excluded"), false) - 12.0;
+            if chips_w <= room {
+                for code in &codes {
+                    let on = !ex.hidden_clubs.contains(code);
+                    let name = code.as_deref().unwrap_or("–");
+                    if chip(&mut row, name, Some(color_of(code)), on).clicked() {
+                        if on {
+                            ex.hidden_clubs.insert(code.clone());
+                        } else {
+                            ex.hidden_clubs.remove(code);
+                        }
                     }
                 }
+            } else {
+                club_menu(&mut row, &codes, &mut ex.hidden_clubs, &color_of);
             }
             if chip(&mut row, tr("Hide excluded"), None, ex.hide_excluded).clicked() {
                 ex.hide_excluded = !ex.hide_excluded;
@@ -368,7 +383,12 @@ impl App {
         let area = ui.available_rect_before_wrap();
         let (cols, rows, cell) = grid(area.size());
         let page_tiles = self.saved.explorer.pages[ex.page].tiles.clone();
-        let spots = place(&page_tiles.iter().map(|t| t.size).collect::<Vec<_>>(), cols, rows);
+        // While configuring, an empty tile with a + comes last: it adds a tile.
+        let mut sizes: Vec<TileSize> = page_tiles.iter().map(|t| t.size).collect();
+        if ex.arrange {
+            sizes.push(TileSize::W1H1);
+        }
+        let spots = place(&sizes, cols, rows);
         let used_rows = spots.iter().map(|&(_, r, _, h)| r + h).max().unwrap_or(0);
         let mut edits: Vec<Edit> = Vec::new();
         let mut clicked: Option<Key> = None;
@@ -381,11 +401,11 @@ impl App {
         egui::ScrollArea::vertical().id_salt(("explorer", ex.page)).auto_shrink([false, false]).show(ui, |ui| {
             let height = used_rows as f32 * (cell.y + GAP) - GAP;
             let (grid_rect, _) = ui.allocate_exact_size(vec2(area.width(), height.max(0.0)), Sense::hover());
-            if page_tiles.is_empty() {
+            if page_tiles.is_empty() && !ex.arrange {
                 ui.painter().text(
                     area.center(),
                     Align2::CENTER_CENTER,
-                    tr("No tiles on this page – right-click the page's tab to add some."),
+                    tr("No tiles on this page – CONFIGURE adds some."),
                     FontId::proportional(13.0),
                     MUTED,
                 );
@@ -408,6 +428,12 @@ impl App {
             }
             if ex.arrange {
                 drag_tiles(ui, &rects, &page_tiles, &mut edits);
+                if let Some(&(c, r, _, _)) = spots.last() {
+                    let rect = Rect::from_min_size(grid_rect.min + vec2(c as f32 * (cell.x + GAP), r as f32 * (cell.y + GAP)), cell);
+                    if let Some(kind) = add_tile(ui, rect) {
+                        edits.push(Edit::Add(kind));
+                    }
+                }
             }
         });
 
@@ -431,6 +457,7 @@ impl App {
                     Edit::Averages(i, on) => tiles[i].averages = on,
                     Edit::Total(i, on) => tiles[i].total = on,
                     Edit::Axes(i, x, y) => (tiles[i].x, tiles[i].y) = (x, y),
+                    Edit::Add(kind) => tiles.push(Tile { kind, ..Tile::default() }),
                     Edit::MoveTo(from, to) => {
                         let tile = tiles.remove(from);
                         tiles.insert(to.min(tiles.len()), tile);
@@ -508,6 +535,29 @@ fn drag_tiles(ui: &mut egui::Ui, rects: &[Rect], tiles: &[Tile], edits: &mut Vec
             edits.push(Edit::MoveTo(i, j));
         }
     }
+}
+
+/// The empty tile with a + shown while configuring; returns the kind of tile picked from its menu.
+fn add_tile(ui: &mut egui::Ui, rect: Rect) -> Option<TileKind> {
+    let resp = ui.interact(rect, ui.id().with("add-tile"), Sense::click());
+    let p = ui.painter();
+    let color = if resp.hovered() { ICON } else { BUTTON_LINE };
+    let outline = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
+    p.extend(egui::Shape::dashed_line(&outline.map(|q| q + (rect.center() - q).normalized() * 1.0), Stroke::new(1.5, color), 6.0, 5.0));
+    let c = rect.center() - vec2(0.0, 10.0);
+    p.line_segment([c - vec2(14.0, 0.0), c + vec2(14.0, 0.0)], Stroke::new(3.0, color));
+    p.line_segment([c - vec2(0.0, 14.0), c + vec2(0.0, 14.0)], Stroke::new(3.0, color));
+    p.text(c + vec2(0.0, 30.0), Align2::CENTER_CENTER, tr("Add tile"), FontId::proportional(12.5), if resp.hovered() { SOFT } else { MUTED });
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let mut picked = None;
+    egui::Popup::menu(&resp).show(|ui| {
+        for kind in TileKind::ALL {
+            if ui.button(kind_name(kind)).clicked() {
+                picked = Some(kind);
+            }
+        }
+    });
+    picked
 }
 
 /// What every tile draws from.
@@ -1283,6 +1333,65 @@ fn page_tab(ui: &mut egui::Ui, name: &str, active: bool) -> egui::Response {
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+fn text_width(ui: &egui::Ui, text: &str, size: f32) -> f32 {
+    ui.painter().layout_no_wrap(text.to_string(), FontId::proportional(size), WHITE).size().x
+}
+
+fn chip_width(ui: &egui::Ui, label: &str, dot: bool) -> f32 {
+    text_width(ui, label, 12.5) + if dot { 14.0 } else { 0.0 } + 20.0
+}
+
+/// Position of a GSPro club code in a bag: driver, woods, hybrids, irons, wedges, putter.
+fn club_rank(code: Option<&str>) -> (u8, u8) {
+    let Some(code) = code else { return (9, 0) };
+    let n = code.get(1..).and_then(|n| n.parse::<u8>().ok()).unwrap_or(0);
+    match code {
+        "DR" => (0, 0),
+        "PW" => (5, 0),
+        "GW" | "AW" => (5, 1),
+        "SW" => (5, 2),
+        "LW" => (5, 3),
+        "PT" => (6, 0),
+        c if c.starts_with('W') => (1, n),
+        c if c.starts_with('H') => (2, n),
+        c if c.starts_with('I') => (3, n),
+        _ => (8, 0),
+    }
+}
+
+/// The club filter as a menu, when the chips don't fit: "Clubs 12/14" with a tick per club.
+fn club_menu(ui: &mut egui::Ui, codes: &[Option<String>], hidden: &mut BTreeSet<Option<String>>, color_of: &dyn Fn(&Option<String>) -> Color32) {
+    let shown = codes.iter().filter(|c| !hidden.contains(*c)).count();
+    let label = format!("{} {shown}/{}  ▼", tr("Clubs"), codes.len());
+    let resp = chip(ui, &label, None, shown < codes.len());
+    egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        ui.horizontal(|ui| {
+            if ui.button(tr("All")).clicked() {
+                hidden.clear();
+            }
+            if ui.button(tr("None")).clicked() {
+                hidden.extend(codes.iter().cloned());
+            }
+        });
+        ui.separator();
+        for code in codes {
+            let mut on = !hidden.contains(code);
+            ui.horizontal(|ui| {
+                let (dot, _) = ui.allocate_exact_size(vec2(10.0, 18.0), Sense::hover());
+                ui.painter().circle_filled(dot.center(), 4.0, color_of(code));
+                let name = code.as_deref().map_or(tr("Unknown").to_string(), |c| format!("{c} · {}", club_name(c)));
+                if ui.checkbox(&mut on, name).changed() {
+                    if on {
+                        hidden.remove(code);
+                    } else {
+                        hidden.insert(code.clone());
+                    }
+                }
+            });
+        }
+    });
+}
+
 /// Rounded filter chip, with an optional colour dot.
 fn chip(ui: &mut egui::Ui, label: &str, dot: Option<Color32>, on: bool) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(12.5), WHITE);
@@ -1327,7 +1436,10 @@ mod tests {
                 app.explorer.selected = keys.iter().cloned().collect();
                 app.explorer.focus = keys.last().cloned();
             }),
-            ("explorer-arrange.png", |app, _| app.explorer.arrange = true),
+            ("explorer-arrange.png", |app, _| {
+                app.saved.explorer.pages[0].tiles[0].size = TileSize::W3H2;
+                app.explorer.arrange = true;
+            }),
             ("explorer-charts.png", |app, _| {
                 state::with(|s| s.session = engine::demo_range());
                 let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(1).map(key).collect());
@@ -1431,6 +1543,13 @@ mod tests {
             let ring = enclosing_ellipse(mean, &pts).unwrap();
             assert!(pts.iter().all(|q| inside(&ring, *q)), "{pts:?}");
         }
+    }
+
+    #[test]
+    fn clubs_sort_in_bag_order() {
+        let mut codes = vec![Some("PW"), None, Some("I7"), Some("H4"), Some("DR"), Some("LW"), Some("W3"), Some("I10"), Some("GW"), Some("PT")];
+        codes.sort_by_key(|c| club_rank(*c));
+        assert_eq!(codes, [Some("DR"), Some("W3"), Some("H4"), Some("I7"), Some("I10"), Some("PW"), Some("GW"), Some("LW"), Some("PT"), None]);
     }
 
     #[test]

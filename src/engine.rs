@@ -164,19 +164,26 @@ pub fn demo_session() -> Vec<crate::history::ShotRecord> {
         .collect()
 }
 
-/// A range session of 59 shots with seven clubs, with realistic spread (the same every time):
+/// A range session of 65 shots with a full bag of fourteen clubs, with realistic spread (the same every time):
 /// face and path vary, start direction and spin axis follow from them.
 #[must_use]
 pub fn demo_range() -> Vec<crate::history::ShotRecord> {
     // (club, shots, ball mph, VLA, spin, club mph, AoA, path, face to path)
     let clubs = [
-        ("DR", 10, 145.0, 11.5, 2700.0, 103.0, 1.5, -2.0, 2.5),
-        ("W3", 6, 136.0, 12.0, 3500.0, 97.0, -1.0, -1.5, 2.0),
-        ("I5", 7, 125.0, 13.5, 5000.0, 89.0, -2.5, -1.2, 1.8),
-        ("I7", 10, 117.0, 16.5, 6800.0, 83.0, -3.5, -1.0, 1.5),
-        ("I9", 6, 106.0, 20.0, 8000.0, 76.0, -4.0, -0.8, 1.2),
-        ("PW", 12, 98.0, 24.0, 8800.0, 72.0, -4.5, -0.5, 1.0),
-        ("SW", 8, 80.0, 30.0, 9500.0, 63.0, -5.0, -0.3, 0.8),
+        ("DR", 8, 145.0, 11.5, 2700.0, 103.0, 1.5, -2.0, 2.5),
+        ("W3", 5, 136.0, 12.0, 3500.0, 97.0, -1.0, -1.5, 2.0),
+        ("W5", 4, 131.0, 12.8, 4000.0, 94.0, -1.5, -1.4, 1.9),
+        ("H3", 4, 128.0, 13.0, 4300.0, 91.0, -2.0, -1.3, 1.8),
+        ("H4", 4, 126.0, 13.5, 4600.0, 90.0, -2.2, -1.3, 1.8),
+        ("I5", 5, 123.0, 14.0, 5200.0, 88.0, -2.5, -1.2, 1.7),
+        ("I6", 5, 120.0, 15.0, 6000.0, 86.0, -3.0, -1.1, 1.6),
+        ("I7", 6, 117.0, 16.5, 6800.0, 83.0, -3.5, -1.0, 1.5),
+        ("I8", 4, 112.0, 18.0, 7400.0, 80.0, -3.8, -0.9, 1.3),
+        ("I9", 4, 106.0, 20.0, 8000.0, 76.0, -4.0, -0.8, 1.2),
+        ("PW", 5, 98.0, 24.0, 8800.0, 72.0, -4.5, -0.5, 1.0),
+        ("GW", 4, 91.0, 27.0, 9200.0, 68.0, -4.8, -0.4, 0.9),
+        ("SW", 4, 80.0, 30.0, 9500.0, 63.0, -5.0, -0.3, 0.8),
+        ("LW", 3, 68.0, 34.0, 9800.0, 57.0, -5.2, -0.2, 0.7),
     ];
     let mut state: u32 = 0x9e37_79b9;
     // xorshift32 → value in [-1, 1]
@@ -451,11 +458,11 @@ mod tests {
     #[test]
     fn demo_range_is_a_full_session() {
         let shots = demo_range();
-        assert_eq!(shots.len(), 59);
+        assert_eq!(shots.len(), 65);
         assert_eq!(shots, demo_range(), "the same every time");
         let mut clubs: Vec<_> = shots.iter().filter_map(|s| s.club_code.clone()).collect();
         clubs.dedup();
-        assert_eq!(clubs, ["DR", "W3", "I5", "I7", "I9", "PW", "SW"]);
+        assert_eq!(clubs.len(), 14);
         assert!(shots.windows(2).all(|w| w[0].time < w[1].time), "in order");
         assert_eq!(shots.iter().filter(|s| !s.delivered).count(), 1);
     }
