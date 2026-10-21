@@ -2799,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "openlaunch-connect"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "block2 0.6.2",
  "chrono",
