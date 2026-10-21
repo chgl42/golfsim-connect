@@ -1109,7 +1109,8 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
     let columns = if width >= 360.0 { 2 } else { 1 };
     let per = values.len().div_ceil(columns);
     egui::ScrollArea::vertical().id_salt(("details", s.shot_number)).auto_shrink([false, false]).max_width(width).show(ui, |ui| {
-        let col_w = (width - (columns - 1) as f32 * 18.0) / columns as f32;
+        // Keep the values clear of the scroll bar on the right.
+        let col_w = (width - 12.0 - (columns - 1) as f32 * 18.0) / columns as f32;
         let (rect, _) = ui.allocate_exact_size(vec2(width, per as f32 * 18.0), Sense::hover());
         let p = ui.painter();
         for (n, (k, v)) in values.iter().enumerate() {
