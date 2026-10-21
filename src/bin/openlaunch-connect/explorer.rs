@@ -852,13 +852,18 @@ mod tests {
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
-        let states: [(&str, Setup); 3] = [
+        let states: [(&str, Setup); 4] = [
             ("explorer-averages.png", |app, _| app.explorer.page = 2),
             ("explorer-selection.png", |app, keys| {
                 app.explorer.selected = keys.iter().cloned().collect();
                 app.explorer.focus = keys.last().cloned();
             }),
             ("explorer-arrange.png", |app, _| app.explorer.arrange = true),
+            ("explorer-reset.png", |app, _| {
+                app.page = Page::Settings;
+                app.saved.explorer.pages.pop();
+                app.confirm_reset = true;
+            }),
         ];
         for (name, setup) in states {
             let settings = Settings { overlay: OverlayPos::Off, language, ..Settings::default() };

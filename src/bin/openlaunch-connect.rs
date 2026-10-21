@@ -218,6 +218,8 @@ struct App {
     /// Session length when `all_shots` was loaded (new shots reload it).
     all_shots_session: usize,
     export_note: Option<String>,
+    /// Settings page: asking before the shots view is reset.
+    confirm_reset: bool,
     /// Shots page: page shown, filter and selection.
     explorer: explorer::ExplorerState,
     /// Sample shot shown in the overlay preview.
@@ -254,6 +256,7 @@ impl App {
             all_shots: Vec::new(),
             all_shots_session: 0,
             export_note: None,
+            confirm_reset: false,
             explorer: explorer::ExplorerState::default(),
             preview_shot: {
                 let (ball, club) = engine::test_shot();
@@ -708,17 +711,49 @@ impl App {
             }
         }
         // Left: back to the explorer's default pages (applies and saves at once, like arranging).
-        let label = tr("RESET SHOT PAGES");
+        let label = tr("RESET SHOTS VIEW");
         let w = ui.painter().layout_no_wrap(label.to_string(), cond(19.0), WHITE).size().x + 40.0;
         let reset_r = Rect::from_min_size(bar.min, vec2(w, bar.height()));
         let is_default = self.saved.explorer == openlaunch_connect::settings::Explorer::default();
-        if button(ui, reset_r, label, Icon::None, false, !is_default, tr("The shot pages are as they come")) {
-            self.saved.explorer = openlaunch_connect::settings::Explorer::default();
-            self.edit.explorer = self.saved.explorer.clone();
-            self.note = Some(match self.saved.save() {
-                Ok(()) => tr("Shot pages reset.").into(),
-                Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
-            });
+        if button(ui, reset_r, label, Icon::None, false, !is_default, tr("The shots view is as it came")) {
+            self.confirm_reset = true;
+        }
+        if self.confirm_reset {
+            let mut reset = false;
+            let modal = egui::Modal::new(egui::Id::new("reset-shot-pages"))
+                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
+                .show(ui.ctx(), |ui| {
+                    ui.set_width(360.0);
+                    ui.label(RichText::new(tr("Reset the shots view?")).size(16.0).color(WHITE));
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(tr("All pages and tiles go back to how they came. Your shots are kept."))
+                            .size(13.0)
+                            .color(SOFT),
+                    );
+                    ui.add_space(16.0);
+                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                    let ok_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
+                    let cancel_r = Rect::from_min_max(pos2(ok_r.left() - 140.0, row.top()), pos2(ok_r.left() - 10.0, row.bottom()));
+                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+                        ui.close();
+                    }
+                    if button(ui, ok_r, tr("RESET"), Icon::None, true, true, "") {
+                        reset = true;
+                        ui.close();
+                    }
+                });
+            if reset {
+                self.saved.explorer = openlaunch_connect::settings::Explorer::default();
+                self.edit.explorer = self.saved.explorer.clone();
+                self.note = Some(match self.saved.save() {
+                    Ok(()) => tr("Shots view reset.").into(),
+                    Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
+                });
+            }
+            if modal.should_close() {
+                self.confirm_reset = false;
+            }
         }
         let note = if dirty { Some(tr("Unsaved changes").to_string()) } else { self.note.clone() };
         if let Some(note) = note {
