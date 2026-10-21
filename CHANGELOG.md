@@ -14,9 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (e.g. a misread); it stays listed, struck through, and *Count* takes it back. Kept in the shot history.
 
 ### Added
-- **Estimated carry and total distance** on the shots page, per shot and as averages per club (in m, or yards
-  with mph). GSPro doesn't send its own results back, so they are estimated from the launch data (no wind, sea
-  level) and marked with *; GSPro may show other numbers.
+- **Estimated carry and total distance** on the shots page, per shot and as averages per club (in metres or
+  yards, chosen separately from the speed unit in Settings → Display). GSPro doesn't send its own results back,
+  so they are estimated from the launch data (no wind, sea level) and marked with *; GSPro may show other numbers.
 
 ### Changed
 - **Interface size** (Settings → Display): *Auto* zooms the interface with the window as before; a fixed size of

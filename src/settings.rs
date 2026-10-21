@@ -18,6 +18,8 @@ pub struct Settings {
     pub device: Option<String>,
     /// Show speeds in km/h (true) or mph (false). Display only; GSPro always gets mph.
     pub metric: bool,
+    /// Show distances in metres (true) or yards (false), independent of the speed unit.
+    pub meters: bool,
     /// Log raw GSPro OpenConnect messages.
     pub debug: bool,
     /// Always-on-top status overlay for playing with GSPro in full screen.
@@ -126,6 +128,7 @@ impl Default for Settings {
             auto_start_gspro: false,
             device: None,
             metric: true,
+            meters: true,
             debug: false,
             overlay: OverlayPos::default(),
             overlay_style: OverlayStyle::default(),
@@ -229,6 +232,7 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"gspro_addr":"127.0.0.1:921","metric":false}"#).unwrap();
         assert_eq!(s.overlay, OverlayPos::TopRight);
         assert!(!s.metric);
+        assert!(s.meters, "distances default to metres, whatever the speed unit");
         let json = serde_json::to_string(&Settings { overlay: OverlayPos::BottomLeft, ..s }).unwrap();
         assert!(json.contains(r#""overlay":"bottom_left""#));
     }

@@ -515,8 +515,9 @@ impl App {
         let metric = self.saved.metric;
         let unit = if metric { "km/h" } else { "mph" };
         let speed = move |mph: f64| if metric { mph * MPH_TO_KMH } else { mph };
-        let dist_unit = if metric { "m" } else { "yd" };
-        let dist = move |m: f64| if metric { m } else { m * M_TO_YD };
+        let meters = self.saved.meters;
+        let dist_unit = if meters { "m" } else { "yd" };
+        let dist = move |m: f64| if meters { m } else { m * M_TO_YD };
         // Header of an estimated column (marked with *) and what it means.
         let estimated = tr("Estimated from the launch data (no wind, sea level); GSPro may show other numbers");
         let header = |ui: &mut egui::Ui, h: &str| {
@@ -759,6 +760,8 @@ impl App {
             });
             setting_row(ui, tr("Units"), |ui| {
                 segmented(ui, &mut self.edit.metric, "km/h", "mph");
+                ui.add_space(4.0);
+                segmented(ui, &mut self.edit.meters, "m", "yd");
             });
             setting_row(ui, tr("Interface"), |ui| {
                 let options = [(None, tr("Auto")), (Some(1.0), "100 %"), (Some(1.25), "125 %"), (Some(1.5), "150 %")];
