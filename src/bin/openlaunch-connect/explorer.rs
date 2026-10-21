@@ -548,7 +548,6 @@ impl App {
         }
         if self.explorer.export_dialog {
             let mut picked = None;
-            let last = self.saved.export_format;
             let modal = egui::Modal::new(egui::Id::new("export-csv"))
                 .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
                 .show(ui.ctx(), |ui| {
@@ -559,7 +558,7 @@ impl App {
                     ui.label(RichText::new(tr("The shots shown, with the filter. Choose the layout:")).size(13.0).color(SOFT));
                     ui.add_space(10.0);
                     for f in ExportFormat::ALL {
-                        if format_choice(ui, f, f == last) {
+                        if format_choice(ui, f) {
                             picked = Some(f);
                             ui.close();
                         }
@@ -576,10 +575,6 @@ impl App {
                 self.explorer.export_dialog = false;
             }
             if let Some(f) = picked {
-                // Remembered as the next default, without touching unsaved edits on the settings page.
-                self.saved.export_format = f;
-                self.edit.export_format = f;
-                let _ = self.saved.save();
                 self.export_note = Some(export_csv(&export, f));
             }
         }
@@ -643,12 +638,12 @@ fn add_tile(ui: &mut egui::Ui, rect: Rect) -> Option<TileKind> {
     picked
 }
 
-/// One layout in the export dialog: its name and what it is for; the last one used is outlined.
-fn format_choice(ui: &mut egui::Ui, format: ExportFormat, last: bool) -> bool {
+/// One layout in the export dialog: its name and what it is for.
+fn format_choice(ui: &mut egui::Ui, format: ExportFormat) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), Sense::click());
     let p = ui.painter();
     let fill = if resp.hovered() { BUTTON_HOVER } else { BUTTON };
-    p.rect(rect, 6.0, fill, Stroke::new(if last { 2.0 } else { 1.0 }, if last { ACCENT } else { BUTTON_LINE }), StrokeKind::Inside);
+    p.rect(rect, 6.0, fill, Stroke::new(1.0, if resp.hovered() { ACCENT } else { BUTTON_LINE }), StrokeKind::Inside);
     let what = match format {
         ExportFormat::OpenLaunch => tr("All values of this app, one row per shot"),
         ExportFormat::GarminGolf => tr("Columns and units like the Garmin Golf app's export"),

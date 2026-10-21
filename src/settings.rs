@@ -40,7 +40,7 @@ pub struct Settings {
     pub notifications: bool,
     /// UI language (the log stays English).
     pub language: Language,
-    /// Last CSV layout chosen on the SHOTS page.
+    /// CSV layout chosen last (unused since the export asks each time; kept so the field still loads).
     pub export_format: ExportFormat,
     /// Pages and tiles of the shots explorer.
     pub explorer: Explorer,
