@@ -194,6 +194,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "No shots saved yet – shots hit with the R10 are saved, test shots aren't." => "Noch keine Schläge gespeichert – gespeichert werden Schläge mit der R10, Testschüsse nicht.",
         "Export {n} shots as CSV" => "{n} Schläge als CSV exportieren",
         "The shots shown, with the filter. Choose the layout:" => "Die gezeigten Schläge, mit Filter. Format wählen:",
         "All values of this app, one row per shot" => "Alle Werte dieser App, eine Zeile pro Schlag",

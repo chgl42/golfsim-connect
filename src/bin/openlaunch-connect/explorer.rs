@@ -200,7 +200,12 @@ impl App {
         bar_ui.radio_value(&mut self.all_time, false, tr("This session ({n})").replace("{n}", &session.len().to_string()));
         bar_ui.radio_value(&mut self.all_time, true, tr("All time"));
         if self.all_time && (!before || self.all_shots_session != session.len()) {
-            self.all_shots = history::load_all();
+            // The demo doesn't save its shots, so its "all time" is the demo session.
+            self.all_shots = if history::PERSIST.load(std::sync::atomic::Ordering::Relaxed) {
+                history::load_all()
+            } else {
+                session.clone()
+            };
             self.all_shots_session = session.len();
         }
         let shots: Vec<ShotRecord> = if self.all_time { self.all_shots.clone() } else { session };
@@ -652,6 +657,11 @@ fn format_choice(ui: &mut egui::Ui, format: ExportFormat) -> bool {
     p.text(rect.left_top() + vec2(14.0, 16.0), Align2::LEFT_CENTER, format.label(), FontId::proportional(14.0), WHITE);
     p.text(rect.left_top() + vec2(14.0, 35.0), Align2::LEFT_CENTER, what, FontId::proportional(12.0), LABEL);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// What an empty tile says: the history may simply have no saved shots yet.
+fn no_shots(ctx: &TileCtx) -> &'static str {
+    if ctx.all_time { tr("No shots saved yet – shots hit with the R10 are saved, test shots aren't.") } else { tr("No shots yet.") }
 }
 
 /// What every tile draws from.
@@ -1179,7 +1189,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
         }
     };
     if shown.is_empty() {
-        ui.label(RichText::new(tr("No shots yet.")).color(MUTED));
+        ui.label(RichText::new(no_shots(ctx)).color(MUTED));
         return None;
     }
     table(ui, egui::Id::new(("shots-table", i)), &cols, shown.len(), |r| row(shown[r])).map(|r| key(shown[r]))
@@ -1191,7 +1201,7 @@ fn averages_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) {
     let shots: Vec<ShotRecord> = ctx.shown.iter().map(|s| (*s).clone()).collect();
     let stats = history::club_stats(&shots);
     if stats.is_empty() {
-        ui.label(RichText::new(tr("No shots yet.")).color(MUTED));
+        ui.label(RichText::new(no_shots(ctx)).color(MUTED));
         return;
     }
     // The spread only from two shots on.
@@ -1272,7 +1282,7 @@ fn fit_columns(ui: &egui::Ui, all: &[(&str, f32, u8)]) -> Vec<usize> {
 /// All values of one shot: the one clicked last, or the latest.
 fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
     let Some(s) = shot else {
-        ui.label(RichText::new(tr("No shots yet.")).color(MUTED));
+        ui.label(RichText::new(no_shots(ctx)).color(MUTED));
         return;
     };
     let u = ctx.units;
