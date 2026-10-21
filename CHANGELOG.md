@@ -10,13 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Overlay page:** choose the overlay's size (75–150 %), one or two lines, how opaque its background is and which
   values it shows (club, battery, tempo, ball speed, VLA, HLA, spin, spin axis, club speed, smash factor), with a
   preview. Changes apply at once. The overlay's position moved here from the settings.
-- **Exclude shots:** *Exclude* next to a shot on the shots page leaves it out of the averages and CSV exports
-  (e.g. a misread); it stays listed, struck through, and *Count* takes it back. Kept in the shot history.
-
-### Added
+- **Exclude shots:** select shots on the shots page and *Exclude* them to leave them out of the averages and CSV
+  exports (e.g. misreads); they stay listed, struck through, and *Count* takes them back. Kept in the shot history.
 - **Estimated carry and total distance** on the shots page, per shot and as averages per club (in metres or
   yards, chosen separately from the speed unit in Settings → Display). GSPro doesn't send its own results back,
   so they are estimated from the launch data (no wind, sea level) and marked with *; GSPro may show other numbers.
+- **Shot explorer** on the shots page: pages of tiles on a grid – a shots table, the averages per club and the
+  details of a shot (all values, including the estimated flight). *Arrange* adds and removes pages and tiles, picks
+  what each tile shows and its size (1×1 up to the whole page) and moves tiles; the layout is saved. A filter by
+  club and *Hide excluded* apply to every tile; shots clicked in a table are selected everywhere and can be shown
+  alone, excluded or counted again together. Larger windows (fixed interface size) fit more tiles.
 
 ### Changed
 - **Interface size** (Settings → Display): *Auto* zooms the interface with the window as before; a fixed size of

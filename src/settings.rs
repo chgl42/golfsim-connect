@@ -39,6 +39,96 @@ pub struct Settings {
     pub language: Language,
     /// Last CSV layout chosen on the SHOTS page.
     pub export_format: ExportFormat,
+    /// Pages and tiles of the shots explorer.
+    pub explorer: Explorer,
+}
+
+/// The shots explorer: pages of tiles on a grid of square cells.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Explorer {
+    pub pages: Vec<ExplorerPage>,
+}
+
+impl Default for Explorer {
+    /// A page with the shots table and the details of a shot, the table on a page of its own,
+    /// and the averages per club.
+    fn default() -> Self {
+        let tile = |kind, size, averages| Tile { kind, size, averages };
+        Self {
+            pages: vec![
+                ExplorerPage {
+                    name: String::new(),
+                    tiles: vec![tile(TileKind::Table, TileSize::W4H2, false), tile(TileKind::Details, TileSize::W2H2, false)],
+                },
+                ExplorerPage { name: String::new(), tiles: vec![tile(TileKind::Table, TileSize::Page, false)] },
+                ExplorerPage { name: String::new(), tiles: vec![tile(TileKind::Table, TileSize::Page, true)] },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ExplorerPage {
+    /// Name on the page's tab; empty shows "Page n".
+    pub name: String,
+    pub tiles: Vec<Tile>,
+}
+
+/// One tile: what it shows and how many cells it covers.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Tile {
+    pub kind: TileKind,
+    pub size: TileSize,
+    /// Table: averages per club instead of single shots.
+    pub averages: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TileKind {
+    #[default]
+    Table,
+    /// All values of the chosen (or latest) shot.
+    Details,
+}
+
+impl TileKind {
+    pub const ALL: [Self; 2] = [Self::Table, Self::Details];
+}
+
+/// Tile sizes in cells (width × height), like widgets on a phone, or the whole page.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TileSize {
+    W1H1,
+    W2H1,
+    W1H2,
+    #[default]
+    W2H2,
+    W3H2,
+    W4H2,
+    Page,
+}
+
+impl TileSize {
+    pub const ALL: [Self; 7] = [Self::W1H1, Self::W2H1, Self::W1H2, Self::W2H2, Self::W3H2, Self::W4H2, Self::Page];
+
+    /// Width and height in cells; `None` for the whole page.
+    #[must_use]
+    pub fn cells(self) -> Option<(usize, usize)> {
+        match self {
+            Self::W1H1 => Some((1, 1)),
+            Self::W2H1 => Some((2, 1)),
+            Self::W1H2 => Some((1, 2)),
+            Self::W2H2 => Some((2, 2)),
+            Self::W3H2 => Some((3, 2)),
+            Self::W4H2 => Some((4, 2)),
+            Self::Page => None,
+        }
+    }
 }
 
 /// What the overlay shows and how large it is. The status is always shown.
@@ -138,6 +228,7 @@ impl Default for Settings {
             check_updates: true,
             window_size: None,
             ui_scale: None,
+            explorer: Explorer::default(),
         }
     }
 }
@@ -233,7 +324,18 @@ mod tests {
         assert_eq!(s.overlay, OverlayPos::TopRight);
         assert!(!s.metric);
         assert!(s.meters, "distances default to metres, whatever the speed unit");
+        assert_eq!(s.explorer, Explorer::default(), "default explorer pages");
         let json = serde_json::to_string(&Settings { overlay: OverlayPos::BottomLeft, ..s }).unwrap();
         assert!(json.contains(r#""overlay":"bottom_left""#));
+    }
+
+    #[test]
+    fn explorer_layout_round_trips() {
+        let mut s = Settings::default();
+        s.explorer.pages[0].name = "Range".into();
+        s.explorer.pages[0].tiles.push(Tile { kind: TileKind::Details, size: TileSize::W1H2, averages: false });
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains(r#""size":"w1_h2""#) || json.contains(r#""size":"w1h2""#), "{json}");
+        assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), s);
     }
 }

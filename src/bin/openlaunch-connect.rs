@@ -12,9 +12,8 @@ use eframe::egui::{
     pos2, vec2,
 };
 use openlaunch_connect::engine;
-use openlaunch_connect::flight;
 use openlaunch_connect::gspro::Cmd;
-use openlaunch_connect::history::{self, ExportFormat, ShotRecord, Stat};
+use openlaunch_connect::history::{self, ExportFormat, ShotRecord};
 use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
 use openlaunch_connect::num;
@@ -22,6 +21,10 @@ use openlaunch_connect::log;
 use openlaunch_connect::settings::{OverlayPos, OverlayStyle, Settings};
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
+
+// Next to this file (the crate root of this binary is src/bin/).
+#[path = "openlaunch-connect/explorer.rs"]
+mod explorer;
 
 const APP_NAME: &str = "OpenLaunch Connect";
 const MPH_TO_KMH: f64 = 1.609_344;
@@ -215,6 +218,8 @@ struct App {
     /// Session length when `all_shots` was loaded (new shots reload it).
     all_shots_session: usize,
     export_note: Option<String>,
+    /// Shots page: page shown, filter and selection.
+    explorer: explorer::ExplorerState,
     /// Sample shot shown in the overlay preview.
     preview_shot: state::LastShot,
 }
@@ -249,6 +254,7 @@ impl App {
             all_shots: Vec::new(),
             all_shots_session: 0,
             export_note: None,
+            explorer: explorer::ExplorerState::default(),
             preview_shot: {
                 let (ball, club) = engine::test_shot();
                 state::LastShot {
@@ -508,192 +514,6 @@ impl App {
         p.rect_filled(Rect::from_min_max(pos2(st.left(), st.bottom() - 4.0), st.max), 0.0, color);
         let st_resp = ui.interact(st, ui.id().with("status"), Sense::hover());
         st_resp.on_hover_text(format!("R10: {}\nGSPro: {}", tr_detail(&r10_detail), tr_detail(&gs_detail)));
-    }
-
-    fn shots(&mut self, ui: &mut egui::Ui) {
-        let session: Vec<ShotRecord> = state::with(|s| s.session.clone());
-        let metric = self.saved.metric;
-        let unit = if metric { "km/h" } else { "mph" };
-        let speed = move |mph: f64| if metric { mph * MPH_TO_KMH } else { mph };
-        let meters = self.saved.meters;
-        let dist_unit = if meters { "m" } else { "yd" };
-        let dist = move |m: f64| if meters { m } else { m * M_TO_YD };
-        // Header of an estimated column (marked with *) and what it means.
-        let estimated = tr("Estimated from the launch data (no wind, sea level); GSPro may show other numbers");
-        let header = |ui: &mut egui::Ui, h: &str| {
-            let r = ui.label(RichText::new(h).color(MUTED));
-            if h.contains('*') {
-                r.on_hover_text(estimated);
-            }
-        };
-
-        ui.horizontal(|ui| {
-            section(ui, tr("BY CLUB"));
-            ui.add_space(16.0);
-            let before = self.all_time;
-            ui.radio_value(&mut self.all_time, false, tr("This session ({n})").replace("{n}", &session.len().to_string()));
-            ui.radio_value(&mut self.all_time, true, tr("All time"));
-            if self.all_time && (!before || self.all_shots_session != session.len()) {
-                self.all_shots = history::load_all();
-                self.all_shots_session = session.len();
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (rect, _) = ui.allocate_exact_size(vec2(150.0, 30.0), Sense::hover());
-                let shown = if self.all_time { &self.all_shots } else { &session };
-                if button(ui, rect, tr("EXPORT CSV"), Icon::None, false, !shown.is_empty(), tr("No shots to export")) {
-                    self.export_note = Some(export_csv(shown, self.saved.export_format));
-                }
-                let before = self.saved.export_format;
-                egui::ComboBox::from_id_salt("export_format")
-                    .selected_text(before.label())
-                    .show_ui(ui, |ui| {
-                        for f in ExportFormat::ALL {
-                            ui.selectable_value(&mut self.saved.export_format, f, f.label());
-                        }
-                    })
-                    .response
-                    .on_hover_text(tr("CSV layout: OpenLaunch, or as exported by the Garmin Golf app or Awesome Golf"));
-                if self.saved.export_format != before {
-                    // Remember the choice without touching unsaved edits on the settings page.
-                    self.edit.export_format = self.saved.export_format;
-                    let _ = self.saved.save();
-                }
-                if let Some(note) = &self.export_note {
-                    ui.label(RichText::new(note).color(MUTED));
-                }
-            });
-        });
-        let shots = if self.all_time { &self.all_shots } else { &session };
-        ui.add_space(4.0);
-
-        let fmt = |st: Option<Stat>, digits: usize, f: &dyn Fn(f64) -> f64| {
-            st.map_or_else(
-                || "–".to_string(),
-                |st| format!("{} ±{}", num(f(st.mean), digits), num(f(st.sd), digits)),
-            )
-        };
-        let id = |v: f64| v;
-        egui::Frame::new().fill(TILE).inner_margin(Margin::same(10)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if shots.is_empty() {
-                ui.label(RichText::new(tr("No shots yet.")).color(MUTED));
-                return;
-            }
-            egui::ScrollArea::vertical().id_salt("by_club").max_height(130.0).show(ui, |ui| {
-                egui::Grid::new("by_club_grid").num_columns(12).spacing([14.0, 5.0]).striped(true).show(ui, |ui| {
-                    for h in [
-                        tr("Club").to_string(),
-                        tr("Shots").into(),
-                        format!("{}* ({dist_unit})", tr("Carry")),
-                        format!("{}* ({dist_unit})", tr("Total")),
-                        format!("{} ({unit})", tr("Ball")),
-                        format!("{} ({unit})", tr("Club")),
-                        tr("Smash").into(),
-                        "VLA".into(),
-                        tr("Spin").into(),
-                        "HLA".into(),
-                        tr("Face to Path").into(),
-                        tr("Tempo").into(),
-                    ] {
-                        header(ui, &h);
-                    }
-                    ui.end_row();
-                    for c in history::club_stats(shots) {
-                        let name = c.club_code.as_deref().map_or(tr("Unknown").to_string(), club_name);
-                        ui.label(RichText::new(name).color(WHITE));
-                        ui.label(c.shots.to_string());
-                        ui.label(fmt(c.carry, 0, &dist));
-                        ui.label(fmt(c.total, 0, &dist));
-                        ui.label(fmt(c.ball_speed, 1, &speed));
-                        ui.label(fmt(c.club_speed, 1, &speed));
-                        ui.label(fmt(c.smash, 2, &id));
-                        ui.label(fmt(c.vla, 1, &id));
-                        ui.label(fmt(c.total_spin, 0, &id));
-                        ui.label(fmt(c.hla, 1, &id));
-                        ui.label(fmt(c.face_to_path, 1, &id));
-                        ui.label(fmt(c.tempo, 1, &id));
-                        ui.end_row();
-                    }
-                });
-            });
-        });
-
-        ui.add_space(10.0);
-        section(ui, tr("SHOTS"));
-        // (time, shot number, excluded) of a shot whose switch was clicked, applied after the table.
-        let mut toggled: Option<(String, u32, bool)> = None;
-        egui::Frame::new().fill(TILE).inner_margin(Margin::same(10)).show(ui, |ui| {
-            egui::ScrollArea::vertical().id_salt("shots").auto_shrink([false, false]).show(ui, |ui| {
-                let (carry_h, total_h) = (format!("{}*", tr("Carry")), format!("{}*", tr("Total")));
-                egui::Grid::new("shots_grid").num_columns(14).spacing([16.0, 5.0]).striped(true).show(ui, |ui| {
-                    for h in [
-                        tr("Time"),
-                        tr("Club"),
-                        &carry_h,
-                        &total_h,
-                        tr("Ball"),
-                        "VLA",
-                        "HLA",
-                        tr("Spin"),
-                        tr("Axis"),
-                        tr("Club"),
-                        tr("Smash"),
-                        tr("Face to Path"),
-                        tr("Tempo"),
-                        "",
-                    ] {
-                        header(ui, h);
-                    }
-                    ui.end_row();
-                    for s in shots.iter().rev() {
-                        let c = s.club.as_ref();
-                        // Excluded shots stay listed, struck through and dimmed.
-                        let cell = |text: String| {
-                            let text = RichText::new(text);
-                            if s.excluded { text.color(MUTED).strikethrough() } else { text }
-                        };
-                        let time = if self.all_time { s.time.get(..16).unwrap_or(&s.time).replace('T', " ") } else { s.clock().to_string() };
-                        let time = if s.delivered { cell(time) } else { cell(format!("{time} ✗")).color(AMBER) };
-                        ui.label(time).on_hover_text(if s.delivered { tr("Delivered to GSPro") } else { tr("Not delivered to GSPro") });
-                        ui.label(cell(s.club_code.as_deref().unwrap_or("–").into()));
-                        let f = flight::fly(&s.ball);
-                        ui.label(cell(format!("{:.0}", dist(f.carry))));
-                        ui.label(cell(format!("{:.0}", dist(f.total))));
-                        ui.label(cell(format!("{:.1}", speed(s.ball.speed))));
-                        ui.label(cell(num(s.ball.vla, 1)));
-                        ui.label(cell(num(s.ball.hla, 1)));
-                        ui.label(cell(format!("{:.0}", s.ball.total_spin)));
-                        ui.label(cell(num(s.ball.spin_axis, 1)));
-                        ui.label(cell(c.map_or("–".into(), |c| format!("{:.1}", speed(c.speed)))));
-                        ui.label(cell(s.smash().map_or("–".into(), |v| format!("{v:.2}"))));
-                        ui.label(cell(c.map_or("–".into(), |c| dir(c.face_to_target - c.path, "O", "C"))));
-                        ui.label(cell(s.tempo.map_or("–".into(), |t| format!("{:.1}", t.ratio()))));
-                        let (label, hint) = if s.excluded {
-                            (tr("Count"), tr("Count this shot in the stats and exports again"))
-                        } else {
-                            (tr("Exclude"), tr("Leave this shot out of the stats and exports (e.g. a misread); it stays listed"))
-                        };
-                        let link = egui::Button::new(RichText::new(label).size(12.0).color(if s.excluded { ICON } else { MUTED })).frame(false);
-                        if ui.add(link).on_hover_text(hint).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            toggled = Some((s.time.clone(), s.shot_number, !s.excluded));
-                        }
-                        ui.end_row();
-                    }
-                });
-            });
-        });
-        if let Some((time, number, excluded)) = toggled {
-            let mark = |shots: &mut Vec<ShotRecord>| {
-                for s in shots.iter_mut().filter(|s| s.time == time && s.shot_number == number) {
-                    s.excluded = excluded;
-                }
-            };
-            state::with(|s| mark(&mut s.session));
-            mark(&mut self.all_shots);
-            if let Err(e) = history::set_excluded(&time, number, excluded) {
-                self.export_note = Some(tr("Saving failed: {e}").replace("{e}", &e));
-            }
-        }
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
@@ -2066,7 +1886,7 @@ mod tests {
     use super::*;
 
     /// Status as during a real session, for the README screenshots.
-    fn demo_state() {
+    pub(super) fn demo_state() {
         let (ball, club) = engine::test_shot();
         state::set_r10(R10Status::Ready, "Ready – hit away");
         state::set_gspro(true, "Connected (127.0.0.1:921)");
@@ -2107,7 +1927,7 @@ mod tests {
     }
 
     /// `OPENLAUNCH_SCREENSHOT_DIR` overrides the target (default `docs/images`).
-    fn save(img: &image::RgbaImage, name: &str) {
+    pub(super) fn save(img: &image::RgbaImage, name: &str) {
         let dir = std::env::var_os("OPENLAUNCH_SCREENSHOT_DIR")
             .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/images"), PathBuf::from);
         let path = dir.join(name);
