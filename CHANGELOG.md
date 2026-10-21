@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Overlay page:** choose the overlay's size (75–150 %), one or two lines, how opaque its background is and which
+  values it shows (club, battery, tempo, ball speed, VLA, HLA, spin, spin axis, club speed, smash factor), with a
+  preview. Changes apply at once. The overlay's position moved here from the settings.
+
 ### Fixed
 - Values that round to zero are shown as *0.0* instead of *-0.0* (play page, shots page, overlay, CSV exports).
 
