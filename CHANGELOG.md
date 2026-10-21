@@ -43,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   overlay preview).
 
 ### Fixed
+- Correlation chart: values with a sign (start direction, spin axis, path, face, angle of attack, side) are centred
+  on 0 with clearly visible axes, so the four quadrants are always in the same place.
 - A shot sent just as GSPro closed the connection was counted as delivered (and not reported as lost).
 - After a test shot without a connected R10, GSPro was told the launch monitor was ready.
 - Garmin Golf export: the sidespin had the opposite sign of the spin axis, and zero values could be written as `-0`.

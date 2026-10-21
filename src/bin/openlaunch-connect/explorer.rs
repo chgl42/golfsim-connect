@@ -1047,6 +1047,31 @@ fn metric_label(m: Metric, u: Units) -> String {
     if unit.is_empty() { name.to_string() } else { format!("{name} ({unit})") }
 }
 
+/// Whether a value has a sign (left/right, up/down, open/closed …): its chart axis is centred on 0.
+fn metric_signed(m: Metric) -> bool {
+    matches!(
+        m,
+        Metric::Hla | Metric::SpinAxis | Metric::AngleOfAttack | Metric::Path | Metric::FaceToTarget | Metric::FaceToPath | Metric::Side
+    )
+}
+
+/// Range of a chart axis for values from `lo` to `hi`, with some room; values with a sign get a
+/// range centred on 0, so the quadrants stay in place.
+fn axis_range(lo: f64, hi: f64, signed: bool) -> (f64, f64) {
+    if lo > hi {
+        return if signed { (-1.0, 1.0) } else { (0.0, 1.0) };
+    }
+    if signed {
+        let m = lo.abs().max(hi.abs()).max(0.5) * 1.1;
+        return (-m, m);
+    }
+    if hi - lo < 1e-9 {
+        return (lo - 1.0, hi + 1.0);
+    }
+    let pad = (hi - lo) * 0.08;
+    (lo - pad, hi + pad)
+}
+
 /// Decimals a value is shown with.
 fn metric_digits(m: Metric) -> usize {
     match m {
@@ -1288,18 +1313,11 @@ fn scatter(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCtx, edits: &mut 
         .zip(ctx.flights)
         .map(|(s, f)| Some((metric_value(x, s, f, u)?, metric_value(y, s, f, u)?)))
         .collect();
-    let range = |pick: fn(&(f64, f64)) -> f64| {
+    let range = |pick: fn(&(f64, f64)) -> f64, metric: Metric| {
         let (lo, hi) = values.iter().flatten().map(pick).fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
-        if lo > hi {
-            (0.0, 1.0)
-        } else if hi - lo < 1e-9 {
-            (lo - 1.0, hi + 1.0)
-        } else {
-            let pad = (hi - lo) * 0.08;
-            (lo - pad, hi + pad)
-        }
+        axis_range(lo, hi, metric_signed(metric))
     };
-    let ((x0, x1), (y0, y1)) = (range(|v| v.0), range(|v| v.1));
+    let ((x0, x1), (y0, y1)) = (range(|v| v.0, x), range(|v| v.1, y));
     let pos = |vx: f64, vy: f64| {
         pos2(
             rect.left() + ((vx - x0) / (x1 - x0)) as f32 * rect.width(),
@@ -1308,14 +1326,15 @@ fn scatter(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCtx, edits: &mut 
     };
     let p = ui.painter_at(rect);
     p.rect(rect, 4.0, PAGE, Stroke::new(1.0, LINE), StrokeKind::Inside);
-    // Zero lines split the chart into quadrants where both signs occur.
+    // Axes through zero split the chart into quadrants (always for values with a sign, centred).
+    let axis = Stroke::new(1.5, LABEL.gamma_multiply(0.55));
     if x0 < 0.0 && x1 > 0.0 {
         let zx = pos(0.0, y0).x;
-        p.line_segment([pos2(zx, rect.top()), pos2(zx, rect.bottom())], Stroke::new(1.0, FIELD_LINE));
+        p.line_segment([pos2(zx, rect.top()), pos2(zx, rect.bottom())], axis);
     }
     if y0 < 0.0 && y1 > 0.0 {
         let zy = pos(x0, 0.0).y;
-        p.line_segment([pos2(rect.left(), zy), pos2(rect.right(), zy)], Stroke::new(1.0, FIELD_LINE));
+        p.line_segment([pos2(rect.left(), zy), pos2(rect.right(), zy)], axis);
     }
     let (dx, dy) = (metric_digits(x), metric_digits(y));
     let small = FontId::proportional(10.5);
@@ -1895,6 +1914,17 @@ mod tests {
         let mut codes = vec![Some("PW"), None, Some("I7"), Some("H4"), Some("DR"), Some("LW"), Some("W3"), Some("I10"), Some("GW"), Some("PT")];
         codes.sort_by_key(|c| club_rank(*c));
         assert_eq!(codes, [Some("DR"), Some("W3"), Some("H4"), Some("I7"), Some("I10"), Some("PW"), Some("GW"), Some("LW"), Some("PT"), None]);
+    }
+
+    #[test]
+    fn signed_axes_are_centred_on_zero() {
+        // Only right of the target: still centred, so 0 is the middle.
+        assert_eq!(axis_range(1.0, 4.0, true), (-4.4, 4.4));
+        assert_eq!(axis_range(-2.0, 1.0, true), (-2.2, 2.2));
+        // Unsigned values keep their own range.
+        let (lo, hi) = axis_range(100.0, 200.0, false);
+        assert!(lo > 90.0 && hi < 210.0);
+        assert_eq!(axis_range(f64::MAX, f64::MIN, true), (-1.0, 1.0), "no values");
     }
 
     #[test]
