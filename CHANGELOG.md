@@ -16,8 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   yards, chosen separately from the speed unit in Settings → Display). GSPro doesn't send its own results back,
   so they are estimated from the launch data (no wind, sea level) and marked with *; GSPro may show other numbers.
 - **Shot explorer** on the shots page: pages of tiles on a grid – a shots table, the averages per club and the
-  details of a shot (all values, including the estimated flight). *Arrange* adds and removes pages and tiles, picks
-  what each tile shows and its size (1×1 up to the whole page) and moves tiles; the layout is saved. A filter by
+  details of a shot (all values, including the estimated flight). Right-click a page's tab to rename it, add tiles
+  or pages, or remove it; *Arrange* picks what each tile shows and its size (1×1 up to the whole page), moves and
+  removes tiles. The layout is saved; *Reset shot pages* in the settings brings back the default pages. A filter by
   club and *Hide excluded* apply to every tile; shots clicked in a table are selected everywhere and can be shown
   alone, excluded or counted again together. Larger windows (fixed interface size) fit more tiles.
 

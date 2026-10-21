@@ -707,6 +707,19 @@ impl App {
                 Err(e) => self.note = Some(tr("Saving failed: {e}").replace("{e}", &e)),
             }
         }
+        // Left: back to the explorer's default pages (applies and saves at once, like arranging).
+        let label = tr("RESET SHOT PAGES");
+        let w = ui.painter().layout_no_wrap(label.to_string(), cond(19.0), WHITE).size().x + 40.0;
+        let reset_r = Rect::from_min_size(bar.min, vec2(w, bar.height()));
+        let is_default = self.saved.explorer == openlaunch_connect::settings::Explorer::default();
+        if button(ui, reset_r, label, Icon::None, false, !is_default, tr("The shot pages are as they come")) {
+            self.saved.explorer = openlaunch_connect::settings::Explorer::default();
+            self.edit.explorer = self.saved.explorer.clone();
+            self.note = Some(match self.saved.save() {
+                Ok(()) => tr("Shot pages reset.").into(),
+                Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
+            });
+        }
         let note = if dirty { Some(tr("Unsaved changes").to_string()) } else { self.note.clone() };
         if let Some(note) = note {
             ui.painter().text(

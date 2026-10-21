@@ -132,9 +132,9 @@ Hover over the status panel for details; the **LOG** page shows everything that 
 e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none.
 
 **Shots page:** every shot of the session (or all time) on pages of tiles – a shots table, the averages and spread
-per club, the details of a shot. *ARRANGE* adds pages and tiles and sets each tile's size (1×1 up to the whole
-page). Click shots to select them in every tile: show only those, or exclude misreads from the stats and exports.
-Carry\* and total\* are estimated from the launch data – GSPro doesn't send its own numbers back. *EXPORT CSV*
+per club, the details of a shot. *ARRANGE* sets what each tile shows and its size (1×1 up to the whole page);
+right-click a page's tab to rename it, add tiles or pages, or remove it. Click shots to select them in every tile:
+show only those, or exclude misreads from the stats and exports. Carry\* and total\* are estimated from the launch data – GSPro doesn't send its own numbers back. *EXPORT CSV*
 writes the shots shown, in the layout picked next to the button: OpenLaunch, Garmin Golf or Awesome Golf.
 
 **Overlay:** while GSPro runs in full screen, a small panel on top of it shows the status, club, battery,

@@ -102,6 +102,14 @@ fn page_name(page: &ExplorerPage, i: usize) -> String {
     if page.name.trim().is_empty() { tr("Page {n}").replace("{n}", &(i + 1).to_string()) } else { page.name.clone() }
 }
 
+/// Changes to a page from its tab's menu, applied afterwards.
+enum PageEdit {
+    Rename(usize, String),
+    AddTile(usize, TileKind),
+    AddPage,
+    Remove(usize),
+}
+
 /// Changes to the layout made while drawing, applied afterwards.
 enum Edit {
     Kind(usize, TileKind),
@@ -163,10 +171,56 @@ impl App {
         self.explorer.page = self.explorer.page.min(self.saved.explorer.pages.len().saturating_sub(1));
         bar_ui.add_space(18.0);
         let mut layout_changed = false;
+        // A page's tab: click shows it, right-click opens its settings.
+        let mut page_edit: Option<PageEdit> = None;
+        let removable = self.saved.explorer.pages.len() > 1;
         for (i, page) in self.saved.explorer.pages.iter().enumerate() {
-            if page_tab(&mut bar_ui, &page_name(page, i), i == self.explorer.page) {
+            let mut tab = page_tab(&mut bar_ui, &page_name(page, i), i == self.explorer.page);
+            if self.explorer.arrange {
+                tab = tab.on_hover_text(tr("Right-click for the page's settings"));
+            }
+            if tab.clicked() || tab.secondary_clicked() {
                 self.explorer.page = i;
             }
+            tab.context_menu(|ui| {
+                let mut name = page.name.clone();
+                let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
+                if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(160.0)).changed() {
+                    page_edit = Some(PageEdit::Rename(i, name));
+                }
+                ui.separator();
+                for kind in TileKind::ALL {
+                    if ui.button(format!("+ {}", kind_name(kind))).clicked() {
+                        page_edit = Some(PageEdit::AddTile(i, kind));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button(tr("Add a page")).clicked() {
+                    page_edit = Some(PageEdit::AddPage);
+                    ui.close();
+                }
+                if removable && ui.button(RichText::new(tr("Remove page")).color(RED)).clicked() {
+                    page_edit = Some(PageEdit::Remove(i));
+                    ui.close();
+                }
+            });
+        }
+        if let Some(edit) = page_edit {
+            let pages = &mut self.saved.explorer.pages;
+            match edit {
+                PageEdit::Rename(i, name) => pages[i].name = name,
+                PageEdit::AddTile(i, kind) => pages[i].tiles.push(Tile { kind, ..Tile::default() }),
+                PageEdit::AddPage => {
+                    pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
+                    self.explorer.page = pages.len() - 1;
+                }
+                PageEdit::Remove(i) => {
+                    pages.remove(i);
+                    self.explorer.page = self.explorer.page.min(pages.len() - 1);
+                }
+            }
+            layout_changed = true;
         }
         if self.explorer.arrange && link(&mut bar_ui, "+", ICON).on_hover_text(tr("Add a page")).clicked() {
             self.saved.explorer.pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
@@ -235,31 +289,7 @@ impl App {
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
         let mut row = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
         row.spacing_mut().item_spacing.x = 6.0;
-        if ex.arrange {
-            let pages = &mut self.saved.explorer.pages;
-            row.label(RichText::new(tr("Name")).size(13.0).color(LABEL));
-            let name = &mut pages[ex.page].name;
-            let hint = tr("Page {n}").replace("{n}", &(ex.page + 1).to_string());
-            if row.add(egui::TextEdit::singleline(name).hint_text(hint).desired_width(140.0)).changed() {
-                layout_changed = true;
-            }
-            row.add_space(10.0);
-            for kind in TileKind::ALL {
-                if chip(&mut row, &format!("+ {}", kind_name(kind)), None, false).clicked() {
-                    pages[ex.page].tiles.push(Tile { kind, ..Tile::default() });
-                    layout_changed = true;
-                }
-            }
-            if pages.len() > 1 {
-                row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if link(ui, tr("Remove page"), RED).clicked() {
-                        pages.remove(ex.page);
-                        ex.page = ex.page.min(pages.len() - 1);
-                        layout_changed = true;
-                    }
-                });
-            }
-        } else {
+        {
             row.label(RichText::new(tr("Filter")).size(13.0).color(LABEL));
             row.add_space(2.0);
             for code in &codes {
@@ -769,7 +799,7 @@ fn columns_width(ui: &egui::Ui, cols: &[(&str, f32)]) -> f32 {
 }
 
 /// Tab of an explorer page.
-fn page_tab(ui: &mut egui::Ui, name: &str, active: bool) -> bool {
+fn page_tab(ui: &mut egui::Ui, name: &str, active: bool) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.0), WHITE);
     let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + 22.0, 28.0), Sense::click());
     let p = ui.painter();
@@ -780,7 +810,7 @@ fn page_tab(ui: &mut egui::Ui, name: &str, active: bool) -> bool {
     }
     let color = if active { WHITE } else if resp.hovered() { SOFT } else { LABEL };
     p.text(rect.center(), Align2::CENTER_CENTER, name, FontId::proportional(13.0), color);
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Rounded filter chip, with an optional colour dot.
