@@ -18,7 +18,7 @@ use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
 use openlaunch_connect::num;
 use openlaunch_connect::log;
-use openlaunch_connect::settings::{OverlayPos, Settings};
+use openlaunch_connect::settings::{OverlayPos, OverlayStyle, Settings};
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
 
@@ -184,6 +184,7 @@ enum Page {
     Play,
     Shots,
     Log,
+    Overlay,
     Settings,
 }
 
@@ -210,6 +211,8 @@ struct App {
     /// Session length when `all_shots` was loaded (new shots reload it).
     all_shots_session: usize,
     export_note: Option<String>,
+    /// Sample shot shown in the overlay preview.
+    preview_shot: state::LastShot,
 }
 
 impl App {
@@ -223,6 +226,7 @@ impl App {
             Ok("settings") => Page::Settings,
             Ok("log") => Page::Log,
             Ok("shots") => Page::Shots,
+            Ok("overlay") => Page::Overlay,
             _ => Page::Play,
         };
         Self {
@@ -240,6 +244,17 @@ impl App {
             all_shots: Vec::new(),
             all_shots_session: 0,
             export_note: None,
+            preview_shot: {
+                let (ball, club) = engine::test_shot();
+                state::LastShot {
+                    ball,
+                    club: Some(club),
+                    tempo: Some(openlaunch_connect::mapping::Tempo { backswing: 0.81, downswing: 0.27 }),
+                    at: Instant::now(),
+                    delivered: true,
+                    shot_number: 0,
+                }
+            },
         }
     }
 
@@ -262,7 +277,7 @@ impl App {
         // Navigation, right-aligned.
         let mut x = rect.right() - 18.0;
         for (page, label) in
-            [(Page::Settings, tr("SETTINGS")), (Page::Log, tr("LOG")), (Page::Shots, tr("SHOTS")), (Page::Play, tr("PLAY"))]
+            [(Page::Settings, tr("SETTINGS")), (Page::Overlay, tr("OVERLAY")), (Page::Log, tr("LOG")), (Page::Shots, tr("SHOTS")), (Page::Play, tr("PLAY"))]
         {
             let galley = ui.painter().layout_no_wrap(label.into(), cond(19.0), WHITE);
             let w = galley.size().x;
@@ -687,20 +702,9 @@ impl App {
                             ui.selectable_value(&mut self.edit.language, l, l.label());
                         }
                     });
-                ui.add_space(12.0);
-                ui.label(RichText::new(tr("Units")).size(13.0).color(LABEL));
-                segmented(ui, &mut self.edit.metric, "km/h", "mph");
             });
-            ui.horizontal(|ui| {
-                setting_label(ui, tr("Overlay"), 72.0);
-                overlay_picker(ui, &mut self.edit.overlay);
-                ui.add_space(12.0);
-                // Text block centred on the picker, starting under "Units" above.
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
-                let p = ui.painter();
-                p.text(r.left_center() - vec2(0.0, 12.0), Align2::LEFT_CENTER, overlay_name(self.edit.overlay), FontId::proportional(14.0), WHITE);
-                p.text(r.left_center() + vec2(0.0, 7.0), Align2::LEFT_CENTER, tr("On top of GSPro, also in full screen."), FontId::proportional(12.0), MUTED);
-                p.text(r.left_center() + vec2(0.0, 23.0), Align2::LEFT_CENTER, tr("Choose the middle to turn it off."), FontId::proportional(12.0), MUTED);
+            setting_row(ui, tr("Units"), |ui| {
+                segmented(ui, &mut self.edit.metric, "km/h", "mph");
             });
         });
 
@@ -831,11 +835,16 @@ impl App {
         let Some(screen) = ctx.input(|i| i.viewport().monitor_size) else {
             return;
         };
+        let style = &self.saved.overlay_style;
+        let content = OverlayContent::live(style, self.saved.metric);
+        let base = content.size(ctx);
         // Sizes are in points, which grow with the main window's zoom; divide it out so the
         // overlay keeps its size on screen however large the main window is.
         let zoom = ctx.zoom_factor();
-        let (size, margin) = (OVERLAY_SIZE / zoom, OVERLAY_MARGIN / zoom);
-        let free = screen - size - vec2(2.0, 2.0) * margin;
+        let scale = style.scale / zoom;
+        let (size, margin) = (base * scale, OVERLAY_MARGIN / zoom);
+        // Never off the left or top edge, even when wider than the screen.
+        let free = (screen - size - vec2(2.0, 2.0) * margin).max(egui::Vec2::ZERO);
         let pos = pos2(margin + free.x * ax, margin + free.y * ay);
         let builder = egui::ViewportBuilder::default()
             .with_title(OVERLAY_TITLE)
@@ -849,21 +858,137 @@ impl App {
             .with_mouse_passthrough(true)
             .with_active(false)
             .with_taskbar(false);
-        let metric = self.saved.metric;
         let capture = &mut self.capture;
         ctx.show_viewport_immediate(overlay_id(), builder, |ui, _class| {
             #[cfg(target_os = "macos")]
             mac::float_over_fullscreen(OVERLAY_TITLE);
-            // Draw at the base size and scale the layer down by the zoom (no input, so this is safe).
+            // Draw at the base size and scale the layer by size ÷ zoom (no input, so this is safe).
             // Own layer: layer transforms apply to every viewport, and the main window draws on
             // `ui.layer_id()` (the background layer) too.
             let layer = overlay_layer();
-            ui.ctx().set_transform_layer(layer, egui::emath::TSTransform::from_scaling(1.0 / zoom));
+            ui.ctx().set_transform_layer(layer, egui::emath::TSTransform::from_scaling(scale));
             // The clip rect is scaled with the layer, so it has to be the unscaled size.
-            let rect = Rect::from_min_size(egui::Pos2::ZERO, OVERLAY_SIZE);
-            overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(rect), rect, metric);
+            let rect = Rect::from_min_size(egui::Pos2::ZERO, base);
+            overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(rect), rect, &content);
             capture.save_from(ui.ctx());
         });
+    }
+
+    /// Overlay position, size and contents with a preview; changes apply and are saved at once.
+    fn overlay_page(&mut self, ui: &mut egui::Ui) {
+        let mut pos = self.saved.overlay;
+        let mut style = self.saved.overlay_style.clone();
+        let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 254.0), Sense::hover());
+        let col_w = (area.width() - 10.0) / 2.0;
+        let left = Rect::from_min_size(area.min, vec2(col_w, area.height()));
+        let right = Rect::from_min_size(pos2(area.left() + col_w + 10.0, area.top()), vec2(col_w, area.height()));
+
+        card(ui, left, tr("LAYOUT"), Icon::Layout, |ui| {
+            ui.spacing_mut().item_spacing.y = 7.0;
+            ui.horizontal(|ui| {
+                setting_label(ui, tr("Position"), 72.0);
+                overlay_picker(ui, &mut pos);
+                ui.add_space(12.0);
+                // Text block centred on the picker.
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
+                let p = ui.painter();
+                p.text(r.left_center() - vec2(0.0, 12.0), Align2::LEFT_CENTER, overlay_name(pos), FontId::proportional(14.0), WHITE);
+                p.text(r.left_center() + vec2(0.0, 7.0), Align2::LEFT_CENTER, tr("On top of GSPro, also in full screen."), FontId::proportional(12.0), MUTED);
+                p.text(r.left_center() + vec2(0.0, 23.0), Align2::LEFT_CENTER, tr("Choose the middle to turn it off."), FontId::proportional(12.0), MUTED);
+            });
+            setting_row(ui, tr("Size"), |ui| {
+                segments(ui, &mut style.scale, &[(0.75, "75 %"), (1.0, "100 %"), (1.25, "125 %"), (1.5, "150 %")]);
+            });
+            setting_row(ui, tr("Lines"), |ui| {
+                segments(ui, &mut style.one_line, &[(false, tr("Two lines")), (true, tr("One line"))]);
+            });
+            setting_row(ui, tr("Background"), |ui| {
+                segments(ui, &mut style.opacity, &[(0.7, "70 %"), (0.85, "85 %"), (1.0, tr("Solid"))]);
+            });
+        });
+
+        card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
+            let s = &mut style;
+            let items: [(&mut bool, &str); 10] = [
+                (&mut s.club, tr("Club")),
+                (&mut s.battery, tr("Battery")),
+                (&mut s.tempo, tr("Tempo")),
+                (&mut s.ball_speed, tr("Ball Speed")),
+                (&mut s.vla, "VLA"),
+                (&mut s.hla, "HLA"),
+                (&mut s.spin, tr("Total Spin")),
+                (&mut s.spin_axis, tr("Spin Axis")),
+                (&mut s.club_speed, tr("Club Speed")),
+                (&mut s.smash, tr("Smash Factor")),
+            ];
+            let body = ui.max_rect();
+            let cell_w = body.width() / 2.0;
+            for (i, (on, label)) in items.into_iter().enumerate() {
+                let r = Rect::from_min_size(body.min + vec2((i % 2) as f32 * cell_w, (i / 2) as f32 * 38.0), vec2(cell_w, 34.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                    toggle(ui, on, label);
+                });
+            }
+        });
+        ui.painter().text(
+            pos2(right.right() - 16.0, right.top() + 21.0),
+            Align2::RIGHT_CENTER,
+            tr("The status is always shown"),
+            FontId::proportional(12.0),
+            MUTED,
+        );
+
+        // Below the cards, down to the page's bottom margin (the cards move the layout cursor).
+        let preview = Rect::from_min_max(pos2(area.left(), area.bottom() + 10.0), pos2(area.right(), ui.max_rect().bottom()));
+        self.overlay_preview(ui, preview, pos, &style);
+
+        if pos != self.saved.overlay || style != self.saved.overlay_style {
+            self.saved.overlay = pos;
+            self.edit.overlay = pos;
+            self.saved.overlay_style = style.clone();
+            self.edit.overlay_style = style;
+            if let Err(e) = self.saved.save() {
+                log::info(&format!("Saving the overlay settings failed: {e}"));
+            }
+        }
+    }
+
+    /// The overlay with a sample shot on a GSPro-like backdrop, at its size and position.
+    fn overlay_preview(&self, ui: &egui::Ui, area: Rect, pos: OverlayPos, style: &OverlayStyle) {
+        const SKY: Color32 = Color32::from_rgb(0x1f, 0x3a, 0x5c);
+        const FAIRWAY: Color32 = Color32::from_rgb(0x23, 0x50, 0x2f);
+        let p = ui.painter();
+        p.rect_filled(area, 6.0, SKY);
+        let ground = Rect::from_min_max(pos2(area.left(), area.top() + area.height() * 0.58), area.max);
+        p.rect_filled(ground, CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, FAIRWAY);
+        p.rect_stroke(area, 6.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
+        let anchor = pos.anchor();
+        // The label goes to the bottom corner the overlay leaves free.
+        let label_right = anchor.is_some_and(|(ax, ay)| ay > 0.5 && ax < 1.0);
+        let (label_pos, label_align) = if label_right {
+            (pos2(area.right() - 12.0, area.bottom() - 14.0), egui::Align::Max)
+        } else {
+            (pos2(area.left() + 12.0, area.bottom() - 14.0), egui::Align::Min)
+        };
+        caps_text(p, label_pos, label_align, tr("PREVIEW"), 14.0, SOFT);
+        let Some((ax, ay)) = anchor else {
+            p.text(area.center(), Align2::CENTER_CENTER, tr("Overlay off"), FontId::proportional(14.0), SOFT);
+            return;
+        };
+        let ready = (R10Status::Ready, "", true);
+        let content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot));
+        let size = content.size(ui.ctx());
+        let pad = 9.0;
+        let room = area.size() - vec2(2.0 * pad, 2.0 * pad);
+        // At its size, or smaller when it doesn't fit (very long single lines).
+        let scale = style.scale.min(room.x / size.x).min(room.y / size.y);
+        let free = (room - size * scale).max(egui::Vec2::ZERO);
+        let origin = area.min + vec2(pad + free.x * ax, pad + free.y * ay);
+        // Scaled on its own layer, like the overlay window; clipped to the preview.
+        let layer = egui::LayerId::new(egui::Order::Middle, egui::Id::new("overlay-preview"));
+        ui.ctx().set_transform_layer(layer, egui::emath::TSTransform::new(origin.to_vec2(), scale));
+        let clip = Rect::from_min_max(((area.min - origin) / scale).to_pos2(), ((area.max - origin) / scale).to_pos2());
+        overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(clip), Rect::from_min_size(egui::Pos2::ZERO, size), &content);
     }
 
     fn log(&mut self, ui: &mut egui::Ui) {
@@ -917,6 +1042,7 @@ impl eframe::App for App {
                     Page::Play => self.play(ui),
                     Page::Shots => self.shots(ui),
                     Page::Settings => self.settings(ui),
+                    Page::Overlay => self.overlay_page(ui),
                     Page::Log => self.log(ui),
                 }
             });
@@ -1278,31 +1404,44 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, label: &str) -> egui::Response {
 
 /// Two equal segments (left = `true`), e.g. km/h | mph.
 fn segmented(ui: &mut egui::Ui, left_on: &mut bool, left: &str, right: &str) {
-    let seg = 56.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(2.0 * seg, 34.0), Sense::hover());
+    segments(ui, left_on, &[(true, left), (false, right)]);
+}
+
+/// Equal segments, one per option; the chosen one is filled. Returns true when it changed.
+fn segments<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
+    let text_w = options
+        .iter()
+        .map(|(_, label)| ui.painter().layout_no_wrap((*label).to_string(), FontId::proportional(13.0), WHITE).size().x)
+        .fold(0.0, f32::max);
+    let seg = (text_w + 24.0).max(56.0).ceil();
+    let (rect, _) = ui.allocate_exact_size(vec2(options.len() as f32 * seg, 34.0), Sense::hover());
     ui.painter().rect(rect, 5.0, PAGE, Stroke::new(1.0, FIELD_LINE), StrokeKind::Inside);
-    for (i, (label, value)) in [(left, true), (right, false)].into_iter().enumerate() {
+    let mut changed = false;
+    for (i, &(option, label)) in options.iter().enumerate() {
         let r = Rect::from_min_size(rect.min + vec2(i as f32 * seg, 0.0), vec2(seg, 34.0));
         let resp = ui.interact(r, ui.id().with(("seg", label)), Sense::click());
-        if resp.clicked() {
-            *left_on = value;
+        if resp.clicked() && *value != option {
+            *value = option;
+            changed = true;
         }
-        let selected = *left_on == value;
+        let selected = *value == option;
         let p = ui.painter();
         if selected {
-            let radius = if i == 0 {
-                CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 }
-            } else {
-                CornerRadius { nw: 0, sw: 0, ne: 5, se: 5 }
+            let radius = CornerRadius {
+                nw: if i == 0 { 5 } else { 0 },
+                sw: if i == 0 { 5 } else { 0 },
+                ne: if i + 1 == options.len() { 5 } else { 0 },
+                se: if i + 1 == options.len() { 5 } else { 0 },
             };
             p.rect_filled(r.shrink(1.0), radius, ACCENT);
-        } else if i == 1 {
+        } else if i > 0 && options[i - 1].0 != *value {
             p.line_segment([r.left_top() + vec2(0.0, 1.0), r.left_bottom() - vec2(0.0, 1.0)], Stroke::new(1.0, FIELD_LINE));
         }
         let color = if selected { WHITE } else if resp.hovered() { SOFT } else { MUTED };
         p.text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(13.0), color);
         resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
+    changed
 }
 
 /// [−] value unit [+] in one field.
@@ -1344,6 +1483,8 @@ enum Icon {
     Eye,
     Signal,
     Bell,
+    Layout,
+    List,
 }
 
 fn draw_icon(p: &egui::Painter, c: egui::Pos2, icon: Icon, color: Color32) {
@@ -1386,6 +1527,15 @@ fn draw_icon(p: &egui::Painter, c: egui::Pos2, icon: Icon, color: Color32) {
             let pts = [(-5.5, 3.0), (-5.0, -1.5), (-3.0, -5.0), (0.0, -6.0), (3.0, -5.0), (5.0, -1.5), (5.5, 3.0), (7.0, 4.5), (-7.0, 4.5)];
             p.add(egui::Shape::closed_line(pts.iter().map(|&(x, y)| c + vec2(x, y)).collect(), s));
             p.circle_filled(c + vec2(0.0, 6.8), 1.5, color);
+        }
+        Icon::Layout => {
+            p.rect_stroke(Rect::from_center_size(c, vec2(17.0, 12.0)), 2.0, s, StrokeKind::Middle);
+            p.rect_filled(Rect::from_min_size(c + vec2(1.5, -3.8), vec2(5.0, 3.5)), 1.0, color);
+        }
+        Icon::List => {
+            for (dy, w) in [(-4.5, 14.0), (0.0, 14.0), (4.5, 9.0)] {
+                p.line_segment([c + vec2(-7.0, dy), c + vec2(w - 7.0, dy)], s);
+            }
         }
     }
 }
@@ -1457,60 +1607,144 @@ fn status_word(r10: R10Status, gs_ok: bool) -> (Color32, &'static str) {
 }
 
 /// Overlay content: status, club and battery on top; last shot (or what's wrong) below.
-fn overlay_ui(p: &egui::Painter, rect: Rect, metric: bool) {
-    let (r10, r10_detail, gs_ok, club, battery, last) = state::with(|s| {
-        (s.r10, s.r10_detail.clone(), s.gspro_connected, s.gspro_club.clone(), s.r10_battery, s.last_shot.clone())
-    });
-    let (color, word) = status_word(r10, gs_ok);
-    p.rect(rect, 8.0, PAGE.gamma_multiply(0.92), Stroke::new(1.0, LINE), StrokeKind::Inside);
+/// Space for the battery at the right of the overlay's status row.
+const OVERLAY_BATTERY_W: f32 = 96.0;
+
+/// What the overlay shows: the status word, the chosen extras and one line with the
+/// chosen values of the last shot (or what's wrong).
+struct OverlayContent {
+    color: Color32,
+    word: &'static str,
+    club: Option<String>,
+    tempo: Option<String>,
+    battery: Option<u8>,
+    line: String,
+    line_color: Color32,
+    one_line: bool,
+    opacity: f32,
+}
+
+impl OverlayContent {
+    /// From the shared status.
+    fn live(style: &OverlayStyle, metric: bool) -> Self {
+        let (r10, r10_detail, gs_ok, club, battery, last) = state::with(|s| {
+            (s.r10, s.r10_detail.clone(), s.gspro_connected, s.gspro_club.clone(), s.r10_battery, s.last_shot.clone())
+        });
+        Self::new(style, metric, (r10, &r10_detail, gs_ok), club.as_deref(), battery, last.as_ref())
+    }
+
+    fn new(
+        style: &OverlayStyle,
+        metric: bool,
+        (r10, r10_detail, gs_ok): (R10Status, &str, bool),
+        club: Option<&str>,
+        battery: Option<u8>,
+        last: Option<&state::LastShot>,
+    ) -> Self {
+        let (color, word) = status_word(r10, gs_ok);
+        let ready = r10 == R10Status::Ready && gs_ok;
+        let tempo = last
+            .and_then(|s| s.tempo)
+            .filter(|_| style.tempo && ready)
+            .map(|t| format!("{} {:.1}:1", tr("Tempo"), t.ratio()));
+        let (line, line_color) = match (last, ready) {
+            (_, false) if r10 != R10Status::Ready => (tr_detail(r10_detail), AMBER),
+            (_, false) => (tr("GSPro not connected").to_string(), AMBER),
+            (Some(s), true) if !s.delivered => (tr("Last shot NOT delivered to GSPro").to_string(), AMBER),
+            (Some(s), true) => {
+                let mut values = shot_values(s, style, metric);
+                // One line: the tempo joins the values instead of sitting next to the battery.
+                if style.one_line {
+                    values.extend(tempo.clone());
+                }
+                (values.join("  ·  "), WHITE)
+            }
+            (None, true) => (tr("Hit away").to_string(), SOFT),
+        };
+        Self {
+            color,
+            word,
+            club: club.filter(|_| style.club).map(club_name),
+            tempo: tempo.filter(|_| !style.one_line),
+            battery: battery.filter(|_| style.battery),
+            line,
+            line_color,
+            one_line: style.one_line,
+            opacity: style.opacity,
+        }
+    }
+
+    /// Panel size at scale 1: two lines at least `OVERLAY_SIZE`, wider for long contents.
+    fn size(&self, ctx: &egui::Context) -> egui::Vec2 {
+        let w = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
+        let extra = |text: &Option<String>, gap: f32| text.as_deref().map_or(0.0, |t| gap + w(t, FontId::proportional(14.0)));
+        let battery = if self.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
+        if self.one_line {
+            let line = if self.line.is_empty() { 0.0 } else { 16.0 + w(&self.line, FontId::proportional(14.0)) };
+            let width = 18.0 + 16.0 + w(self.word, cond(20.0)) + extra(&self.club, 12.0) + line + battery;
+            vec2(width.ceil(), 40.0)
+        } else {
+            let top = 18.0 + 16.0 + w(self.word, cond(24.0)) + extra(&self.club, 12.0) + extra(&self.tempo, 24.0) + battery;
+            let bottom = 18.0 + w(&self.line, FontId::proportional(14.0)) + 14.0;
+            vec2(top.max(bottom).max(OVERLAY_SIZE.x).ceil(), OVERLAY_SIZE.y)
+        }
+    }
+}
+
+/// The chosen values of a shot, e.g. "198.3 km/h", "VLA 16.5°", "7146 rpm".
+fn shot_values(s: &state::LastShot, style: &OverlayStyle, metric: bool) -> Vec<String> {
+    let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
+    let b = &s.ball;
+    let mut values = Vec::new();
+    if style.ball_speed {
+        values.push(format!("{:.1} {unit}", b.speed * factor));
+    }
+    if style.vla {
+        values.push(format!("VLA {}°", num(b.vla, 1)));
+    }
+    if style.hla {
+        values.push(format!("HLA {}°", num(b.hla, 1)));
+    }
+    if style.spin {
+        values.push(format!("{:.0} rpm", b.total_spin));
+    }
+    if style.spin_axis {
+        values.push(format!("{} {}°", tr("Axis"), num(b.spin_axis, 1)));
+    }
+    if let Some(c) = s.club.as_ref().filter(|_| style.club_speed) {
+        values.push(format!("{} {:.1} {unit}", tr("Club"), c.speed * factor));
+    }
+    if let Some(smash) = history::smash(b, s.club.as_ref()).filter(|_| style.smash) {
+        values.push(format!("Smash {smash:.2}"));
+    }
+    values
+}
+
+fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
+    p.rect(rect, 8.0, PAGE.gamma_multiply(c.opacity), Stroke::new(1.0, LINE), StrokeKind::Inside);
     p.rect_filled(
         Rect::from_min_size(rect.min + vec2(1.0, 1.0), vec2(5.0, rect.height() - 2.0)),
         CornerRadius { nw: 7, sw: 7, ne: 0, se: 0 },
-        color,
+        c.color,
     );
 
     let left = rect.left() + 18.0;
-    let top_y = rect.top() + 20.0;
-    p.circle_filled(pos2(left + 4.0, top_y), 5.0, color);
-    let word_r = caps_text(p, pos2(left + 16.0, top_y), egui::Align::Min, word, 24.0, color);
-    if let Some(club) = club.as_deref() {
-        p.text(
-            pos2(word_r.right() + 12.0, top_y),
-            Align2::LEFT_CENTER,
-            club_name(club),
-            FontId::proportional(14.0),
-            SOFT,
-        );
+    let row_y = if c.one_line { rect.center().y } else { rect.top() + 20.0 };
+    p.circle_filled(pos2(left + 4.0, row_y), 5.0, c.color);
+    let size = if c.one_line { 20.0 } else { 24.0 };
+    let mut x = caps_text(p, pos2(left + 16.0, row_y), egui::Align::Min, c.word, size, c.color).right();
+    if let Some(club) = &c.club {
+        x = p.text(pos2(x + 12.0, row_y), Align2::LEFT_CENTER, club, FontId::proportional(14.0), SOFT).right();
     }
-    if let Some(level) = battery {
-        draw_battery(p, pos2(rect.right() - 12.0, top_y), level);
+    if let Some(level) = c.battery {
+        draw_battery(p, pos2(rect.right() - 12.0, row_y), level);
     }
-    if let Some(t) = last.as_ref().and_then(|s| s.tempo).filter(|_| r10 == R10Status::Ready && gs_ok) {
-        p.text(
-            pos2(rect.right() - 96.0, top_y),
-            Align2::RIGHT_CENTER,
-            format!("{} {:.1}:1", tr("Tempo"), t.ratio()),
-            FontId::proportional(14.0),
-            SOFT,
-        );
+    if let Some(tempo) = &c.tempo {
+        let right = rect.right() - if c.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
+        p.text(pos2(right, row_y), Align2::RIGHT_CENTER, tempo, FontId::proportional(14.0), SOFT);
     }
-
-    let bottom_y = rect.bottom() - 20.0;
-    let (line, line_color) = match (&last, r10 == R10Status::Ready && gs_ok) {
-        (_, false) if r10 != R10Status::Ready => (tr_detail(&r10_detail), AMBER),
-        (_, false) => (tr("GSPro not connected").to_string(), AMBER),
-        (Some(s), true) if !s.delivered => (tr("Last shot NOT delivered to GSPro").to_string(), AMBER),
-        (Some(s), true) => {
-            let (v, unit) = if metric { (s.ball.speed * MPH_TO_KMH, "km/h") } else { (s.ball.speed, "mph") };
-            let mut t = format!("{v:.1} {unit}  ·  VLA {}°  ·  {:.0} rpm", num(s.ball.vla, 1), s.ball.total_spin);
-            if let Some(smash) = history::smash(&s.ball, s.club.as_ref()) {
-                t.push_str(&format!("  ·  Smash {smash:.2}"));
-            }
-            (t, WHITE)
-        }
-        (None, true) => (tr("Hit away").to_string(), SOFT),
-    };
-    p.text(pos2(left, bottom_y), Align2::LEFT_CENTER, line, FontId::proportional(14.0), line_color);
+    let line_pos = if c.one_line { pos2(x + 16.0, row_y) } else { pos2(left, rect.bottom() - 20.0) };
+    p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
 }
 
 /// The overlay position as a small screen with eight spots; the middle turns the overlay off.
@@ -1698,6 +1932,7 @@ mod tests {
             (Page::Play, "screenshot-play.png"),
             (Page::Shots, "screenshot-shots.png"),
             (Page::Settings, "screenshot-settings.png"),
+            (Page::Overlay, "screenshot-overlay-settings.png"),
             (Page::Log, "screenshot-log.png"),
         ] {
             let home = std::env::var("HOME").unwrap_or_default();
@@ -1733,7 +1968,9 @@ mod tests {
             .build_ui(|ui| {
                 // Fonts set in one frame apply from the next; draw only once they are there.
                 if ui.ctx().fonts(|f| f.families().contains(&FontFamily::Name("cond".into()))) {
-                    overlay_ui(ui.painter(), ui.max_rect(), true);
+                    let content = OverlayContent::live(&OverlayStyle::default(), true);
+                    let rect = Rect::from_min_size(ui.max_rect().min, content.size(ui.ctx()));
+                    overlay_ui(ui.painter(), rect, &content);
                 } else {
                     setup_style(ui.ctx());
                 }

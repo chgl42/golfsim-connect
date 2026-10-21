@@ -38,7 +38,9 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
 - `src/bin/openlaunch-connect.rs` – **the app** (egui/eframe), styled after GSPro's in-game look
   (navy, tiles, condensed figures, status panel with READY, battery glyph). Layout base size 1000×470 (`BASE_SIZE`);
   larger windows zoom the whole UI uniformly (`apply_window_zoom`, `fit_zoom`), the overlay divides the zoom out
-  (layer transform) so it keeps its size. Window size is saved in the settings (`window_size`).
+  (layer transform) so it keeps its size. The *Overlay* page sets the overlay's position, size, lines, opacity and
+  contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
+  `OverlayContent` builds what both the overlay window and the preview draw. Window size is saved in the settings (`window_size`).
   Text in DIN Condensed (`cond()`) inside boxes/buttons always via `caps_text()`: the capitals sit ~¼ of the font size
   above the middle of the text box; `caps_text` centres the capitals on `pos.y` (measured).
   Controls (buttons, toggles, segments, stepper, cards) are drawn with the painter – see `button()`, `card()`, `toggle()`.
@@ -101,7 +103,7 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
   (1000×470 @2x, demo status from `demo_state()`), then `python3 tools/banner.py .` for the banner.
   `OPENLAUNCH_SCREENSHOT_LANG=de OPENLAUNCH_SCREENSHOT_DIR=<dir>` renders the German UI (check that texts fit).
   Capturing a real window with `screencapture` often fails: wgpu doesn't render occluded windows ("Skipping frame due to occlusion").
-- `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot), `OPENLAUNCH_PAGE=settings|log|shots`
+- `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot), `OPENLAUNCH_PAGE=settings|overlay|log|shots`
   opens another page; `OPENLAUNCH_SCREENSHOT[_OVERLAY]=<png>` saves the visible window and quits.
 
 ## Workflow

@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Overlay page:** choose the overlay's size (75–150 %), one or two lines, how opaque its background is and which
+  values it shows (club, battery, tempo, ball speed, VLA, HLA, spin, spin axis, club speed, smash factor), with a
+  preview. Changes apply at once. The overlay's position moved here from the settings.
+
 ### Fixed
+- A shot sent just as GSPro closed the connection was counted as delivered (and not reported as lost).
+- After a test shot without a connected R10, GSPro was told the launch monitor was ready.
 - Garmin Golf export: the sidespin had the opposite sign of the spin axis, and zero values could be written as `-0`.
 - *All time* on the shots page now includes shots hit while it is open (also in the export).
 - Settings are saved safely: a crash while saving no longer loses them.

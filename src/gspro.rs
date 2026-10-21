@@ -187,6 +187,9 @@ impl Link {
                 if !self.is_connected() {
                     log::gspro("⚠️  Shot dropped – not connected to GSPro.");
                     record_shot(ball, club, tempo, false, 0, test);
+                    if test {
+                        self.ready = was_ready;
+                    }
                     return;
                 }
                 if !was_ready {
@@ -208,6 +211,13 @@ impl Link {
                     self.awaiting_shot_ack = false;
                 }
                 record_shot(ball, club, tempo, delivered, self.shot_number, test);
+                // A test shot doesn't make the launch monitor ready (e.g. no R10 connected).
+                if test && !was_ready {
+                    self.ready = false;
+                    if self.is_connected() {
+                        self.send_heartbeat();
+                    }
+                }
             }
         }
     }
@@ -291,7 +301,9 @@ impl Link {
         match result {
             Ok(()) => {
                 self.wait_for_reply();
-                true
+                // Writing to a socket GSPro just closed succeeds; the close only shows up while
+                // reading the reply, which drops the stream.
+                self.stream.is_some()
             }
             Err(e) => {
                 log::gspro(&format!("Lost connection to GSPro ({e}) – reconnecting …"));
@@ -444,6 +456,22 @@ pub fn drain_json_values(buf: &mut Vec<u8>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test shot – here to a connection GSPro has just closed – is not delivered and
+    /// leaves the launch monitor's readiness as it was.
+    #[test]
+    fn test_shot_keeps_the_readiness() {
+        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut link = Link::new(listener.local_addr().unwrap().to_string(), false);
+        link.ensure_connected();
+        assert!(link.is_connected());
+        drop(listener.accept().unwrap());
+        let (ball, club) = crate::engine::test_shot();
+        link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: true });
+        assert_eq!(state::with(|s| s.last_shot.as_ref().map(|s| s.delivered)), Some(false));
+        assert!(!link.ready);
+    }
 
     #[test]
     fn drains_concatenated_and_partial_responses() {
