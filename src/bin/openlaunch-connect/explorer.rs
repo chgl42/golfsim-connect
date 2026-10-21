@@ -1,11 +1,11 @@
 //! SHOTS page: the shots explorer. Pages of tiles (table, details) on a grid of near-square
 //! cells; the filter and the selection are shared by all tiles.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use openlaunch_connect::flight::{self, Flight};
 use openlaunch_connect::history::Stat;
-use openlaunch_connect::settings::{ExplorerPage, Tile, TileKind, TileSize};
+use openlaunch_connect::settings::{ExplorerPage, Metric, Tile, TileKind, TileSize};
 
 use super::*;
 
@@ -15,12 +15,15 @@ const GAP: f32 = 8.0;
 const CELL_TARGET: f32 = 170.0;
 const ROW_H: f32 = 21.0;
 /// Club colours, in the order the clubs were first used.
-const CLUB_COLORS: [Color32; 6] = [
+const CLUB_COLORS: [Color32; 9] = [
     AMBER,
     ICON,
     Color32::from_rgb(0x4f, 0xd1, 0xc5),
     Color32::from_rgb(0xe0, 0x7b, 0xd8),
     GREEN,
+    Color32::from_rgb(0xff, 0x8a, 0x65),
+    Color32::from_rgb(0xb3, 0x9d, 0xff),
+    Color32::from_rgb(0xf4, 0xe0, 0x6d),
     LABEL,
 ];
 
@@ -42,6 +45,24 @@ pub(super) struct ExplorerState {
     selected: BTreeSet<Key>,
     /// Shot shown in the details tiles (the last one clicked).
     focus: Option<Key>,
+    /// Estimated flight of every shot seen, computed once.
+    flights: HashMap<Key, FlightSummary>,
+}
+
+/// The estimated flight values the tiles use (`flight::fly` without the path).
+#[derive(Clone, Copy)]
+struct FlightSummary {
+    carry: f64,
+    total: f64,
+    carry_side: f64,
+    total_side: f64,
+    apex: f64,
+}
+
+impl From<&Flight> for FlightSummary {
+    fn from(f: &Flight) -> Self {
+        Self { carry: f.carry, total: f.total, carry_side: f.carry_side, total_side: f.total_side, apex: f.apex }
+    }
 }
 
 /// Grid of near-square cells filling `size`: columns, rows and the cell size.
@@ -83,6 +104,8 @@ fn kind_name(kind: TileKind) -> &'static str {
     match kind {
         TileKind::Table => tr("Table"),
         TileKind::Details => tr("Details"),
+        TileKind::Dispersion => tr("Dispersion"),
+        TileKind::Scatter => tr("Correlation"),
     }
 }
 
@@ -115,6 +138,8 @@ enum Edit {
     Kind(usize, TileKind),
     Size(usize, TileSize),
     Averages(usize, bool),
+    Total(usize, bool),
+    Axes(usize, Metric, Metric),
     Move(usize, isize),
     Remove(usize),
 }
@@ -284,6 +309,10 @@ impl App {
         if let Some(list) = &mut export {
             list.extend(shown.iter().map(|s| (*s).clone()));
         }
+        let flights: Vec<FlightSummary> = shown
+            .iter()
+            .map(|s| *ex.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball))))
+            .collect();
 
         // Second row: the filter and what to do with the selection, or the page while arranging.
         let mut exclude: Option<bool> = None;
@@ -363,7 +392,14 @@ impl App {
                 let min = grid_rect.min + vec2(c as f32 * (cell.x + GAP), r as f32 * (cell.y + GAP));
                 let size = vec2(w as f32 * cell.x + (w - 1) as f32 * GAP, h as f32 * cell.y + (h - 1) as f32 * GAP);
                 let rect = Rect::from_min_size(min, size);
-                let ctx = TileCtx { shown: &shown, selected: &ex.selected, color_of: &color_of, units, all_time: self.all_time };
+                let ctx = TileCtx {
+                    shown: &shown,
+                    flights: &flights,
+                    selected: &ex.selected,
+                    color_of: &color_of,
+                    units,
+                    all_time: self.all_time,
+                };
                 tile_ui(ui, rect, i, tile, ex.arrange, page_tiles.len(), &ctx, focus, &mut edits, &mut clicked);
             }
         });
@@ -386,6 +422,8 @@ impl App {
                     Edit::Kind(i, kind) => tiles[i].kind = kind,
                     Edit::Size(i, size) => tiles[i].size = size,
                     Edit::Averages(i, on) => tiles[i].averages = on,
+                    Edit::Total(i, on) => tiles[i].total = on,
+                    Edit::Axes(i, x, y) => (tiles[i].x, tiles[i].y) = (x, y),
                     Edit::Move(i, by) => {
                         let j = i.saturating_add_signed(by);
                         if j < tiles.len() {
@@ -430,6 +468,8 @@ impl App {
 /// What every tile draws from.
 struct TileCtx<'a> {
     shown: &'a [&'a ShotRecord],
+    /// Estimated flight of each shot shown, in the same order.
+    flights: &'a [FlightSummary],
     selected: &'a BTreeSet<Key>,
     color_of: &'a dyn Fn(&Option<String>) -> Color32,
     units: Units,
@@ -490,17 +530,36 @@ fn tile_ui(
             }
         });
     } else {
-        head_ui.label(RichText::new(kind_name(tile.kind).to_uppercase()).font(cond(14.0)).color(LABEL).extra_letter_spacing(1.2));
-        if tile.kind == TileKind::Table {
-            head_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // Narrow tiles with a switch in the header leave out the title; the switch says enough.
+        let switch = matches!(tile.kind, TileKind::Table | TileKind::Dispersion);
+        if !switch || rect.width() >= 250.0 {
+            head_ui.label(RichText::new(kind_name(tile.kind).to_uppercase()).font(cond(14.0)).color(LABEL).extra_letter_spacing(1.2));
+        }
+        head_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match tile.kind {
+            TileKind::Table => {
                 for (on, label) in [(true, tr("Averages")), (false, tr("Shots"))] {
                     let color = if tile.averages == on { WHITE } else { MUTED };
                     if link(ui, label, color).clicked() && tile.averages != on {
                         edits.push(Edit::Averages(i, on));
                     }
                 }
-            });
-        }
+            }
+            TileKind::Dispersion => {
+                for (on, label) in [(true, tr("Total")), (false, tr("Carry"))] {
+                    let color = if tile.total == on { WHITE } else { MUTED };
+                    if link(ui, label, color).clicked() && tile.total != on {
+                        edits.push(Edit::Total(i, on));
+                    }
+                }
+            }
+            TileKind::Scatter => {
+                if let Some(r) = correlation(ctx, tile.x, tile.y) {
+                    ui.label(RichText::new(format!("r = {r:.2}")).size(12.5).color(SOFT))
+                        .on_hover_text(tr("Correlation of the two values (−1 to 1) over the shots shown, excluded ones left out"));
+                }
+            }
+            TileKind::Details => {}
+        });
     }
 
     let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -513,7 +572,342 @@ fn tile_ui(
             }
         }
         TileKind::Details => details(&mut body_ui, focus, ctx),
+        TileKind::Dispersion => {
+            if let Some(k) = dispersion(&mut body_ui, i, tile.total, ctx) {
+                *clicked = Some(k);
+            }
+        }
+        TileKind::Scatter => {
+            if let Some(k) = scatter(&mut body_ui, i, tile, ctx, edits) {
+                *clicked = Some(k);
+            }
+        }
     }
+}
+
+/// A value of a shot in the units shown; `None` where the shot doesn't have it.
+fn metric_value(m: Metric, s: &ShotRecord, f: &FlightSummary, u: Units) -> Option<f64> {
+    let c = s.club.as_ref();
+    Some(match m {
+        Metric::BallSpeed => u.speed(s.ball.speed),
+        Metric::ClubSpeed => u.speed(c?.speed),
+        Metric::Smash => s.smash()?,
+        Metric::Vla => s.ball.vla,
+        Metric::Hla => s.ball.hla,
+        Metric::Spin => s.ball.total_spin,
+        Metric::SpinAxis => s.ball.spin_axis,
+        Metric::AngleOfAttack => c?.angle_of_attack,
+        Metric::Path => c?.path,
+        Metric::FaceToTarget => c?.face_to_target,
+        Metric::FaceToPath => c?.face_to_target - c?.path,
+        Metric::Carry => u.dist(f.carry),
+        Metric::Total => u.dist(f.total),
+        Metric::Side => u.dist(f.total_side),
+        Metric::Apex => u.dist(f.apex),
+        Metric::Tempo => s.tempo?.ratio(),
+    })
+}
+
+/// Name of a value with its unit; estimated ones are marked with *.
+fn metric_label(m: Metric, u: Units) -> String {
+    let (name, unit) = match m {
+        Metric::BallSpeed => (tr("Ball Speed"), u.speed_unit()),
+        Metric::ClubSpeed => (tr("Club Speed"), u.speed_unit()),
+        Metric::Smash => (tr("Smash Factor"), ""),
+        Metric::Vla => ("VLA", "°"),
+        Metric::Hla => ("HLA", "°"),
+        Metric::Spin => (tr("Total Spin"), "rpm"),
+        Metric::SpinAxis => (tr("Spin Axis"), "°"),
+        Metric::AngleOfAttack => (tr("Club AoA"), "°"),
+        Metric::Path => (tr("Club Path"), "°"),
+        Metric::FaceToTarget => (tr("Face to Target"), "°"),
+        Metric::FaceToPath => (tr("Face to Path"), "°"),
+        Metric::Carry => return format!("{}* ({})", tr("Carry"), u.dist_unit()),
+        Metric::Total => return format!("{}* ({})", tr("Total"), u.dist_unit()),
+        Metric::Side => return format!("{}* ({})", tr("Side"), u.dist_unit()),
+        Metric::Apex => return format!("{}* ({})", tr("Apex"), u.dist_unit()),
+        Metric::Tempo => (tr("Tempo"), ""),
+    };
+    if unit.is_empty() { name.to_string() } else { format!("{name} ({unit})") }
+}
+
+/// Decimals a value is shown with.
+fn metric_digits(m: Metric) -> usize {
+    match m {
+        Metric::Smash => 2,
+        Metric::Spin | Metric::Carry | Metric::Total | Metric::Side | Metric::Apex => 0,
+        _ => 1,
+    }
+}
+
+/// A shot drawn as a dot in a chart.
+struct Dot {
+    pos: egui::Pos2,
+    color: Color32,
+    selected: bool,
+    excluded: bool,
+    key: Key,
+    tip: String,
+}
+
+/// Draw the dots (selected ones on top); hovering shows the shot, a click returns it.
+fn draw_dots(ui: &mut egui::Ui, id: egui::Id, rect: Rect, dots: &[Dot]) -> Option<Key> {
+    let resp = ui.interact(rect, id, Sense::click());
+    let p = ui.painter_at(rect);
+    for selected in [false, true] {
+        for d in dots.iter().filter(|d| d.selected == selected) {
+            let alpha = if d.excluded { 0.3 } else { 1.0 };
+            if d.selected {
+                p.circle(d.pos, 5.5, d.color.gamma_multiply(alpha), Stroke::new(2.0, WHITE));
+            } else {
+                p.circle(d.pos, 3.8, d.color.gamma_multiply(alpha), Stroke::new(1.0, PAGE));
+            }
+        }
+    }
+    let near = resp.hover_pos().and_then(|at| {
+        dots.iter()
+            .map(|d| (d, d.pos.distance(at)))
+            .filter(|(_, dist)| *dist <= 9.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(d, _)| d)
+    });
+    let clicked = resp.clicked();
+    if let Some(d) = near {
+        p.circle_stroke(d.pos, 7.5, Stroke::new(1.0, SOFT));
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&d.tip);
+        if clicked {
+            return Some(d.key.clone());
+        }
+    }
+    None
+}
+
+/// Mean (cross) and ±1 standard deviation (dashed ellipse) of each club's points that count.
+fn draw_spread(p: &egui::Painter, groups: &[(Color32, Vec<egui::Pos2>)]) {
+    for (color, pts) in groups {
+        if pts.is_empty() {
+            continue;
+        }
+        let n = pts.len() as f32;
+        let mean = pts.iter().fold(egui::Vec2::ZERO, |a, q| a + q.to_vec2()) / n;
+        if pts.len() > 1 {
+            let var = pts.iter().fold(egui::Vec2::ZERO, |a, q| {
+                let d = q.to_vec2() - mean;
+                a + vec2(d.x * d.x, d.y * d.y)
+            }) / (n - 1.0);
+            let r = vec2(var.x.sqrt().max(2.0), var.y.sqrt().max(2.0));
+            let ring: Vec<egui::Pos2> = (0..=48)
+                .map(|k| {
+                    let a = k as f32 / 48.0 * std::f32::consts::TAU;
+                    (mean + vec2(a.cos() * r.x, a.sin() * r.y)).to_pos2()
+                })
+                .collect();
+            p.extend(egui::Shape::dashed_line(&ring, Stroke::new(1.3, *color), 5.0, 4.0));
+        }
+        let c = mean.to_pos2();
+        p.line_segment([c - vec2(7.0, 0.0), c + vec2(7.0, 0.0)], Stroke::new(2.0, WHITE));
+        p.line_segment([c - vec2(0.0, 7.0), c + vec2(0.0, 7.0)], Stroke::new(2.0, WHITE));
+        p.circle_filled(c, 3.0, *color);
+    }
+}
+
+/// Points of the shots that count, grouped by club in the order of the clubs.
+fn club_groups(ctx: &TileCtx, mut at: impl FnMut(usize) -> Option<egui::Pos2>) -> Vec<(Color32, Vec<egui::Pos2>)> {
+    let mut groups: Vec<(Option<String>, Color32, Vec<egui::Pos2>)> = Vec::new();
+    for (n, s) in ctx.shown.iter().enumerate() {
+        if s.excluded {
+            continue;
+        }
+        let Some(q) = at(n) else { continue };
+        match groups.iter_mut().find(|g| g.0 == s.club_code) {
+            Some(g) => g.2.push(q),
+            None => groups.push((s.club_code.clone(), (ctx.color_of)(&s.club_code), vec![q])),
+        }
+    }
+    groups.into_iter().map(|(_, c, pts)| (c, pts)).collect()
+}
+
+/// Landing points (or where the balls stopped) from above, on a range. Returns the shot clicked.
+fn dispersion(ui: &mut egui::Ui, i: usize, total: bool, ctx: &TileCtx) -> Option<Key> {
+    let rect = ui.available_rect_before_wrap();
+    let u = ctx.units;
+    let at = |f: &FlightSummary| if total { (u.dist(f.total_side), u.dist(f.total)) } else { (u.dist(f.carry_side), u.dist(f.carry)) };
+    let pts: Vec<(f64, f64)> = ctx.flights.iter().map(at).collect();
+    // Distance lines every 25 (m or yd) around the shots; the width follows the widest shot.
+    let step = 25.0;
+    let (near, far) = pts.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &(_, d)| (lo.min(d), hi.max(d)));
+    let (y0, y1) = if pts.is_empty() { (0.0, 250.0) } else { (((near - 15.0) / step).floor().max(0.0) * step, ((far + 10.0) / step).ceil() * step) };
+    let half = pts.iter().fold(20.0_f64, |m, &(x, _)| m.max(x.abs() * 1.25));
+    let pos = |x: f64, y: f64| {
+        pos2(
+            rect.center().x + (x / half) as f32 * rect.width() / 2.0,
+            rect.bottom() - ((y - y0) / (y1 - y0)) as f32 * rect.height(),
+        )
+    };
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 4.0, Color32::from_rgb(0x23, 0x50, 0x2f));
+    let fairway = Rect::from_x_y_ranges(rect.center().x - rect.width() / 4.0..=rect.center().x + rect.width() / 4.0, rect.y_range());
+    p.rect_filled(fairway, 0.0, Color32::from_rgb(0x2c, 0x5c, 0x37));
+    let grass = Color32::from_rgb(0xcf, 0xe3, 0xd4);
+    p.line_segment([pos2(rect.center().x, rect.top()), pos2(rect.center().x, rect.bottom())], Stroke::new(1.0, grass.gamma_multiply(0.35)));
+    let mut d = y0;
+    while d <= y1 {
+        let y = pos(0.0, d).y;
+        let major = (d / (2.0 * step)).fract() == 0.0;
+        p.line_segment([pos2(rect.left(), y), pos2(rect.right(), y)], Stroke::new(1.0, if major { Color32::from_rgb(0x5d, 0x8f, 0x6a) } else { Color32::from_rgb(0x3f, 0x6b, 0x4a) }));
+        if d > y0 {
+            p.text(pos2(rect.left() + 4.0, y - 2.0), Align2::LEFT_BOTTOM, format!("{d:.0} {}", u.dist_unit()), FontId::proportional(10.5), grass);
+        }
+        d += step;
+    }
+    draw_spread(&p, &club_groups(ctx, |n| Some(pos(pts[n].0, pts[n].1))));
+    let what = if total { tr("Total") } else { tr("Carry") };
+    let dots: Vec<Dot> = ctx
+        .shown
+        .iter()
+        .zip(&pts)
+        .map(|(s, &(x, y))| Dot {
+            pos: pos(x, y),
+            color: (ctx.color_of)(&s.club_code),
+            selected: ctx.selected.contains(&key(s)),
+            excluded: s.excluded,
+            key: key(s),
+            tip: format!(
+                "{} · {}\n{}* {y:.0} {} · {}",
+                s.clock(),
+                s.club_code.as_deref().unwrap_or("–"),
+                what,
+                u.dist_unit(),
+                side_text(x, u),
+            ),
+        })
+        .collect();
+    draw_dots(ui, egui::Id::new(("dispersion", i)), rect, &dots)
+}
+
+/// Lateral distance as "12 m R" / "3 yd L" (already in the unit shown).
+fn side_text(v: f64, u: Units) -> String {
+    if v.abs() < 0.5 { format!("0 {}", u.dist_unit()) } else { format!("{:.0} {} {}", v.abs(), u.dist_unit(), if v > 0.0 { "R" } else { "L" }) }
+}
+
+/// Correlation coefficient of two values over the shots shown that count.
+fn correlation(ctx: &TileCtx, x: Metric, y: Metric) -> Option<f64> {
+    let pairs: Vec<(f64, f64)> = ctx
+        .shown
+        .iter()
+        .zip(ctx.flights)
+        .filter(|(s, _)| !s.excluded)
+        .filter_map(|(s, f)| Some((metric_value(x, s, f, ctx.units)?, metric_value(y, s, f, ctx.units)?)))
+        .collect();
+    pearson(&pairs)
+}
+
+fn pearson(pairs: &[(f64, f64)]) -> Option<f64> {
+    if pairs.len() < 3 {
+        return None;
+    }
+    let n = pairs.len() as f64;
+    let (mx, my) = pairs.iter().fold((0.0, 0.0), |(a, b), (x, y)| (a + x / n, b + y / n));
+    let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
+    for (x, y) in pairs {
+        sxy += (x - mx) * (y - my);
+        sxx += (x - mx) * (x - mx);
+        syy += (y - my) * (y - my);
+    }
+    (sxx > 0.0 && syy > 0.0).then(|| sxy / (sxx * syy).sqrt())
+}
+
+/// Two values of the shots against each other, chosen in the tile. Returns the shot clicked.
+fn scatter(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCtx, edits: &mut Vec<Edit>) -> Option<Key> {
+    let u = ctx.units;
+    let (mut x, mut y) = (tile.x, tile.y);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let w = ((ui.available_width() - 36.0) / 2.0).max(40.0);
+        for (axis, value) in [("Y", &mut y), ("X", &mut x)] {
+            ui.label(RichText::new(axis).size(11.0).color(MUTED));
+            egui::ComboBox::from_id_salt(("scatter", i, axis)).width(w).selected_text(RichText::new(metric_label(*value, u)).size(11.5)).show_ui(ui, |ui| {
+                for m in Metric::ALL {
+                    ui.selectable_value(value, m, metric_label(m, u));
+                }
+            });
+        }
+    });
+    if (x, y) != (tile.x, tile.y) {
+        edits.push(Edit::Axes(i, x, y));
+    }
+    ui.add_space(4.0);
+    let rect = ui.available_rect_before_wrap();
+    let values: Vec<Option<(f64, f64)>> = ctx
+        .shown
+        .iter()
+        .zip(ctx.flights)
+        .map(|(s, f)| Some((metric_value(x, s, f, u)?, metric_value(y, s, f, u)?)))
+        .collect();
+    let range = |pick: fn(&(f64, f64)) -> f64| {
+        let (lo, hi) = values.iter().flatten().map(pick).fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        if lo > hi {
+            (0.0, 1.0)
+        } else if hi - lo < 1e-9 {
+            (lo - 1.0, hi + 1.0)
+        } else {
+            let pad = (hi - lo) * 0.08;
+            (lo - pad, hi + pad)
+        }
+    };
+    let ((x0, x1), (y0, y1)) = (range(|v| v.0), range(|v| v.1));
+    let pos = |vx: f64, vy: f64| {
+        pos2(
+            rect.left() + ((vx - x0) / (x1 - x0)) as f32 * rect.width(),
+            rect.bottom() - ((vy - y0) / (y1 - y0)) as f32 * rect.height(),
+        )
+    };
+    let p = ui.painter_at(rect);
+    p.rect(rect, 4.0, PAGE, Stroke::new(1.0, LINE), StrokeKind::Inside);
+    // Zero lines split the chart into quadrants where both signs occur.
+    if x0 < 0.0 && x1 > 0.0 {
+        let zx = pos(0.0, y0).x;
+        p.line_segment([pos2(zx, rect.top()), pos2(zx, rect.bottom())], Stroke::new(1.0, FIELD_LINE));
+    }
+    if y0 < 0.0 && y1 > 0.0 {
+        let zy = pos(x0, 0.0).y;
+        p.line_segment([pos2(rect.left(), zy), pos2(rect.right(), zy)], Stroke::new(1.0, FIELD_LINE));
+    }
+    let (dx, dy) = (metric_digits(x), metric_digits(y));
+    let small = FontId::proportional(10.5);
+    p.text(rect.left_bottom() + vec2(4.0, -2.0), Align2::LEFT_BOTTOM, num(x0, dx), small.clone(), MUTED);
+    p.text(rect.right_bottom() + vec2(-4.0, -2.0), Align2::RIGHT_BOTTOM, num(x1, dx), small.clone(), MUTED);
+    p.text(rect.left_top() + vec2(4.0, 2.0), Align2::LEFT_TOP, num(y1, dy), small, MUTED);
+    if values.iter().all(Option::is_none) {
+        p.text(rect.center(), Align2::CENTER_CENTER, tr("No shots with these values"), FontId::proportional(12.0), MUTED);
+        return None;
+    }
+    draw_spread(&p, &club_groups(ctx, |n| values[n].map(|(vx, vy)| pos(vx, vy))));
+    let dots: Vec<Dot> = ctx
+        .shown
+        .iter()
+        .zip(&values)
+        .filter_map(|(s, v)| {
+            let (vx, vy) = (*v)?;
+            Some(Dot {
+                pos: pos(vx, vy),
+                color: (ctx.color_of)(&s.club_code),
+                selected: ctx.selected.contains(&key(s)),
+                excluded: s.excluded,
+                key: key(s),
+                tip: format!(
+                    "{} · {}\n{}: {}\n{}: {}",
+                    s.clock(),
+                    s.club_code.as_deref().unwrap_or("–"),
+                    metric_label(x, u),
+                    num(vx, dx),
+                    metric_label(y, u),
+                    num(vy, dy),
+                ),
+            })
+        })
+        .collect();
+    draw_dots(ui, egui::Id::new(("scatter", i)), rect, &dots)
 }
 
 /// The shots, latest first; wide tiles show every column. Returns the shot clicked.
@@ -697,6 +1091,8 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
     if let Some(t) = s.tempo {
         values.push((tr("Tempo").into(), format!("{:.1} : 1", t.ratio())));
     }
+    // The tile's width, before the header row could widen the layout.
+    let width = ui.available_width();
     let name = s.club_code.as_deref().map_or(tr("Unknown").to_string(), club_name);
     let time = if ctx.all_time { s.time.get(..16).unwrap_or(&s.time).replace('T', " ") } else { s.clock().to_string() };
     ui.horizontal(|ui| {
@@ -710,10 +1106,9 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
     });
     ui.add_space(2.0);
     // Two columns when there is room.
-    let columns = if ui.available_width() >= 360.0 { 2 } else { 1 };
+    let columns = if width >= 360.0 { 2 } else { 1 };
     let per = values.len().div_ceil(columns);
-    egui::ScrollArea::vertical().id_salt(("details", s.shot_number)).auto_shrink([false, false]).show(ui, |ui| {
-        let width = ui.available_width();
+    egui::ScrollArea::vertical().id_salt(("details", s.shot_number)).auto_shrink([false, false]).max_width(width).show(ui, |ui| {
         let col_w = (width - (columns - 1) as f32 * 18.0) / columns as f32;
         let (rect, _) = ui.allocate_exact_size(vec2(width, per as f32 * 18.0), Sense::hover());
         let p = ui.painter();
@@ -852,13 +1247,26 @@ mod tests {
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
-        let states: [(&str, Setup); 4] = [
+        let states: [(&str, Setup); 5] = [
             ("explorer-averages.png", |app, _| app.explorer.page = 2),
             ("explorer-selection.png", |app, keys| {
                 app.explorer.selected = keys.iter().cloned().collect();
                 app.explorer.focus = keys.last().cloned();
             }),
             ("explorer-arrange.png", |app, _| app.explorer.arrange = true),
+            ("explorer-charts.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(1).map(key).collect());
+                let tile = |kind, size| Tile { kind, size, ..Tile::default() };
+                app.saved.explorer.pages[0].tiles = vec![
+                    tile(TileKind::Dispersion, TileSize::W2H2),
+                    tile(TileKind::Scatter, TileSize::W2H2),
+                    Tile { total: true, ..tile(TileKind::Dispersion, TileSize::W1H2) },
+                    Tile { x: Metric::BallSpeed, y: Metric::Carry, ..tile(TileKind::Scatter, TileSize::W1H1) },
+                    tile(TileKind::Details, TileSize::W1H1),
+                ];
+                app.explorer.selected = keys.iter().take(1).cloned().collect();
+            }),
             ("explorer-reset.png", |app, _| {
                 app.page = Page::Settings;
                 app.saved.explorer.pages.pop();
@@ -884,6 +1292,16 @@ mod tests {
             }
             super::super::tests::save(&harness.render().unwrap(), name);
         }
+    }
+
+    #[test]
+    fn correlation_of_two_series() {
+        let up: Vec<(f64, f64)> = (0..5).map(|k| (f64::from(k), 2.0 * f64::from(k) + 1.0)).collect();
+        assert!((pearson(&up).unwrap() - 1.0).abs() < 1e-9);
+        let down: Vec<(f64, f64)> = up.iter().map(|&(x, y)| (x, -y)).collect();
+        assert!((pearson(&down).unwrap() + 1.0).abs() < 1e-9);
+        assert_eq!(pearson(&up[..2]), None, "too few shots");
+        assert_eq!(pearson(&[(1.0, 2.0), (1.0, 3.0), (1.0, 4.0)]), None, "no spread");
     }
 
     #[test]

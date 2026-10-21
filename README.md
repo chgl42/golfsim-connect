@@ -49,7 +49,8 @@ One app, a stable connection, no phone in the loop.
 - **All shot data the R10 measures**: ball speed, launch angle (VLA), launch direction (HLA), total spin,
   spin axis, back/side spin, club speed, angle of attack, club path, face to target, face to path
 - **Club and handedness from GSPro** shown live, plus **smash factor**
-- **Shot explorer:** pages of tiles you arrange yourself (shots table, averages per club, details of a shot),
+- **Shot explorer:** pages of tiles you arrange yourself (shots table, averages per club, details of a shot,
+  dispersion of the landing points, correlation of any two values),
   a filter by club and a selection shared by all tiles; **estimated carry and total** for every shot
 - **CSV export** in three layouts: OpenLaunch, **Garmin Golf** app or **Awesome Golf** (same columns and units row as theirs)
 - **In-game overlay** on top of GSPro – also in full screen – with status, club, battery and the last shot;

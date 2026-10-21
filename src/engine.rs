@@ -119,7 +119,8 @@ fn demo_loop(tx: &Sender<Cmd>) {
     state::with(|s| {
         s.r10_battery = Some(82);
         s.r10_device = Some("E4:51:2A:7C:19:0B".into());
-        s.session = demo_session();
+        // OPENLAUNCH_DEMO=range: a whole range session to try the shots explorer with.
+        s.session = if std::env::var("OPENLAUNCH_DEMO").as_deref() == Ok("range") { demo_range() } else { demo_session() };
     });
     let _ = tx.send(Cmd::Ready(true));
     thread::sleep(Duration::from_secs(2));
@@ -161,6 +162,60 @@ pub fn demo_session() -> Vec<crate::history::ShotRecord> {
             rec
         })
         .collect()
+}
+
+/// A range session of 59 shots with seven clubs, with realistic spread (the same every time):
+/// face and path vary, start direction and spin axis follow from them.
+#[must_use]
+pub fn demo_range() -> Vec<crate::history::ShotRecord> {
+    // (club, shots, ball mph, VLA, spin, club mph, AoA, path, face to path)
+    let clubs = [
+        ("DR", 10, 145.0, 11.5, 2700.0, 103.0, 1.5, -2.0, 2.5),
+        ("W3", 6, 136.0, 12.0, 3500.0, 97.0, -1.0, -1.5, 2.0),
+        ("I5", 7, 125.0, 13.5, 5000.0, 89.0, -2.5, -1.2, 1.8),
+        ("I7", 10, 117.0, 16.5, 6800.0, 83.0, -3.5, -1.0, 1.5),
+        ("I9", 6, 106.0, 20.0, 8000.0, 76.0, -4.0, -0.8, 1.2),
+        ("PW", 12, 98.0, 24.0, 8800.0, 72.0, -4.5, -0.5, 1.0),
+        ("SW", 8, 80.0, 30.0, 9500.0, 63.0, -5.0, -0.3, 0.8),
+    ];
+    let mut state: u32 = 0x9e37_79b9;
+    // xorshift32 → value in [-1, 1]
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        f64::from(state) / f64::from(u32::MAX) * 2.0 - 1.0
+    };
+    let r1 = |v: f64| (v * 10.0).round() / 10.0;
+    let mut out = Vec::new();
+    for (code, shots, speed, vla, spin, club_speed, aoa, path, f2p) in clubs {
+        for _ in 0..shots {
+            let n = out.len();
+            let strike = 1.0 + 0.025 * next();
+            let path = r1(path + 1.6 * next());
+            let face_to_path = f2p + 1.4 * next();
+            let face = r1(path + face_to_path);
+            let total_spin = (spin * (1.0 + 0.08 * next())).round();
+            let spin_axis = r1(2.2 * face_to_path + 1.5 * next());
+            let ball = mapping::GsBall {
+                speed: r1(speed * strike),
+                spin_axis,
+                total_spin,
+                back_spin: (total_spin * spin_axis.to_radians().cos()).round(),
+                side_spin: (total_spin * spin_axis.to_radians().sin()).round(),
+                hla: r1(0.8 * face + 0.2 * path + 0.6 * next()),
+                vla: r1(vla + 1.5 * next()),
+            };
+            let cs = r1(club_speed * (1.0 + 0.02 * next()));
+            let club = mapping::GsClub { speed: cs, speed_at_impact: cs, angle_of_attack: r1(aoa + 1.2 * next()), face_to_target: face, path };
+            let mut rec = crate::history::ShotRecord::new(ball, Some(club), Some(code.into()), n != 23, n as u32 + 1);
+            let secs = 17 * 3600 + n * 75;
+            rec.time = format!("2026-10-21T{:02}:{:02}:{:02}+02:00", secs / 3600, secs / 60 % 60, secs % 60);
+            rec.tempo = Some(mapping::Tempo { backswing: ((0.81 + 0.05 * next()) * 100.0).round() / 100.0, downswing: 0.27 });
+            out.push(rec);
+        }
+    }
+    out
 }
 
 /// Connect to the R10, forward events, reconnect forever.
@@ -387,4 +442,21 @@ fn handle_shot(cfg: &Config, shot: &tenover::ShotData, tx: &Sender<Cmd>) {
     log::r10(&line);
 
     let _ = tx.send(Cmd::Shot { ball, club, tempo, test: false });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo_range_is_a_full_session() {
+        let shots = demo_range();
+        assert_eq!(shots.len(), 59);
+        assert_eq!(shots, demo_range(), "the same every time");
+        let mut clubs: Vec<_> = shots.iter().filter_map(|s| s.club_code.clone()).collect();
+        clubs.dedup();
+        assert_eq!(clubs, ["DR", "W3", "I5", "I7", "I9", "PW", "SW"]);
+        assert!(shots.windows(2).all(|w| w[0].time < w[1].time), "in order");
+        assert_eq!(shots.iter().filter(|s| !s.delivered).count(), 1);
+    }
 }

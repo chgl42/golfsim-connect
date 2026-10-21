@@ -54,7 +54,7 @@ impl Default for Explorer {
     /// A page with the shots table and the details of a shot, the table on a page of its own,
     /// and the averages per club.
     fn default() -> Self {
-        let tile = |kind, size, averages| Tile { kind, size, averages };
+        let tile = |kind, size, averages| Tile { kind, size, averages, ..Tile::default() };
         Self {
             pages: vec![
                 ExplorerPage {
@@ -77,13 +77,67 @@ pub struct ExplorerPage {
 }
 
 /// One tile: what it shows and how many cells it covers.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Tile {
     pub kind: TileKind,
     pub size: TileSize,
     /// Table: averages per club instead of single shots.
     pub averages: bool,
+    /// Dispersion: where the ball comes to rest instead of where it lands.
+    pub total: bool,
+    /// Scatter: values on the horizontal and vertical axis.
+    pub x: Metric,
+    pub y: Metric,
+}
+
+impl Default for Tile {
+    fn default() -> Self {
+        Self { kind: TileKind::Table, size: TileSize::W2H2, averages: false, total: false, x: Metric::Hla, y: Metric::SpinAxis }
+    }
+}
+
+/// A value of a shot that a scatter tile can plot.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Metric {
+    BallSpeed,
+    ClubSpeed,
+    Smash,
+    Vla,
+    Hla,
+    Spin,
+    SpinAxis,
+    AngleOfAttack,
+    Path,
+    FaceToTarget,
+    FaceToPath,
+    Carry,
+    Total,
+    Side,
+    Apex,
+    Tempo,
+}
+
+impl Metric {
+    pub const ALL: [Self; 16] = [
+        Self::BallSpeed,
+        Self::ClubSpeed,
+        Self::Smash,
+        Self::Vla,
+        Self::Hla,
+        Self::Spin,
+        Self::SpinAxis,
+        Self::AngleOfAttack,
+        Self::Path,
+        Self::FaceToTarget,
+        Self::FaceToPath,
+        Self::Carry,
+        Self::Total,
+        Self::Side,
+        Self::Apex,
+        Self::Tempo,
+    ];
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,10 +147,14 @@ pub enum TileKind {
     Table,
     /// All values of the chosen (or latest) shot.
     Details,
+    /// Landing points from above, with mean and spread per club.
+    Dispersion,
+    /// Two values against each other.
+    Scatter,
 }
 
 impl TileKind {
-    pub const ALL: [Self; 2] = [Self::Table, Self::Details];
+    pub const ALL: [Self; 4] = [Self::Table, Self::Details, Self::Dispersion, Self::Scatter];
 }
 
 /// Tile sizes in cells (width × height), like widgets on a phone, or the whole page.
@@ -333,7 +391,7 @@ mod tests {
     fn explorer_layout_round_trips() {
         let mut s = Settings::default();
         s.explorer.pages[0].name = "Range".into();
-        s.explorer.pages[0].tiles.push(Tile { kind: TileKind::Details, size: TileSize::W1H2, averages: false });
+        s.explorer.pages[0].tiles.push(Tile { kind: TileKind::Details, size: TileSize::W1H2, ..Tile::default() });
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains(r#""size":"w1_h2""#) || json.contains(r#""size":"w1h2""#), "{json}");
         assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), s);
