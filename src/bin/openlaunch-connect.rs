@@ -12,6 +12,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 use openlaunch_connect::engine;
+use openlaunch_connect::flight;
 use openlaunch_connect::gspro::Cmd;
 use openlaunch_connect::history::{self, ExportFormat, ShotRecord, Stat};
 use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
@@ -24,6 +25,7 @@ use openlaunch_connect::update;
 
 const APP_NAME: &str = "OpenLaunch Connect";
 const MPH_TO_KMH: f64 = 1.609_344;
+const M_TO_YD: f64 = 1.093_613;
 const OVERLAY_TITLE: &str = "OpenLaunch Overlay";
 /// Size the layout is designed for. Larger windows zoom the whole UI uniformly, or, with a fixed
 /// interface size, give the pages more room.
@@ -513,6 +515,16 @@ impl App {
         let metric = self.saved.metric;
         let unit = if metric { "km/h" } else { "mph" };
         let speed = move |mph: f64| if metric { mph * MPH_TO_KMH } else { mph };
+        let dist_unit = if metric { "m" } else { "yd" };
+        let dist = move |m: f64| if metric { m } else { m * M_TO_YD };
+        // Header of an estimated column (marked with *) and what it means.
+        let estimated = tr("Estimated from the launch data (no wind, sea level); GSPro may show other numbers");
+        let header = |ui: &mut egui::Ui, h: &str| {
+            let r = ui.label(RichText::new(h).color(MUTED));
+            if h.contains('*') {
+                r.on_hover_text(estimated);
+            }
+        };
 
         ui.horizontal(|ui| {
             section(ui, tr("BY CLUB"));
@@ -567,10 +579,12 @@ impl App {
                 return;
             }
             egui::ScrollArea::vertical().id_salt("by_club").max_height(130.0).show(ui, |ui| {
-                egui::Grid::new("by_club_grid").num_columns(10).spacing([22.0, 5.0]).striped(true).show(ui, |ui| {
+                egui::Grid::new("by_club_grid").num_columns(12).spacing([14.0, 5.0]).striped(true).show(ui, |ui| {
                     for h in [
                         tr("Club").to_string(),
                         tr("Shots").into(),
+                        format!("{}* ({dist_unit})", tr("Carry")),
+                        format!("{}* ({dist_unit})", tr("Total")),
                         format!("{} ({unit})", tr("Ball")),
                         format!("{} ({unit})", tr("Club")),
                         tr("Smash").into(),
@@ -580,13 +594,15 @@ impl App {
                         tr("Face to Path").into(),
                         tr("Tempo").into(),
                     ] {
-                        ui.label(RichText::new(h).color(MUTED));
+                        header(ui, &h);
                     }
                     ui.end_row();
                     for c in history::club_stats(shots) {
                         let name = c.club_code.as_deref().map_or(tr("Unknown").to_string(), club_name);
                         ui.label(RichText::new(name).color(WHITE));
                         ui.label(c.shots.to_string());
+                        ui.label(fmt(c.carry, 0, &dist));
+                        ui.label(fmt(c.total, 0, &dist));
                         ui.label(fmt(c.ball_speed, 1, &speed));
                         ui.label(fmt(c.club_speed, 1, &speed));
                         ui.label(fmt(c.smash, 2, &id));
@@ -607,10 +623,13 @@ impl App {
         let mut toggled: Option<(String, u32, bool)> = None;
         egui::Frame::new().fill(TILE).inner_margin(Margin::same(10)).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("shots").auto_shrink([false, false]).show(ui, |ui| {
-                egui::Grid::new("shots_grid").num_columns(12).spacing([22.0, 5.0]).striped(true).show(ui, |ui| {
+                let (carry_h, total_h) = (format!("{}*", tr("Carry")), format!("{}*", tr("Total")));
+                egui::Grid::new("shots_grid").num_columns(14).spacing([16.0, 5.0]).striped(true).show(ui, |ui| {
                     for h in [
                         tr("Time"),
                         tr("Club"),
+                        &carry_h,
+                        &total_h,
                         tr("Ball"),
                         "VLA",
                         "HLA",
@@ -622,7 +641,7 @@ impl App {
                         tr("Tempo"),
                         "",
                     ] {
-                        ui.label(RichText::new(h).color(MUTED));
+                        header(ui, h);
                     }
                     ui.end_row();
                     for s in shots.iter().rev() {
@@ -636,6 +655,9 @@ impl App {
                         let time = if s.delivered { cell(time) } else { cell(format!("{time} ✗")).color(AMBER) };
                         ui.label(time).on_hover_text(if s.delivered { tr("Delivered to GSPro") } else { tr("Not delivered to GSPro") });
                         ui.label(cell(s.club_code.as_deref().unwrap_or("–").into()));
+                        let f = flight::fly(&s.ball);
+                        ui.label(cell(format!("{:.0}", dist(f.carry))));
+                        ui.label(cell(format!("{:.0}", dist(f.total))));
                         ui.label(cell(format!("{:.1}", speed(s.ball.speed))));
                         ui.label(cell(num(s.ball.vla, 1)));
                         ui.label(cell(num(s.ball.hla, 1)));
