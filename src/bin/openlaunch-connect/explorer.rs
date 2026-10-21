@@ -182,7 +182,8 @@ impl App {
             if tab.clicked() || tab.secondary_clicked() {
                 self.explorer.page = i;
             }
-            tab.context_menu(|ui| {
+            // Stays open while typing the name; the entries close it themselves.
+            egui::Popup::context_menu(&tab).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                 let mut name = page.name.clone();
                 let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
                 if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(160.0)).changed() {
