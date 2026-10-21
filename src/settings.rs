@@ -28,6 +28,9 @@ pub struct Settings {
     pub check_updates: bool,
     /// Last main window size in logical points (at zoom 1), restored on start.
     pub window_size: Option<[f32; 2]>,
+    /// Interface size: `None` fits the window (which keeps the base aspect ratio), otherwise a fixed
+    /// zoom (1.0–1.5) and a freely sized window whose extra room the pages use.
+    pub ui_scale: Option<f32>,
     /// macOS notifications for problems (battery, R10 errors, lost connections, undelivered shots).
     pub notifications: bool,
     /// UI language (the log stays English).
@@ -131,6 +134,7 @@ impl Default for Settings {
             notifications: true,
             check_updates: true,
             window_size: None,
+            ui_scale: None,
         }
     }
 }

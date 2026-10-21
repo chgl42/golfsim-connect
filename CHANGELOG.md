@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Exclude shots:** *Exclude* next to a shot on the shots page leaves it out of the averages and CSV exports
   (e.g. a misread); it stays listed, struck through, and *Count* takes it back. Kept in the shot history.
 
+### Changed
+- **Interface size** (Settings → Display): *Auto* zooms the interface with the window as before; a fixed size of
+  100, 125 or 150 % lets the window take any shape, and the pages use the extra room (larger tables, log and
+  overlay preview).
+
 ### Fixed
 - A shot sent just as GSPro closed the connection was counted as delivered (and not reported as lost).
 - After a test shot without a connected R10, GSPro was told the launch monitor was ready.
