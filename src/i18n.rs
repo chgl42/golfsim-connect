@@ -59,6 +59,12 @@ pub fn tr(en: &'static str) -> &'static str {
     if german() { de(en).unwrap_or(en) } else { en }
 }
 
+/// Whether `text` is `en` in any of the languages (e.g. a default name the user typed in German).
+#[must_use]
+pub fn is_text(en: &str, text: &str) -> bool {
+    text == en || de(en) == Some(text)
+}
+
 /// Translate a status text that may carry a trailing detail in parentheses,
 /// e.g. "Connected (127.0.0.1:921)" → "Verbunden (127.0.0.1:921)".
 #[must_use]
@@ -194,6 +200,13 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "Range" => "Range",
+        "Ball flight" => "Ballflug",
+        "Data" => "Daten",
+        "3D flight" => "3D-Flug",
+        "Tee" => "Abschlag",
+        "Side view" => "Seite",
+        "Above" => "Oben",
         "No shots saved yet – shots hit with the R10 are saved, test shots aren't." => "Noch keine Schläge gespeichert – gespeichert werden Schläge mit der R10, Testschüsse nicht.",
         "Export {n} shots as CSV" => "{n} Schläge als CSV exportieren",
         "The shots shown, with the filter. Choose the layout:" => "Die gezeigten Schläge, mit Filter. Format wählen:",

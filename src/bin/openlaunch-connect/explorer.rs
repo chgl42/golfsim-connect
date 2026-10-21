@@ -5,7 +5,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use openlaunch_connect::flight::{self, Flight};
 use openlaunch_connect::history::Stat;
-use openlaunch_connect::settings::{ExplorerPage, Metric, Tile, TileKind, TileSize};
+use std::rc::Rc;
+
+use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileSize};
 
 use super::*;
 
@@ -56,6 +58,28 @@ pub(super) struct ExplorerState {
     confirm_remove: Option<usize>,
     /// Estimated flight of every shot seen, computed once.
     flights: HashMap<Key, FlightSummary>,
+    /// Flight paths for the 3D tiles, computed once when such a tile is shown.
+    paths: HashMap<Key, Rc<FlightPath>>,
+}
+
+/// A flight for drawing: points through the air (thinned out) and where the ball comes to rest.
+struct FlightPath {
+    air: Vec<[f32; 3]>,
+    rest: [f32; 3],
+}
+
+impl From<&Flight> for FlightPath {
+    fn from(f: &Flight) -> Self {
+        let last = f.path.len().saturating_sub(1);
+        let air = f
+            .path
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| k % 4 == 0 || *k == last)
+            .map(|(_, p)| [p[0] as f32, p[1] as f32, p[2] as f32])
+            .collect();
+        Self { air, rest: [f.total_side as f32, 0.0, f.total as f32] }
+    }
 }
 
 /// The estimated flight values the tiles use (`flight::fly` without the path).
@@ -115,6 +139,7 @@ fn kind_name(kind: TileKind) -> &'static str {
         TileKind::Details => tr("Details"),
         TileKind::Dispersion => tr("Dispersion"),
         TileKind::Scatter => tr("Correlation"),
+        TileKind::Flight => tr("3D flight"),
     }
 }
 
@@ -131,7 +156,12 @@ fn size_name(size: TileSize) -> &'static str {
 }
 
 fn page_name(page: &ExplorerPage, i: usize) -> String {
-    if page.name.trim().is_empty() { tr("Page {n}").replace("{n}", &(i + 1).to_string()) } else { page.name.clone() }
+    if page.name.trim().is_empty() {
+        return tr("Page {n}").replace("{n}", &(i + 1).to_string());
+    }
+    // The default pages' names (in either language) in the language shown.
+    let name = page.name.trim();
+    DEFAULT_PAGE_NAMES.iter().find(|n| i18n::is_text(n, name)).map_or_else(|| page.name.clone(), |n| tr(n).to_string())
 }
 
 /// Changes to a page from its tab's menu, applied afterwards.
@@ -149,6 +179,7 @@ enum Edit {
     Averages(usize, bool),
     Total(usize, bool),
     Axes(usize, Metric, Metric),
+    Camera(usize, Camera),
     Move(usize, isize),
     /// Dragged onto another tile's place.
     MoveTo(usize, usize),
@@ -223,7 +254,7 @@ impl App {
                 if i > 0 && link(ui, "◀", LABEL).on_hover_text(tr("Move the page left")).clicked() {
                     page_edit = Some(PageEdit::Move(i, -1));
                 }
-                let mut name = page.name.clone();
+                let mut name = if page.name.trim().is_empty() { String::new() } else { page_name(page, i) };
                 let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
                 let w = (text_width(ui, if name.is_empty() { &hint } else { &name }, 13.0) + 24.0).clamp(70.0, 180.0);
                 if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(w)).on_hover_text(tr("Name of the page")).changed() {
@@ -250,7 +281,7 @@ impl App {
             }
             // Stays open while typing the name; the entries close it themselves.
             egui::Popup::context_menu(&tab).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                let mut name = page.name.clone();
+                let mut name = if page.name.trim().is_empty() { String::new() } else { page_name(page, i) };
                 let hint = tr("Page {n}").replace("{n}", &(i + 1).to_string());
                 if ui.add(egui::TextEdit::singleline(&mut name).hint_text(hint).desired_width(160.0)).changed() {
                     page_edit = Some(PageEdit::Rename(i, name));
@@ -368,6 +399,12 @@ impl App {
             .iter()
             .map(|s| *ex.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball))))
             .collect();
+        let page_has_flight = self.saved.explorer.pages.get(ex.page).is_some_and(|p| p.tiles.iter().any(|t| t.kind == TileKind::Flight));
+        let paths: Vec<Rc<FlightPath>> = if page_has_flight {
+            shown.iter().map(|s| ex.paths.entry(key(s)).or_insert_with(|| Rc::new(FlightPath::from(&flight::fly(&s.ball)))).clone()).collect()
+        } else {
+            Vec::new()
+        };
 
         // Second row: the filter and what to do with the selection, or the page while arranging.
         let mut exclude: Option<bool> = None;
@@ -472,6 +509,7 @@ impl App {
                 let ctx = TileCtx {
                     shown: &shown,
                     flights: &flights,
+                    paths: &paths,
                     selected: &ex.selected,
                     color_of: &color_of,
                     units,
@@ -511,6 +549,7 @@ impl App {
                     Edit::Averages(i, on) => tiles[i].averages = on,
                     Edit::Total(i, on) => tiles[i].total = on,
                     Edit::Axes(i, x, y) => (tiles[i].x, tiles[i].y) = (x, y),
+                    Edit::Camera(i, camera) => tiles[i].camera = camera,
                     Edit::Add(kind) => tiles.push(Tile { kind, ..Tile::default() }),
                     Edit::MoveTo(from, to) => {
                         let tile = tiles.remove(from);
@@ -669,6 +708,8 @@ struct TileCtx<'a> {
     shown: &'a [&'a ShotRecord],
     /// Estimated flight of each shot shown, in the same order.
     flights: &'a [FlightSummary],
+    /// Their paths, in the same order (empty unless a 3D tile is on the page).
+    paths: &'a [Rc<FlightPath>],
     selected: &'a BTreeSet<Key>,
     color_of: &'a dyn Fn(&Option<String>) -> Color32,
     units: Units,
@@ -730,8 +771,9 @@ fn tile_ui(
         });
     } else {
         // Narrow tiles with a switch in the header leave out the title; the switch says enough.
-        let switch = matches!(tile.kind, TileKind::Table | TileKind::Dispersion);
-        if !switch || rect.width() >= 250.0 {
+        let switch = matches!(tile.kind, TileKind::Table | TileKind::Dispersion | TileKind::Flight);
+        let wide_enough = if tile.kind == TileKind::Flight { 330.0 } else { 250.0 };
+        if !switch || rect.width() >= wide_enough {
             head_ui.label(RichText::new(kind_name(tile.kind).to_uppercase()).font(cond(14.0)).color(LABEL).extra_letter_spacing(1.2));
         }
         head_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match tile.kind {
@@ -755,6 +797,14 @@ fn tile_ui(
                 if let Some(r) = correlation(ctx, tile.x, tile.y) {
                     ui.label(RichText::new(format!("r = {r:.2}")).size(12.5).color(SOFT))
                         .on_hover_text(tr("Correlation of the two values (−1 to 1) over the shots shown, excluded ones left out"));
+                }
+            }
+            TileKind::Flight => {
+                for camera in Camera::ALL.into_iter().rev() {
+                    let color = if tile.camera == camera { WHITE } else { MUTED };
+                    if link(ui, camera_name(camera), color).clicked() && tile.camera != camera {
+                        edits.push(Edit::Camera(i, camera));
+                    }
                 }
             }
             TileKind::Details => {}
@@ -781,7 +831,173 @@ fn tile_ui(
                 *clicked = Some(k);
             }
         }
+        TileKind::Flight => {
+            if let Some(k) = flight_view(&mut body_ui, i, tile.camera, ctx) {
+                *clicked = Some(k);
+            }
+        }
     }
+}
+
+fn camera_name(camera: Camera) -> &'static str {
+    match camera {
+        Camera::Tee => tr("Tee"),
+        Camera::Side => tr("Side view"),
+        Camera::Above => tr("Above"),
+    }
+}
+
+/// A perspective camera looking from `eye` at `at` (metres; x right, y up, z down the range).
+struct View {
+    eye: [f32; 3],
+    right: [f32; 3],
+    up: [f32; 3],
+    forward: [f32; 3],
+}
+
+impl View {
+    fn new(eye: [f32; 3], at: [f32; 3]) -> Self {
+        let norm = |v: [f32; 3]| {
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+            [v[0] / l, v[1] / l, v[2] / l]
+        };
+        let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let forward = norm([at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]]);
+        let right = norm(cross([0.0, 1.0, 0.0], forward));
+        let up = cross(forward, right);
+        Self { eye, right, up, forward }
+    }
+
+    /// Point on the image plane at distance 1 (x right, y up); `None` behind the camera.
+    fn project(&self, p: [f32; 3]) -> Option<egui::Vec2> {
+        let d = [p[0] - self.eye[0], p[1] - self.eye[1], p[2] - self.eye[2]];
+        let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        let z = dot(self.forward);
+        (z > 0.5).then(|| vec2(dot(self.right) / z, dot(self.up) / z))
+    }
+}
+
+/// The shots' estimated flights in 3D, fitted into the tile. Returns the shot clicked (at its
+/// landing point).
+fn flight_view(ui: &mut egui::Ui, i: usize, camera: Camera, ctx: &TileCtx) -> Option<Key> {
+    let rect = ui.available_rect_before_wrap();
+    let u = ctx.units;
+    // Range shown: a little beyond the longest shot, at least 100 m; half as wide as long, at most 60 m.
+    let far = ctx.paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
+    let apex = ctx.paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
+    let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
+    let view = match camera {
+        Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
+        // From the right of the range, so the distance grows to the right.
+        Camera::Side => View::new([far * 1.3, apex * 0.6, far * 0.5], [0.0, apex * 0.4, far * 0.5]),
+        Camera::Above => View::new([-far * 0.08, far * 0.6, -far * 0.3], [0.0, 0.0, far * 0.55]),
+    };
+    // Fit what matters (the flights and the range's corners) into the tile, same scale both ways.
+    let mut fit: Vec<egui::Vec2> = ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)).collect();
+    // The near corners of the range only from above: from the tee they are right below the camera.
+    let near = if camera == Camera::Above { [[-half, 0.0, 0.0], [half, 0.0, 0.0]] } else { [[0.0, 0.0, 6.0]; 2] };
+    fit.extend([[-half, 0.0, far], [half, 0.0, far], [0.0, apex, far * 0.5]].iter().chain(&near).filter_map(|q| view.project(*q)));
+    let (lo, hi) = fit.iter().fold((vec2(f32::MAX, f32::MAX), vec2(f32::MIN, f32::MIN)), |(lo, hi), q| (lo.min(*q), hi.max(*q)));
+    let inner = rect.shrink(12.0);
+    let (sx, sy) = (inner.width() / (hi.x - lo.x).max(1e-3), inner.height() / (hi.y - lo.y).max(1e-3));
+    // Same scale both ways, but a little stretch where the tile has room: from the tee the
+    // spread is narrow and the flights tall, from the side it is the other way round.
+    let (kx, ky) = match camera {
+        Camera::Tee => (3.0, 1.0),
+        Camera::Side => (1.0, 2.5),
+        Camera::Above => (2.0, 1.0),
+    };
+    let base = sx.min(sy);
+    let scale = vec2(sx.min(base * kx), sy.min(base * ky));
+    let mid = (lo + hi) / 2.0;
+    let to_screen = |q: [f32; 3]| view.project(q).map(|v| pos2(inner.center().x + (v.x - mid.x) * scale.x, inner.center().y - (v.y - mid.y) * scale.y));
+
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 4.0, Color32::from_rgb(0x1a, 0x2f, 0x4d));
+    // Ground: rough, fairway, distance lines, target line.
+    let quad = |x0: f32, x1: f32, z0: f32, z1: f32| -> Vec<egui::Pos2> {
+        // Subdivided along the range so near points stay in front of the camera.
+        let mut pts = Vec::new();
+        for k in 0..=16 {
+            pts.extend(to_screen([x0, 0.0, z0 + (z1 - z0) * k as f32 / 16.0]));
+        }
+        for k in (0..=16).rev() {
+            pts.extend(to_screen([x1, 0.0, z0 + (z1 - z0) * k as f32 / 16.0]));
+        }
+        pts
+    };
+    let rough = Color32::from_rgb(0x22, 0x47, 0x2c);
+    // Everything below the horizon is grass, also right in front of the camera.
+    if let Some(h) = to_screen([0.0, 0.0, far * 1.4]) {
+        p.rect_filled(Rect::from_min_max(pos2(rect.left(), h.y.max(rect.top())), rect.max), 4.0, rough);
+    }
+    p.add(egui::Shape::convex_polygon(quad(-half * 3.0, half * 3.0, 0.0, far * 1.4), rough, Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(quad(-half * 0.45, half * 0.45, 0.0, far * 1.4), Color32::from_rgb(0x2c, 0x5c, 0x37), Stroke::NONE));
+    let line = Color32::from_rgb(0x4b, 0x7a, 0x57);
+    let grass = Color32::from_rgb(0xcf, 0xe3, 0xd4);
+    let step_m = if u.meters { 50.0 } else { 50.0 / M_TO_YD as f32 };
+    let mut k = 1;
+    let mut last_label: Option<egui::Pos2> = None;
+    while step_m * k as f32 <= far {
+        let z = step_m * k as f32;
+        if let (Some(a), Some(b)) = (to_screen([-half, 0.0, z]), to_screen([half, 0.0, z])) {
+            p.line_segment([a, b], Stroke::new(1.0, line));
+            // From the side below the ground, else at the line's end; none where they would crowd.
+            let (at, align) = match camera {
+                Camera::Side => (to_screen([0.0, 0.0, z]).unwrap_or(b) + vec2(0.0, 6.0), Align2::CENTER_TOP),
+                _ => (b + vec2(3.0, 0.0), Align2::LEFT_CENTER),
+            };
+            if last_label.is_none_or(|l| (l.y - at.y).abs() > 13.0 || (l.x - at.x).abs() > 44.0) {
+                p.text(at, align, format!("{} {}", 50 * k, u.dist_unit()), FontId::proportional(10.0), grass);
+                last_label = Some(at);
+            }
+        }
+        k += 1;
+    }
+    if let (Some(a), Some(b)) = (to_screen([0.0, 0.0, 0.0]), to_screen([0.0, 0.0, far * 1.4])) {
+        p.line_segment([a, b], Stroke::new(1.0, grass.gamma_multiply(0.3)));
+    }
+
+    // Flights, selected ones on top; the roll-out dashed on the ground.
+    let mut dots: Vec<Dot> = Vec::new();
+    for selected in [false, true] {
+        for ((s, path), f) in ctx.shown.iter().zip(ctx.paths).zip(ctx.flights) {
+            let is_selected = ctx.selected.contains(&key(s));
+            if is_selected != selected {
+                continue;
+            }
+            let color = (ctx.color_of)(&s.club_code);
+            let (color, width) = match (selected, s.excluded) {
+                (true, _) => (WHITE, 2.4),
+                (false, true) => (color.gamma_multiply(0.25), 1.0),
+                (false, false) => (color.gamma_multiply(0.85), 1.3),
+            };
+            let air: Vec<egui::Pos2> = path.air.iter().filter_map(|q| to_screen(*q)).collect();
+            p.add(egui::Shape::line(air, Stroke::new(width, color)));
+            if let (Some(land), Some(rest)) = (path.air.last().and_then(|q| to_screen(*q)), to_screen(path.rest)) {
+                p.extend(egui::Shape::dashed_line(&[land, rest], Stroke::new(width * 0.8, color), 3.0, 3.0));
+                dots.push(Dot {
+                    pos: land,
+                    color: (ctx.color_of)(&s.club_code),
+                    selected,
+                    excluded: s.excluded,
+                    key: key(s),
+                    tip: format!(
+                        "{} · {}\n{}* {:.0} {} · {}* {:.0} {}",
+                        s.clock(),
+                        s.club_code.as_deref().unwrap_or("–"),
+                        tr("Carry"),
+                        u.dist(f.carry),
+                        u.dist_unit(),
+                        tr("Apex"),
+                        u.dist(f.apex),
+                        u.dist_unit(),
+                    ),
+                });
+            }
+        }
+    }
+    draw_dots(ui, egui::Id::new(("flight", i)), rect, &dots)
 }
 
 /// A value of a shot in the units shown; `None` where the shot doesn't have it.
@@ -1534,7 +1750,7 @@ mod tests {
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
-        let states: [(&str, Setup); 6] = [
+        let states: [(&str, Setup); 7] = [
             ("explorer-averages.png", |app, _| app.explorer.page = 2),
             ("explorer-selection.png", |app, keys| {
                 app.explorer.selected = keys.iter().cloned().collect();
@@ -1556,6 +1772,16 @@ mod tests {
                     tile(TileKind::Details, TileSize::W1H1),
                 ];
                 app.explorer.selected = keys.iter().take(1).cloned().collect();
+            }),
+            ("explorer-flight.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                let tile = |size, camera| Tile { kind: TileKind::Flight, size, camera, ..Tile::default() };
+                app.saved.explorer.pages[0].tiles =
+                    vec![tile(TileSize::W4H2, Camera::Tee), tile(TileSize::W2H1, Camera::Side), tile(TileSize::W2H1, Camera::Above)];
+                app.explorer.hidden_clubs = [Some("W5"), Some("H3"), Some("I6"), Some("I8"), Some("GW"), Some("LW")]
+                    .into_iter()
+                    .map(|c| c.map(String::from))
+                    .collect();
             }),
             ("explorer-export.png", |app, _| app.explorer.export_dialog = true),
             ("explorer-reset.png", |app, _| {
@@ -1605,8 +1831,8 @@ mod tests {
         for _ in 0..3 {
             harness.step();
         }
-        // Default page: table 4×2 on the left, details 2×2 on the right (six columns).
-        let (from, to) = (pos2(250.0, 300.0), pos2(850.0, 300.0));
+        // Default page: table 3×2, dispersion 2×2, flight 1×2 (six columns).
+        let (from, to) = (pos2(250.0, 300.0), pos2(650.0, 300.0));
         let events = [
             egui::Event::PointerMoved(from),
             egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
@@ -1620,7 +1846,7 @@ mod tests {
         }
         harness.step();
         let kinds: Vec<TileKind> = harness.state().saved.explorer.pages[0].tiles.iter().map(|t| t.kind).collect();
-        assert_eq!(kinds, [TileKind::Details, TileKind::Table]);
+        assert_eq!(kinds, [TileKind::Dispersion, TileKind::Table, TileKind::Flight]);
     }
 
     #[test]
@@ -1648,6 +1874,19 @@ mod tests {
             let ring = enclosing_ellipse(mean, &pts).unwrap();
             assert!(pts.iter().all(|q| inside(&ring, *q)), "{pts:?}");
         }
+    }
+
+    #[test]
+    fn default_page_names_follow_the_language() {
+        let page = |name: &str| ExplorerPage { name: name.into(), tiles: Vec::new() };
+        i18n::set(Language::German);
+        assert_eq!(page_name(&page("Ball flight"), 1), "Ballflug");
+        assert_eq!(page_name(&page("Daten"), 2), "Daten");
+        assert_eq!(page_name(&page("Driver only"), 0), "Driver only");
+        assert_eq!(page_name(&page(""), 3), "Seite 4");
+        i18n::set(Language::English);
+        assert_eq!(page_name(&page("Ballflug"), 1), "Ball flight", "typed in German, shown in English");
+        assert_eq!(page_name(&page("Daten"), 2), "Data");
     }
 
     #[test]

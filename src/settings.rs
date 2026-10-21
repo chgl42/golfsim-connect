@@ -54,22 +54,41 @@ pub struct Explorer {
 }
 
 impl Default for Explorer {
-    /// A page with the shots table and the details of a shot, the table on a page of its own,
-    /// and the averages per club.
+    /// One row each: the range (table, dispersion, flights from above), the ball flight from the
+    /// tee, the side and above, and the data (table and details of a shot). The names are shown
+    /// translated (see `DEFAULT_PAGE_NAMES`).
     fn default() -> Self {
-        let tile = |kind, size, averages| Tile { kind, size, averages, ..Tile::default() };
+        let tile = |kind, size, camera| Tile { kind, size, camera, ..Tile::default() };
+        let page = |name: &str, tiles| ExplorerPage { name: name.into(), tiles };
         Self {
             pages: vec![
-                ExplorerPage {
-                    name: String::new(),
-                    tiles: vec![tile(TileKind::Table, TileSize::W4H2, false), tile(TileKind::Details, TileSize::W2H2, false)],
-                },
-                ExplorerPage { name: String::new(), tiles: vec![tile(TileKind::Table, TileSize::Page, false)] },
-                ExplorerPage { name: String::new(), tiles: vec![tile(TileKind::Table, TileSize::Page, true)] },
+                page(
+                    DEFAULT_PAGE_NAMES[0],
+                    vec![
+                        tile(TileKind::Table, TileSize::W3H2, Camera::Tee),
+                        tile(TileKind::Dispersion, TileSize::W2H2, Camera::Tee),
+                        tile(TileKind::Flight, TileSize::W1H2, Camera::Above),
+                    ],
+                ),
+                page(
+                    DEFAULT_PAGE_NAMES[1],
+                    vec![
+                        tile(TileKind::Flight, TileSize::W2H2, Camera::Tee),
+                        tile(TileKind::Flight, TileSize::W3H2, Camera::Side),
+                        tile(TileKind::Flight, TileSize::W1H2, Camera::Above),
+                    ],
+                ),
+                page(
+                    DEFAULT_PAGE_NAMES[2],
+                    vec![tile(TileKind::Table, TileSize::W4H2, Camera::Tee), tile(TileKind::Details, TileSize::W2H2, Camera::Tee)],
+                ),
             ],
         }
     }
 }
+
+/// Names of the default pages, in English; the app shows them translated.
+pub const DEFAULT_PAGE_NAMES: [&str; 3] = ["Range", "Ball flight", "Data"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -92,11 +111,38 @@ pub struct Tile {
     /// Scatter: values on the horizontal and vertical axis.
     pub x: Metric,
     pub y: Metric,
+    /// 3D flight: where the camera looks from.
+    pub camera: Camera,
+}
+
+/// Camera of a 3D flight tile.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Camera {
+    /// Behind the tee, looking down the range.
+    #[default]
+    Tee,
+    /// From the side: height over distance.
+    Side,
+    /// From above and behind, at an angle.
+    Above,
+}
+
+impl Camera {
+    pub const ALL: [Self; 3] = [Self::Tee, Self::Side, Self::Above];
 }
 
 impl Default for Tile {
     fn default() -> Self {
-        Self { kind: TileKind::Table, size: TileSize::W2H2, averages: false, total: false, x: Metric::Hla, y: Metric::SpinAxis }
+        Self {
+            kind: TileKind::Table,
+            size: TileSize::W2H2,
+            averages: false,
+            total: false,
+            x: Metric::Hla,
+            y: Metric::SpinAxis,
+            camera: Camera::Tee,
+        }
     }
 }
 
@@ -154,10 +200,12 @@ pub enum TileKind {
     Dispersion,
     /// Two values against each other.
     Scatter,
+    /// The estimated flights in 3D.
+    Flight,
 }
 
 impl TileKind {
-    pub const ALL: [Self; 4] = [Self::Table, Self::Details, Self::Dispersion, Self::Scatter];
+    pub const ALL: [Self; 5] = [Self::Table, Self::Details, Self::Dispersion, Self::Scatter, Self::Flight];
 }
 
 /// Tile sizes in cells (width × height), like widgets on a phone, or the whole page.
