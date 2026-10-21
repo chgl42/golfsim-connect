@@ -191,7 +191,9 @@ impl Settings {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
         let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())
+        // Write a copy and swap it in, so a crash never leaves half a settings file.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
     }
 
     #[must_use]

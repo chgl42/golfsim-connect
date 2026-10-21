@@ -2,7 +2,7 @@
 //! `shots.jsonl` next to the settings, so it survives restarts and can be
 //! exported as CSV.
 
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -89,12 +89,22 @@ pub fn append(rec: &ShotRecord) -> Result<(), String> {
     let mut line = serde_json::to_string(rec).map_err(|e| e.to_string())?;
     line.push('\n');
     let _lock = FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .and_then(|mut f| f.write_all(line.as_bytes()))
-        .map_err(|e| e.to_string())
+    let mut file = std::fs::OpenOptions::new().create(true).read(true).append(true).open(&path).map_err(|e| e.to_string())?;
+    // After a cut-off last line (crash, full disk), start on a new line so this shot stays readable.
+    if ends_mid_line(&mut file).map_err(|e| e.to_string())? {
+        line.insert(0, '\n');
+    }
+    file.write_all(line.as_bytes()).map_err(|e| e.to_string())
+}
+
+fn ends_mid_line(file: &mut std::fs::File) -> std::io::Result<bool> {
+    if file.metadata()?.len() == 0 {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    Ok(last[0] != b'\n')
 }
 
 /// All shots ever recorded (skips unreadable lines).
@@ -266,7 +276,9 @@ pub fn to_garmin_csv(shots: &[ShotRecord]) -> String {
     for s in shots {
         let b = &s.ball;
         let c = s.club.as_ref();
-        let opt = |v: Option<f64>| v.map_or_else(String::new, |v| v.to_string());
+        // `+ 0.0` turns -0.0 into 0.0, so no "-0".
+        let n = |v: f64| (v + 0.0).to_string();
+        let opt = |v: Option<f64>| v.map_or_else(String::new, n);
         let mut fields = vec![
             format_time(&s.time, "%-m/%-d/%y %H:%M:%S"),
             String::new(),
@@ -278,16 +290,16 @@ pub fn to_garmin_csv(shots: &[ShotRecord]) -> String {
             opt(c.map(|c| c.path)),
             opt(c.map(|c| c.face_to_target)),
             opt(c.map(|c| r2(c.face_to_target - c.path))),
-            b.speed.to_string(),
+            n(b.speed),
             opt(s.smash().map(r2)),
-            b.vla.to_string(),
-            b.hla.to_string(),
-            b.back_spin.to_string(),
-            b.side_spin.to_string(),
-            b.total_spin.to_string(),
+            n(b.vla),
+            n(b.hla),
+            n(b.back_spin),
+            // Spin axis and sidespin in the R10's convention (GSPro's inverted), same sign.
+            n(-b.side_spin),
+            n(b.total_spin),
             String::new(),
-            // 0.0 - x instead of -x: no "-0" for a spin axis of exactly 0.
-            (0.0 - b.spin_axis).to_string(),
+            n(-b.spin_axis),
         ];
         fields.resize(cols, String::new());
         if let Some(t) = &s.tempo {
@@ -532,6 +544,19 @@ mod tests {
     }
 
     #[test]
+    fn cut_off_last_line_is_detected() {
+        let path = std::env::temp_dir().join(format!("openlaunch-cutoff-{}.jsonl", std::process::id()));
+        let open = || std::fs::OpenOptions::new().create(true).read(true).append(true).open(&path).unwrap();
+        std::fs::write(&path, "").unwrap();
+        assert!(!ends_mid_line(&mut open()).unwrap(), "empty file");
+        std::fs::write(&path, "{\"a\":1}\n").unwrap();
+        assert!(!ends_mid_line(&mut open()).unwrap(), "complete line");
+        std::fs::write(&path, "{\"a\":1}\n{\"b\":").unwrap();
+        assert!(ends_mid_line(&mut open()).unwrap(), "cut off");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn garmin_export_matches_layout() {
         let csv = to_garmin_csv(&[rec(Some("I7"), 120.0, Some(84.0)), rec(None, 80.0, None)]);
         assert!(csv.starts_with('\u{feff}'));
@@ -546,6 +571,14 @@ mod tests {
         assert_eq!(row[10], "120");
         assert_eq!(row[11], "1.43");
         assert_eq!(row[18], "-1", "spin axis back in R10 convention");
+        assert_eq!(row[15], "-105", "sidespin with the same sign as the spin axis");
+
+        // No "-0" for values that are zero (an R10 spin axis of 0 maps to -0.0).
+        let mut straight = rec(Some("I7"), 120.0, Some(84.0));
+        (straight.ball.spin_axis, straight.ball.side_spin, straight.ball.hla) = (-0.0, -0.0, -0.0);
+        let csv = to_garmin_csv(&[straight]);
+        let row: Vec<&str> = csv.lines().nth(2).unwrap().split(',').collect();
+        assert_eq!([row[13], row[15], row[18]], ["0", "0", "0"]);
         assert_eq!(&row[38..42], ["810.0", "270.0", "", "3.0"]);
     }
 
