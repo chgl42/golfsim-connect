@@ -109,7 +109,11 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
   (1000×470 @2x, demo status from `demo_state()`), then `python3 tools/banner.py .` for the banner.
   `OPENLAUNCH_SCREENSHOT_LANG=de OPENLAUNCH_SCREENSHOT_DIR=<dir>` renders the German UI (check that texts fit).
   Capturing a real window with `screencapture` often fails: wgpu doesn't render occluded windows ("Skipping frame due to occlusion").
-- `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot), `OPENLAUNCH_PAGE=settings|overlay|log|shots`
+- Tests that drive the app (kittest) must not write the real settings: `settings::SAVE` off (`demo_state()` does it;
+  set it yourself in tests that don't call it).
+- `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot; `OPENLAUNCH_DEMO=range`:
+  a 65-shot range session with a full bag of fourteen clubs, `engine::demo_range()`, to try the explorer; on the MacBook:
+  `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=settings|overlay|log|shots`
   opens another page; `OPENLAUNCH_SCREENSHOT[_OVERLAY]=<png>` saves the visible window and quits.
 
 ## Workflow

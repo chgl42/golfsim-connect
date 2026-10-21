@@ -49,7 +49,8 @@ One app, a stable connection, no phone in the loop.
 - **All shot data the R10 measures**: ball speed, launch angle (VLA), launch direction (HLA), total spin,
   spin axis, back/side spin, club speed, angle of attack, club path, face to target, face to path
 - **Club and handedness from GSPro** shown live, plus **smash factor**
-- **Shot explorer:** pages of tiles you arrange yourself (shots table, averages per club, details of a shot),
+- **Shot explorer:** pages of tiles you arrange yourself (shots table, averages per club, details of a shot,
+  dispersion of the landing points, correlation of any two values),
   a filter by club and a selection shared by all tiles; **estimated carry and total** for every shot
 - **CSV export** in three layouts: OpenLaunch, **Garmin Golf** app or **Awesome Golf** (same columns and units row as theirs)
 - **In-game overlay** on top of GSPro – also in full screen – with status, club, battery and the last shot;
@@ -132,10 +133,10 @@ Hover over the status panel for details; the **LOG** page shows everything that 
 e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none.
 
 **Shots page:** every shot of the session (or all time) on pages of tiles – a shots table, the averages and spread
-per club, the details of a shot. *ARRANGE* sets what each tile shows and its size (1×1 up to the whole page);
-right-click a page's tab to rename it, add tiles or pages, or remove it. Click shots to select them in every tile:
+per club, the details of a shot. *CONFIGURE* adds tiles, sets what each tile shows and its size (1×1 up to the
+whole page) and lets you drag tiles into place; while configuring, the page shown is renamed, moved or removed right in its tab. Click shots to select them in every tile:
 show only those, or exclude misreads from the stats and exports. Carry\* and total\* are estimated from the launch data – GSPro doesn't send its own numbers back. *EXPORT CSV*
-writes the shots shown, in the layout picked next to the button: OpenLaunch, Garmin Golf or Awesome Golf.
+writes the shots shown and asks for the layout: OpenLaunch, Garmin Golf or Awesome Golf.
 
 **Overlay:** while GSPro runs in full screen, a small panel on top of it shows the status, club, battery,
 tempo and the last shot – or what's wrong. It ignores the mouse, so it never gets in the way. On the *Overlay*

@@ -15,12 +15,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Estimated carry and total distance** on the shots page, per shot and as averages per club (in metres or
   yards, chosen separately from the speed unit in Settings → Display). GSPro doesn't send its own results back,
   so they are estimated from the launch data (no wind, sea level) and marked with *; GSPro may show other numbers.
-- **Shot explorer** on the shots page: pages of tiles on a grid – a shots table, the averages per club and the
-  details of a shot (all values, including the estimated flight). Right-click a page's tab to rename it, add tiles
-  or pages, or remove it; *Arrange* picks what each tile shows and its size (1×1 up to the whole page), moves and
-  removes tiles. The layout is saved; *Reset shots view* in the settings brings back the default pages (after asking). A filter by
-  club and *Hide excluded* apply to every tile; shots clicked in a table are selected everywhere and can be shown
-  alone, excluded or counted again together. Larger windows (fixed interface size) fit more tiles.
+- **Shot explorer** on the shots page: pages of tiles on a grid – a shots table, the averages per club, the details
+  of a shot (all values, including the estimated flight), the **dispersion** of the landing points (carry or total)
+  from above with the mean and an ellipse around all shots of each club, and a **correlation** chart of any two
+  values (e.g. face to path against spin axis) with the correlation coefficient. *Configure* adds tiles (the empty
+  tile with +), picks what each tile shows and its size (1×1 up to the whole page), lets you drag tiles into place
+  and removes them; the page shown is renamed, moved and removed (after asking) right in its tab, *+* adds a page
+  (also with a right-click on a tab). The layout is saved; *Reset shots view* in the settings brings back the
+  default pages (after asking). A filter by club (a menu when the clubs don't fit in a row; clubs in bag order, each
+  with its own colour) and *Hide excluded* apply to every tile; shots clicked in a table or chart are selected
+  everywhere and can be shown alone, excluded or counted again together. Larger windows (fixed interface size) fit
+  more tiles. *Export CSV* writes the shots shown and asks for the layout in a dialog.
 
 ### Changed
 - **Interface size** (Settings → Display): *Auto* zooms the interface with the window as before; a fixed size of
