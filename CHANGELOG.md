@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+- Values that round to zero are shown as *0.0* instead of *-0.0* (play page, shots page, overlay, CSV exports).
+
 ## [1.0.0] – 2026-10-20
 
 First public release. The 0.x versions were developed privately; this release sums them up.

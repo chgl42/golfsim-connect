@@ -16,6 +16,7 @@ use openlaunch_connect::gspro::Cmd;
 use openlaunch_connect::history::{self, ExportFormat, ShotRecord, Stat};
 use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
+use openlaunch_connect::num;
 use openlaunch_connect::log;
 use openlaunch_connect::settings::{OverlayPos, Settings};
 use openlaunch_connect::state::{self, R10Status};
@@ -321,11 +322,11 @@ impl App {
             ui,
             [
                 (b.map(|b| format!("{:.1}", speed(b.speed))), format!("{} ({unit})", tr("Ball Speed"))),
-                (b.map(|b| format!("{:.1}", b.vla)), "VLA".into()),
-                (b.map(|b| format!("{:.1}", b.hla)), "HLA".into()),
+                (b.map(|b| num(b.vla, 1)), "VLA".into()),
+                (b.map(|b| num(b.hla, 1)), "HLA".into()),
                 (b.map(|b| format!("{:.0}", b.total_spin)), tr("Total Spin").into()),
-                (b.map(|b| format!("{:.1}", b.spin_axis)), tr("Spin Axis").into()),
-                (b.map(|b| format!("{:.0}", b.side_spin)), tr("Side Spin").into()),
+                (b.map(|b| num(b.spin_axis, 1)), tr("Spin Axis").into()),
+                (b.map(|b| num(b.side_spin, 0)), tr("Side Spin").into()),
             ],
         );
         ui.add_space(10.0);
@@ -533,7 +534,7 @@ impl App {
         let fmt = |st: Option<Stat>, digits: usize, f: &dyn Fn(f64) -> f64| {
             st.map_or_else(
                 || "–".to_string(),
-                |st| format!("{:.digits$} ±{:.digits$}", f(st.mean), f(st.sd)),
+                |st| format!("{} ±{}", num(f(st.mean), digits), num(f(st.sd), digits)),
             )
         };
         let id = |v: f64| v;
@@ -606,10 +607,10 @@ impl App {
                         ui.label(time).on_hover_text(if s.delivered { tr("Delivered to GSPro") } else { tr("Not delivered to GSPro") });
                         ui.label(s.club_code.as_deref().unwrap_or("–"));
                         ui.label(format!("{:.1}", speed(s.ball.speed)));
-                        ui.label(format!("{:.1}", s.ball.vla));
-                        ui.label(format!("{:.1}", s.ball.hla));
+                        ui.label(num(s.ball.vla, 1));
+                        ui.label(num(s.ball.hla, 1));
                         ui.label(format!("{:.0}", s.ball.total_spin));
-                        ui.label(format!("{:.1}", s.ball.spin_axis));
+                        ui.label(num(s.ball.spin_axis, 1));
                         ui.label(c.map_or("–".into(), |c| format!("{:.1}", speed(c.speed))));
                         ui.label(s.smash().map_or("–".into(), |v| format!("{v:.2}")));
                         ui.label(c.map_or("–".into(), |c| dir(c.face_to_target - c.path, "O", "C")));
@@ -1497,7 +1498,7 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, metric: bool) {
         (Some(s), true) if !s.delivered => (tr("Last shot NOT delivered to GSPro").to_string(), AMBER),
         (Some(s), true) => {
             let (v, unit) = if metric { (s.ball.speed * MPH_TO_KMH, "km/h") } else { (s.ball.speed, "mph") };
-            let mut t = format!("{v:.1} {unit}  ·  VLA {:.1}°  ·  {:.0} rpm", s.ball.vla, s.ball.total_spin);
+            let mut t = format!("{v:.1} {unit}  ·  VLA {}°  ·  {:.0} rpm", num(s.ball.vla, 1), s.ball.total_spin);
             if let Some(smash) = history::smash(&s.ball, s.club.as_ref()) {
                 t.push_str(&format!("  ·  Smash {smash:.2}"));
             }

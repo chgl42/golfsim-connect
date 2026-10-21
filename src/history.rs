@@ -104,7 +104,7 @@ backswing_s,downswing_s,tempo";
 /// Shots as CSV (speeds in mph, angles in degrees, as sent to GSPro).
 #[must_use]
 pub fn to_csv(shots: &[ShotRecord]) -> String {
-    let opt = |v: Option<f64>, digits: usize| v.map_or_else(String::new, |v| format!("{v:.digits$}"));
+    let opt = |v: Option<f64>, digits: usize| v.map_or_else(String::new, |v| crate::num(v, digits));
     let mut out = String::from(CSV_HEADER);
     out.push('\n');
     for s in shots {
@@ -116,12 +116,12 @@ pub fn to_csv(shots: &[ShotRecord]) -> String {
             s.club_code.clone().unwrap_or_default(),
             s.delivered.to_string(),
             format!("{:.1}", b.speed),
-            format!("{:.1}", b.vla),
-            format!("{:.1}", b.hla),
+            crate::num(b.vla, 1),
+            crate::num(b.hla, 1),
             format!("{:.0}", b.total_spin),
-            format!("{:.1}", b.spin_axis),
-            format!("{:.0}", b.back_spin),
-            format!("{:.0}", b.side_spin),
+            crate::num(b.spin_axis, 1),
+            crate::num(b.back_spin, 0),
+            crate::num(b.side_spin, 0),
             opt(c.map(|c| c.speed), 1),
             opt(c.map(|c| c.angle_of_attack), 1),
             opt(c.map(|c| c.path), 1),
@@ -248,7 +248,8 @@ pub fn to_garmin_csv(shots: &[ShotRecord]) -> String {
             b.side_spin.to_string(),
             b.total_spin.to_string(),
             String::new(),
-            (-b.spin_axis).to_string(),
+            // 0.0 - x instead of -x: no "-0" for a spin axis of exactly 0.
+            (0.0 - b.spin_axis).to_string(),
         ];
         fields.resize(cols, String::new());
         if let Some(t) = &s.tempo {
@@ -277,7 +278,7 @@ const AWESOME_UNITS: &str = ",,,[ft],[mph],[mph],[yd],[yd],[yd],,[deg],[ft],[deg
 #[must_use]
 pub fn to_awesome_golf_csv(shots: &[ShotRecord]) -> String {
     let mut out = format!("{AWESOME_HEADER}\n{AWESOME_UNITS}\n");
-    let f2 = |v: f64| format!("{v:.2}");
+    let f2 = |v: f64| crate::num(v, 2);
     let opt = |v: Option<f64>| v.map_or_else(String::new, f2);
     for s in shots {
         let b = &s.ball;
