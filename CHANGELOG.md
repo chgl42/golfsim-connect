@@ -12,7 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   preview. Changes apply at once. The overlay's position moved here from the settings.
 - **Exclude shots:** select shots on the shots page and *Exclude* them to leave them out of the averages and CSV
   exports (e.g. misreads); they stay listed, struck through, and *Count* takes them back. Kept in the shot history.
-- **Impact graphics in the overlay** (Overlay page → *Impact graphics*, on by default): next to the values, the
+- **Impact graphics in the overlay** (Overlay page → *Impact from the side* / *from above*, each on its own, on by
+  default): next to the values, the
   club head arriving at the angle of attack and the ball leaving at the launch angle (side view), and a broad
   arrow for the club path with a narrow one for the start direction (top view, angles drawn three times larger),
   with the numbers underneath. Small and without numbers in the one-line overlay.

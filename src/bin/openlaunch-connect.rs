@@ -849,7 +849,7 @@ impl App {
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
             let s = &mut style;
-            let items: [(&mut bool, &str); 11] = [
+            let items: [(&mut bool, &str); 12] = [
                 (&mut s.club, tr("Club")),
                 (&mut s.battery, tr("Battery")),
                 (&mut s.tempo, tr("Tempo")),
@@ -860,7 +860,8 @@ impl App {
                 (&mut s.spin_axis, tr("Spin Axis")),
                 (&mut s.club_speed, tr("Club Speed")),
                 (&mut s.smash, tr("Smash Factor")),
-                (&mut s.impact, tr("Impact graphics")),
+                (&mut s.impact_side, tr("Impact from the side")),
+                (&mut s.impact_top, tr("Impact from above")),
             ];
             let body = ui.max_rect();
             let cell_w = body.width() / 2.0;
@@ -1702,6 +1703,8 @@ struct OverlayContent {
 /// What the impact graphics show, in degrees: angle of attack and club path need club data.
 #[derive(Clone, Copy)]
 struct Impact {
+    side: bool,
+    top: bool,
     aoa: Option<f64>,
     vla: f64,
     path: Option<f64>,
@@ -1745,7 +1748,9 @@ impl OverlayContent {
             }
             (None, true) => (tr("Hit away").to_string(), SOFT),
         };
-        let impact = last.filter(|s| style.impact && ready && s.delivered).map(|s| Impact {
+        let impact = last.filter(|s| (style.impact_side || style.impact_top) && ready && s.delivered).map(|s| Impact {
+            side: style.impact_side,
+            top: style.impact_top,
             aoa: s.club.map(|c| c.angle_of_attack),
             vla: s.ball.vla,
             path: s.club.map(|c| c.path),
@@ -1786,7 +1791,8 @@ impl OverlayContent {
 
     /// Room for the two impact graphics on the right (none without them).
     fn graphics_width(&self) -> f32 {
-        if self.impact.is_some() { 2.0 * (impact_panel_width(self.one_line) + 1.0) } else { 0.0 }
+        let count = self.impact.map_or(0, |i| usize::from(i.side) + usize::from(i.top));
+        count as f32 * (impact_panel_width(self.one_line) + 1.0)
     }
 }
 
@@ -1830,14 +1836,15 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
     let graphics = c.graphics_width();
     if let Some(impact) = c.impact {
         let w = impact_panel_width(c.one_line);
-        let side = Rect::from_min_size(pos2(rect.right() - graphics + 1.0, rect.top()), vec2(w, rect.height()));
-        let top = side.translate(vec2(w + 1.0, 0.0));
-        for r in [side, top] {
-            p.line_segment([pos2(r.left() - 0.5, rect.top() + 1.0), pos2(r.left() - 0.5, rect.bottom() - 1.0)], Stroke::new(1.0, LINE));
-        }
         let labels = !c.one_line;
-        impact_side(p, side, impact, labels);
-        impact_top(p, top, impact, labels);
+        let mut x = rect.right() - graphics + 1.0;
+        let panels: [(bool, ImpactGraphic); 2] = [(impact.side, impact_side), (impact.top, impact_top)];
+        for (_, draw) in panels.into_iter().filter(|(on, _)| *on) {
+            let r = Rect::from_min_size(pos2(x, rect.top()), vec2(w, rect.height()));
+            p.line_segment([pos2(r.left() - 0.5, rect.top() + 1.0), pos2(r.left() - 0.5, rect.bottom() - 1.0)], Stroke::new(1.0, LINE));
+            draw(p, r, impact, labels);
+            x += w + 1.0;
+        }
     }
     let rect = Rect::from_min_max(rect.min, pos2(rect.right() - graphics, rect.bottom()));
 
@@ -1861,6 +1868,9 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
     let line_pos = if c.one_line { pos2(x + 16.0, row_y) } else { pos2(left, rect.bottom() - inset) };
     p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
 }
+
+/// Draws one impact graphic into a panel (with or without its caption).
+type ImpactGraphic = fn(&egui::Painter, Rect, Impact, bool);
 
 /// Width of one impact graphic: room for its caption with two lines, small in one line.
 fn impact_panel_width(one_line: bool) -> f32 {
