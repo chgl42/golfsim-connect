@@ -207,6 +207,8 @@ struct App {
     all_time: bool,
     /// Cached contents of the history file (loaded when "All time" is chosen).
     all_shots: Vec<ShotRecord>,
+    /// Session length when `all_shots` was loaded (new shots reload it).
+    all_shots_session: usize,
     export_note: Option<String>,
 }
 
@@ -236,6 +238,7 @@ impl App {
             aspect_locked: None,
             all_time: false,
             all_shots: Vec::new(),
+            all_shots_session: 0,
             export_note: None,
         }
     }
@@ -499,8 +502,9 @@ impl App {
             let before = self.all_time;
             ui.radio_value(&mut self.all_time, false, tr("This session ({n})").replace("{n}", &session.len().to_string()));
             ui.radio_value(&mut self.all_time, true, tr("All time"));
-            if self.all_time && !before {
+            if self.all_time && (!before || self.all_shots_session != session.len()) {
                 self.all_shots = history::load_all();
+                self.all_shots_session = session.len();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(150.0, 30.0), Sense::hover());

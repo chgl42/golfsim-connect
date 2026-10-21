@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Fixed
+- Garmin Golf export: the sidespin had the opposite sign of the spin axis, and zero values could be written as `-0`.
+- *All time* on the shots page now includes shots hit while it is open (also in the export).
+- Settings are saved safely: a crash while saving no longer loses them.
+- A shot is no longer lost when the previous line of the shot history was cut off (e.g. by a crash).
 - Values that round to zero are shown as *0.0* instead of *-0.0* (play page, shots page, overlay, CSV exports).
 
 ## [1.0.0] – 2026-10-20
