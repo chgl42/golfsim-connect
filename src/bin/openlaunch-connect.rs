@@ -600,9 +600,11 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, tr("SHOTS"));
+        // (time, shot number, excluded) of a shot whose switch was clicked, applied after the table.
+        let mut toggled: Option<(String, u32, bool)> = None;
         egui::Frame::new().fill(TILE).inner_margin(Margin::same(10)).show(ui, |ui| {
             egui::ScrollArea::vertical().id_salt("shots").auto_shrink([false, false]).show(ui, |ui| {
-                egui::Grid::new("shots_grid").num_columns(11).spacing([22.0, 5.0]).striped(true).show(ui, |ui| {
+                egui::Grid::new("shots_grid").num_columns(12).spacing([22.0, 5.0]).striped(true).show(ui, |ui| {
                     for h in [
                         tr("Time"),
                         tr("Club"),
@@ -615,30 +617,57 @@ impl App {
                         tr("Smash"),
                         tr("Face to Path"),
                         tr("Tempo"),
+                        "",
                     ] {
                         ui.label(RichText::new(h).color(MUTED));
                     }
                     ui.end_row();
                     for s in shots.iter().rev() {
                         let c = s.club.as_ref();
+                        // Excluded shots stay listed, struck through and dimmed.
+                        let cell = |text: String| {
+                            let text = RichText::new(text);
+                            if s.excluded { text.color(MUTED).strikethrough() } else { text }
+                        };
                         let time = if self.all_time { s.time.get(..16).unwrap_or(&s.time).replace('T', " ") } else { s.clock().to_string() };
-                        let time = if s.delivered { RichText::new(time) } else { RichText::new(format!("{time} ✗")).color(AMBER) };
+                        let time = if s.delivered { cell(time) } else { cell(format!("{time} ✗")).color(AMBER) };
                         ui.label(time).on_hover_text(if s.delivered { tr("Delivered to GSPro") } else { tr("Not delivered to GSPro") });
-                        ui.label(s.club_code.as_deref().unwrap_or("–"));
-                        ui.label(format!("{:.1}", speed(s.ball.speed)));
-                        ui.label(num(s.ball.vla, 1));
-                        ui.label(num(s.ball.hla, 1));
-                        ui.label(format!("{:.0}", s.ball.total_spin));
-                        ui.label(num(s.ball.spin_axis, 1));
-                        ui.label(c.map_or("–".into(), |c| format!("{:.1}", speed(c.speed))));
-                        ui.label(s.smash().map_or("–".into(), |v| format!("{v:.2}")));
-                        ui.label(c.map_or("–".into(), |c| dir(c.face_to_target - c.path, "O", "C")));
-                        ui.label(s.tempo.map_or("–".into(), |t| format!("{:.1}", t.ratio())));
+                        ui.label(cell(s.club_code.as_deref().unwrap_or("–").into()));
+                        ui.label(cell(format!("{:.1}", speed(s.ball.speed))));
+                        ui.label(cell(num(s.ball.vla, 1)));
+                        ui.label(cell(num(s.ball.hla, 1)));
+                        ui.label(cell(format!("{:.0}", s.ball.total_spin)));
+                        ui.label(cell(num(s.ball.spin_axis, 1)));
+                        ui.label(cell(c.map_or("–".into(), |c| format!("{:.1}", speed(c.speed)))));
+                        ui.label(cell(s.smash().map_or("–".into(), |v| format!("{v:.2}"))));
+                        ui.label(cell(c.map_or("–".into(), |c| dir(c.face_to_target - c.path, "O", "C"))));
+                        ui.label(cell(s.tempo.map_or("–".into(), |t| format!("{:.1}", t.ratio()))));
+                        let (label, hint) = if s.excluded {
+                            (tr("Count"), tr("Count this shot in the stats and exports again"))
+                        } else {
+                            (tr("Exclude"), tr("Leave this shot out of the stats and exports (e.g. a misread); it stays listed"))
+                        };
+                        let link = egui::Button::new(RichText::new(label).size(12.0).color(if s.excluded { ICON } else { MUTED })).frame(false);
+                        if ui.add(link).on_hover_text(hint).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            toggled = Some((s.time.clone(), s.shot_number, !s.excluded));
+                        }
                         ui.end_row();
                     }
                 });
             });
         });
+        if let Some((time, number, excluded)) = toggled {
+            let mark = |shots: &mut Vec<ShotRecord>| {
+                for s in shots.iter_mut().filter(|s| s.time == time && s.shot_number == number) {
+                    s.excluded = excluded;
+                }
+            };
+            state::with(|s| mark(&mut s.session));
+            mark(&mut self.all_shots);
+            if let Err(e) = history::set_excluded(&time, number, excluded) {
+                self.export_note = Some(tr("Saving failed: {e}").replace("{e}", &e));
+            }
+        }
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {

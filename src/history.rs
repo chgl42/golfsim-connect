@@ -4,6 +4,7 @@
 
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,9 @@ use crate::settings::Settings;
 
 /// Write shots to disk (off in demo mode, so screenshots don't pollute the history).
 pub static PERSIST: AtomicBool = AtomicBool::new(true);
+
+/// Serialises appending and rewriting `shots.jsonl`.
+static FILE: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShotRecord {
@@ -27,6 +31,9 @@ pub struct ShotRecord {
     /// Swing timing; missing in history files written before 0.9.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tempo: Option<Tempo>,
+    /// Left out of the stats and exports (e.g. a misread); stays in the history.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub excluded: bool,
 }
 
 impl ShotRecord {
@@ -40,6 +47,7 @@ impl ShotRecord {
             ball,
             club,
             tempo: None,
+            excluded: false,
         }
     }
 
@@ -80,6 +88,7 @@ pub fn append(rec: &ShotRecord) -> Result<(), String> {
     }
     let mut line = serde_json::to_string(rec).map_err(|e| e.to_string())?;
     line.push('\n');
+    let _lock = FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut file = std::fs::OpenOptions::new().create(true).read(true).append(true).open(&path).map_err(|e| e.to_string())?;
     // After a cut-off last line (crash, full disk), start on a new line so this shot stays readable.
     if ends_mid_line(&mut file).map_err(|e| e.to_string())? {
@@ -105,6 +114,34 @@ pub fn load_all() -> Vec<ShotRecord> {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
         .unwrap_or_default()
+}
+
+/// Marks the shot with this time and number as excluded (or counts it again) in `shots.jsonl`.
+/// Other lines, unreadable ones included, are kept as they are.
+///
+/// # Errors
+/// Returns a message if the file cannot be read or written.
+pub fn set_excluded(time: &str, shot_number: u32, excluded: bool) -> Result<(), String> {
+    if !PERSIST.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    let path = path().ok_or("HOME not set")?;
+    let _lock = FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut out = String::with_capacity(text.len() + 32);
+    for line in text.lines() {
+        match serde_json::from_str::<ShotRecord>(line) {
+            Ok(mut rec) if rec.time == time && rec.shot_number == shot_number => {
+                rec.excluded = excluded;
+                out.push_str(&serde_json::to_string(&rec).map_err(|e| e.to_string())?);
+            }
+            _ => out.push_str(line),
+        }
+        out.push('\n');
+    }
+    // Write a copy and swap it in, so a crash never leaves a half-written history.
+    let tmp = path.with_extension("jsonl.tmp");
+    std::fs::write(&tmp, out).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
 const CSV_HEADER: &str = "time,shot_number,club,delivered,ball_speed_mph,vla_deg,hla_deg,total_spin_rpm,\
@@ -185,13 +222,14 @@ impl ExportFormat {
         }
     }
 
-    /// File contents.
+    /// File contents, without excluded shots.
     #[must_use]
     pub fn export(self, shots: &[ShotRecord]) -> String {
+        let shots: Vec<ShotRecord> = shots.iter().filter(|s| !s.excluded).cloned().collect();
         match self {
-            Self::OpenLaunch => to_csv(shots),
-            Self::GarminGolf => to_garmin_csv(shots),
-            Self::AwesomeGolf => to_awesome_golf_csv(shots),
+            Self::OpenLaunch => to_csv(&shots),
+            Self::GarminGolf => to_garmin_csv(&shots),
+            Self::AwesomeGolf => to_awesome_golf_csv(&shots),
         }
     }
 }
@@ -380,11 +418,12 @@ pub struct ClubStats {
     pub tempo: Option<Stat>,
 }
 
-/// Per-club statistics, in order of first use.
+/// Per-club statistics of the shots that aren't excluded, in order of first use.
 #[must_use]
 pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
+    let shots: Vec<&ShotRecord> = shots.iter().filter(|s| !s.excluded).collect();
     let mut codes: Vec<Option<String>> = Vec::new();
-    for s in shots {
+    for s in &shots {
         if !codes.contains(&s.club_code) {
             codes.push(s.club_code.clone());
         }
@@ -392,7 +431,7 @@ pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
     codes
         .into_iter()
         .map(|code| {
-            let group: Vec<&ShotRecord> = shots.iter().filter(|s| s.club_code == code).collect();
+            let group: Vec<&ShotRecord> = shots.iter().copied().filter(|s| s.club_code == code).collect();
             let clubs = || group.iter().filter_map(|s| s.club.as_ref());
             ClubStats {
                 shots: group.len(),
@@ -439,7 +478,26 @@ mod tests {
             ball,
             club,
             tempo: club_speed.map(|_| Tempo { backswing: 0.81, downswing: 0.27 }),
+            excluded: false,
         }
+    }
+
+    #[test]
+    fn excluded_shots_are_left_out() {
+        let mut misread = rec(Some("I7"), 41.3, Some(80.0));
+        misread.excluded = true;
+        let shots = [rec(Some("I7"), 120.0, Some(80.0)), misread, rec(Some("DR"), 150.0, None)];
+        let stats = club_stats(&shots);
+        assert_eq!(stats[0].shots, 1);
+        assert_eq!(stats[0].ball_speed.map(|s| s.mean), Some(120.0));
+        for format in ExportFormat::ALL {
+            assert!(!format.export(&shots).contains("41.3"), "{format:?} exports the excluded shot");
+        }
+        // Only excluded shots of a club: no row for it.
+        assert_eq!(club_stats(&shots[1..2]).len(), 0);
+        // The flag is only written when set, and old lines read as not excluded.
+        assert!(!serde_json::to_string(&shots[0]).unwrap().contains("excluded"));
+        assert!(serde_json::to_string(&shots[1]).unwrap().contains("\"excluded\":true"));
     }
 
     #[test]
