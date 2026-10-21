@@ -2234,6 +2234,57 @@ mod tests {
             save(&harness.render().unwrap(), name);
         }
 
+        // The shots explorer with a range session (seven of the fourteen clubs): its default pages,
+        // a page with the correlation charts and averages, and the configure mode.
+        state::with(|s| s.session = engine::demo_range());
+        let first = state::with(|s| s.session.iter().rev().nth(10).map(|r| (r.time.clone(), r.shot_number)));
+        let hidden: std::collections::BTreeSet<Option<String>> =
+            ["W5", "H3", "H4", "I6", "I8", "GW", "LW"].into_iter().map(|c| Some(c.to_string())).collect();
+        let analysis = {
+            use openlaunch_connect::settings::{ExplorerPage, Metric, Tile, TileKind, TileSize};
+            let scatter = |x, y| Tile { kind: TileKind::Scatter, size: TileSize::W2H2, x, y, ..Tile::default() };
+            ExplorerPage {
+                name: "Analysis".into(),
+                tiles: vec![
+                    scatter(Metric::FaceToPath, Metric::SpinAxis),
+                    scatter(Metric::BallSpeed, Metric::Carry),
+                    Tile { kind: TileKind::Table, size: TileSize::W2H2, averages: true, ..Tile::default() },
+                ],
+            }
+        };
+        for (page, configure, name) in [
+            (0, false, "screenshot-shots.png"),
+            (1, false, "screenshot-ball-flight.png"),
+            (2, false, "screenshot-data.png"),
+            (3, false, "screenshot-analysis.png"),
+            (2, true, "screenshot-configure.png"),
+        ] {
+            let mut settings = Settings { overlay: OverlayPos::Off, language, ..Settings::default() };
+            settings.explorer.pages.push(analysis.clone());
+            if configure {
+                // Room on the page for the empty tile that adds tiles.
+                settings.explorer.pages[2].tiles[0].size = openlaunch_connect::settings::TileSize::W3H2;
+            }
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut harness = Harness::builder()
+                .with_size(vec2(1000.0, 470.0))
+                .with_pixels_per_point(2.0)
+                .wgpu()
+                .build_eframe(|cc| {
+                    setup_style(&cc.egui_ctx);
+                    App::new(settings, tx)
+                });
+            let app = harness.state_mut();
+            app.page = Page::Shots;
+            app.show_overlay = false;
+            app.remember_size = false;
+            app.explorer.set_for_screenshot(page, configure, hidden.clone(), first.clone());
+            for _ in 0..6 {
+                harness.step();
+            }
+            save(&harness.render().unwrap(), name);
+        }
+
         // Wide enough for the impact graphics; cropped to the overlay below.
         let drawn = std::rc::Rc::new(std::cell::Cell::new(Rect::ZERO));
         let size_out = drawn.clone();

@@ -741,7 +741,10 @@ fn tile_ui(
     head_ui.spacing_mut().item_spacing.x = 6.0;
     if arrange {
         let mut kind = tile.kind;
-        egui::ComboBox::from_id_salt(("tile-kind", i)).width(90.0).selected_text(kind_name(kind)).show_ui(&mut head_ui, |ui| {
+        // Narrow tiles: a narrower menu and no arrows (tiles can be dragged).
+        let narrow = rect.width() < 230.0;
+        let kind_w = if narrow { (rect.width() - 120.0).max(40.0) } else { 90.0 };
+        egui::ComboBox::from_id_salt(("tile-kind", i)).width(kind_w).selected_text(kind_name(kind)).show_ui(&mut head_ui, |ui| {
             for k in TileKind::ALL {
                 ui.selectable_value(&mut kind, k, kind_name(k));
             }
@@ -763,10 +766,10 @@ fn tile_ui(
             if size != tile.size {
                 edits.push(Edit::Size(i, size));
             }
-            if i + 1 < count && link(ui, "▶", LABEL).on_hover_text(tr("Move later")).clicked() {
+            if !narrow && i + 1 < count && link(ui, "▶", LABEL).on_hover_text(tr("Move later")).clicked() {
                 edits.push(Edit::Move(i, 1));
             }
-            if i > 0 && link(ui, "◀", LABEL).on_hover_text(tr("Move earlier")).clicked() {
+            if !narrow && i > 0 && link(ui, "◀", LABEL).on_hover_text(tr("Move earlier")).clicked() {
                 edits.push(Edit::Move(i, -1));
             }
         });
@@ -1754,6 +1757,18 @@ fn chip(ui: &mut egui::Ui, label: &str, dot: Option<Color32>, on: bool) -> egui:
 fn link(ui: &mut egui::Ui, label: &str, color: Color32) -> egui::Response {
     ui.add(egui::Button::new(RichText::new(label).size(13.0).color(color)).frame(false))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[cfg(test)]
+impl ExplorerState {
+    /// Page shown, configure mode, clubs filtered out and one shot selected, for the README screenshots.
+    pub(super) fn set_for_screenshot(&mut self, page: usize, configure: bool, hidden: BTreeSet<Option<String>>, selected: Option<Key>) {
+        self.page = page;
+        self.arrange = configure;
+        self.hidden_clubs = hidden;
+        self.selected = selected.iter().cloned().collect();
+        self.focus = selected;
+    }
 }
 
 #[cfg(test)]

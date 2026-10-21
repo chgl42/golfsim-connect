@@ -49,12 +49,13 @@ One app, a stable connection, no phone in the loop.
 - **All shot data the R10 measures**: ball speed, launch angle (VLA), launch direction (HLA), total spin,
   spin axis, back/side spin, club speed, angle of attack, club path, face to target, face to path
 - **Club and handedness from GSPro** shown live, plus **smash factor**
-- **Shot explorer:** pages of tiles you arrange yourself (shots table, averages per club, details of a shot,
-  dispersion of the landing points, correlation of any two values, 3D flights),
-  a filter by club and a selection shared by all tiles; **estimated carry and total** for every shot
+- **Shot explorer:** pages of tiles you arrange yourself – shots table, averages per club, details of a shot,
+  dispersion of the landing points, correlation of any two values, 3D flights – with a filter by club and a
+  selection shared by all tiles; **estimated carry, total, apex and side** and the **shot shape** for every shot
 - **CSV export** in three layouts: OpenLaunch, **Garmin Golf** app or **Awesome Golf** (same columns and units row as theirs)
 - **In-game overlay** on top of GSPro – also in full screen – with status, club, battery and the last shot;
-  place it in any corner or at the middle of any edge, choose its size, one or two lines and which values it shows
+  place it in any corner or at the middle of any edge, choose its size, one or two lines and which values it shows;
+  **impact graphics** for angle of attack / launch angle and club path / start direction with the shot shape
 - **Swing tempo** (backswing : downswing, e.g. 3.0 : 1) per shot, per club and in the overlay
 - **R10 battery level** and device warnings (tilted, overheating, radar saturation)
 - **macOS notifications** while GSPro is in front: low battery, R10 errors, lost connections, shots not delivered
@@ -69,7 +70,7 @@ One app, a stable connection, no phone in the loop.
 </p>
 
 <p align="center">
-  <img src="docs/images/screenshot-shots.png" alt="Shots page: the shot explorer with the shots table and the details of a shot" width="80%">
+  <img src="docs/images/screenshot-shots.png" alt="Shots page: the shot explorer's Range page with the shots table, the dispersion and the flights from above" width="80%">
 </p>
 
 <p align="center">
@@ -132,16 +133,13 @@ Hover over the status panel for details; the **LOG** page shows everything that 
 **Swing tempo:** next to the buttons the play page shows the tempo of the last swing (backswing : downswing,
 e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none.
 
-**Shots page:** every shot of the session (or all time) on pages of tiles – a shots table, the averages and spread
-per club, the details of a shot. *CONFIGURE* adds tiles, sets what each tile shows and its size (1×1 up to the
-whole page) and lets you drag tiles into place; while configuring, the page shown is renamed, moved or removed right in its tab. Click shots to select them in every tile:
-show only those, or exclude misreads from the stats and exports. Carry\* and total\* are estimated from the launch data – GSPro doesn't send its own numbers back. *EXPORT CSV*
-writes the shots shown and asks for the layout: OpenLaunch, Garmin Golf or Awesome Golf.
-
 **Overlay:** while GSPro runs in full screen, a small panel on top of it shows the status, club, battery,
 tempo and the last shot – or what's wrong. It ignores the mouse, so it never gets in the way. On the *Overlay*
 page you choose its position (or turn it off), size (75–150 %), one or two lines, how opaque its background is
-and which values it shows; a preview shows the result, and changes apply at once.
+and which values it shows; a preview shows the result, and changes apply at once. The **impact graphics** next to
+the values show the club head arriving at the angle of attack and the ball leaving at the launch angle (side view),
+and the club path (broad arrow) with the start direction and the curving flight of the ball (top view) – angles drawn
+three times larger, the shot shape's name on top.
 
 <p align="center">
   <img src="docs/images/screenshot-overlay-settings.png" alt="Overlay page with layout, contents and a preview" width="80%">
@@ -156,6 +154,50 @@ a lost R10 or GSPro connection and shots that didn't reach GSPro – each at mos
 **Test shot:** click **TEST SHOT IN 3 S** and switch to the GSPro window – a slightly randomised 7-iron
 is sent after three seconds. GSPro only processes shots while its window is active and a ball is teed up
 (range or course, not a menu).
+
+### Shots page – the shot explorer
+
+Every shot of the session (or *all time*) on **pages of tiles**. The app comes with three pages – *Range*, *Ball
+flight* and *Data* – and you can add your own. The tiles:
+
+| Tile | Shows |
+|---|---|
+| **Table** | the shots, latest first, with as many columns as fit (carry\*, total\*, ball and club speed, VLA, HLA, spin, axis, smash, face to path, tempo, shot shape) – or, switched to *Averages*, mean ± spread per club |
+| **Details** | every value of the shot clicked last (or the latest): the R10's data plus estimated carry, total, side, apex, landing angle and the shot shape |
+| **Dispersion** | where the balls landed (*Carry*) or stopped (*Total*), seen from above on a range, with each club's mean and an ellipse around its shots |
+| **Correlation** | any two of 16 values against each other (e.g. face to path against spin axis) with the correlation coefficient *r*; values with a sign are centred on 0, so the quadrants are easy to read |
+| **3D flight** | the estimated flights with the roll-out, from the tee, from the side or from above |
+
+Values marked with \* are estimated from the launch data (no wind, sea level) – GSPro doesn't send its own numbers back.
+The **shot shape** (straight, draw, fade, hook, slice, push, pull, push-draw …) comes from the start direction and
+the spin axis, named for right-handers.
+
+<p align="center">
+  <img src="docs/images/screenshot-ball-flight.png" alt="Ball flight page: 3D flights from the tee, from the side and from above" width="80%">
+</p>
+
+<p align="center">
+  <img src="docs/images/screenshot-data.png" alt="Data page: the shots table and the details of the selected shot" width="80%">
+</p>
+
+<p align="center">
+  <img src="docs/images/screenshot-analysis.png" alt="A page of your own: two correlation charts and the averages per club" width="80%">
+</p>
+
+**Filter and selection:** the club filter (a menu when there are many clubs) and *Hide excluded* apply to every tile.
+Click a shot in a table or a dot in a chart to select it everywhere; then show only the selected shots, or
+*Exclude* misreads from the stats and exports (*Count* takes them back).
+
+**Your own pages:** *CONFIGURE* shows an empty tile with **+** to add tiles, a menu on each tile for what it shows
+and its size (1×1 up to the whole page), and lets you drag tiles into place or remove them (×). The page shown can be
+renamed, moved and removed right in its tab; **+** next to the tabs adds a page. The layout is saved; *Reset shots
+view* in the settings brings back the default pages.
+
+<p align="center">
+  <img src="docs/images/screenshot-configure.png" alt="Configure mode: tile menus, the empty tile with + and the page's tools in its tab" width="80%">
+</p>
+
+*EXPORT CSV* writes the shots shown and asks for the layout: OpenLaunch, Garmin Golf or Awesome Golf.
 
 ## Settings
 
