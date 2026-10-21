@@ -141,6 +141,8 @@ enum Edit {
     Total(usize, bool),
     Axes(usize, Metric, Metric),
     Move(usize, isize),
+    /// Dragged onto another tile's place.
+    MoveTo(usize, usize),
     Remove(usize),
 }
 
@@ -383,11 +385,12 @@ impl App {
                 ui.painter().text(
                     area.center(),
                     Align2::CENTER_CENTER,
-                    tr("No tiles on this page – add some with ARRANGE."),
+                    tr("No tiles on this page – right-click the page's tab to add some."),
                     FontId::proportional(13.0),
                     MUTED,
                 );
             }
+            let mut rects: Vec<Rect> = Vec::new();
             for (i, (tile, &(c, r, w, h))) in page_tiles.iter().zip(&spots).enumerate() {
                 let min = grid_rect.min + vec2(c as f32 * (cell.x + GAP), r as f32 * (cell.y + GAP));
                 let size = vec2(w as f32 * cell.x + (w - 1) as f32 * GAP, h as f32 * cell.y + (h - 1) as f32 * GAP);
@@ -401,6 +404,10 @@ impl App {
                     all_time: self.all_time,
                 };
                 tile_ui(ui, rect, i, tile, ex.arrange, page_tiles.len(), &ctx, focus, &mut edits, &mut clicked);
+                rects.push(rect);
+            }
+            if ex.arrange {
+                drag_tiles(ui, &rects, &page_tiles, &mut edits);
             }
         });
 
@@ -424,6 +431,10 @@ impl App {
                     Edit::Averages(i, on) => tiles[i].averages = on,
                     Edit::Total(i, on) => tiles[i].total = on,
                     Edit::Axes(i, x, y) => (tiles[i].x, tiles[i].y) = (x, y),
+                    Edit::MoveTo(from, to) => {
+                        let tile = tiles.remove(from);
+                        tiles.insert(to.min(tiles.len()), tile);
+                    }
                     Edit::Move(i, by) => {
                         let j = i.saturating_add_signed(by);
                         if j < tiles.len() {
@@ -461,6 +472,40 @@ impl App {
         }
         if let Some(list) = export {
             self.export_note = Some(export_csv(&list, self.saved.export_format));
+        }
+    }
+}
+
+/// While arranging, tiles are dragged by their body onto another tile's place. The tile under
+/// the pointer is outlined, a label follows the pointer.
+fn drag_tiles(ui: &mut egui::Ui, rects: &[Rect], tiles: &[Tile], edits: &mut Vec<Edit>) {
+    let pointer = ui.ctx().pointer_interact_pos();
+    for (i, rect) in rects.iter().enumerate() {
+        // Below the header, which keeps its controls; on top of the tile's content.
+        let handle = Rect::from_min_max(rect.min + vec2(0.0, 28.0), rect.max);
+        let resp = ui.interact(handle, ui.id().with(("drag-tile", i)), Sense::drag());
+        let target = pointer.and_then(|at| rects.iter().position(|r| r.contains(at)));
+        if resp.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            let layer = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("drag-tiles")));
+            layer.rect_filled(*rect, 8.0, Color32::from_black_alpha(110));
+            if let Some(j) = target.filter(|&j| j != i) {
+                layer.rect_stroke(rects[j], 8.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+            }
+            if let Some(at) = pointer {
+                let text = kind_name(tiles[i].kind);
+                let galley = layer.layout_no_wrap(text.to_string(), FontId::proportional(13.0), WHITE);
+                let label = Rect::from_min_size(at + vec2(12.0, 8.0), galley.size() + vec2(16.0, 8.0));
+                layer.rect(label, 5.0, BUTTON, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+                layer.galley(label.min + vec2(8.0, 4.0), galley, WHITE);
+            }
+        } else if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if resp.drag_stopped()
+            && let Some(j) = target.filter(|&j| j != i)
+        {
+            edits.push(Edit::MoveTo(i, j));
         }
     }
 }
@@ -1323,10 +1368,49 @@ mod tests {
         }
     }
 
+    /// Dragging the first tile onto the second one's place swaps them.
+    #[test]
+    fn tiles_are_dragged_into_place() {
+        use egui_kittest::Harness;
+
+        // Moving a tile saves the layout at once – not into the real settings file.
+        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        let settings = Settings { overlay: OverlayPos::Off, ..Settings::default() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(settings, tx)
+        });
+        harness.state_mut().page = Page::Shots;
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_overlay = false;
+        harness.state_mut().explorer.arrange = true;
+        for _ in 0..3 {
+            harness.step();
+        }
+        // Default page: table 4×2 on the left, details 2×2 on the right (six columns).
+        let (from, to) = (pos2(250.0, 300.0), pos2(850.0, 300.0));
+        let events = [
+            egui::Event::PointerMoved(from),
+            egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+            egui::Event::PointerMoved(from + vec2(20.0, 0.0)),
+            egui::Event::PointerMoved(to),
+            egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+        ];
+        for event in events {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        let kinds: Vec<TileKind> = harness.state().saved.explorer.pages[0].tiles.iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, [TileKind::Details, TileKind::Table]);
+    }
+
     #[test]
     fn ellipse_encloses_every_point() {
         let inside = |ring: &[egui::Pos2], q: egui::Pos2| {
-            // Ray casting to the right.
+            // Ray casting to the right, just off the height of the ring's vertices.
+            let q = q + vec2(0.0, 0.013);
             let mut hit = false;
             for w in ring.windows(2) {
                 let (a, b) = (w[0], w[1]);

@@ -8,6 +8,9 @@ use crate::engine::Config;
 use crate::history::ExportFormat;
 use crate::i18n::Language;
 
+/// Off in tests that drive the app, so they never overwrite the real settings file.
+pub static SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -342,6 +345,9 @@ impl Settings {
     /// # Errors
     /// Returns a message if the file cannot be written.
     pub fn save(&self) -> Result<(), String> {
+        if !SAVE.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
         let path = Self::path().ok_or("HOME not set")?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

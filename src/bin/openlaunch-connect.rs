@@ -1935,6 +1935,8 @@ mod tests {
 
     /// Status as during a real session, for the README screenshots.
     pub(super) fn demo_state() {
+        // Screenshot tests drive the app; they must not touch the real settings file.
+        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let (ball, club) = engine::test_shot();
         state::set_r10(R10Status::Ready, "Ready – hit away");
         state::set_gspro(true, "Connected (127.0.0.1:921)");

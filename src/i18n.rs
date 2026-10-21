@@ -225,7 +225,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Show all" => "Alle zeigen",
         "Show only these" => "Nur diese zeigen",
         "{n} selected" => "{n} ausgewählt",
-        "No tiles on this page – add some with ARRANGE." => "Keine Kacheln auf dieser Seite – über ANORDNEN hinzufügen.",
+        "No tiles on this page – right-click the page's tab to add some." => "Keine Kacheln auf dieser Seite – Rechtsklick auf den Seiten-Tab fügt welche hinzu.",
         "Remove tile" => "Kachel entfernen",
         "Move later" => "Nach hinten",
         "Move earlier" => "Nach vorn",
