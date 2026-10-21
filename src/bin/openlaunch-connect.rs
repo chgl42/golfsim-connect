@@ -849,7 +849,7 @@ impl App {
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
             let s = &mut style;
-            let items: [(&mut bool, &str); 10] = [
+            let items: [(&mut bool, &str); 11] = [
                 (&mut s.club, tr("Club")),
                 (&mut s.battery, tr("Battery")),
                 (&mut s.tempo, tr("Tempo")),
@@ -860,11 +860,12 @@ impl App {
                 (&mut s.spin_axis, tr("Spin Axis")),
                 (&mut s.club_speed, tr("Club Speed")),
                 (&mut s.smash, tr("Smash Factor")),
+                (&mut s.impact, tr("Impact graphics")),
             ];
             let body = ui.max_rect();
             let cell_w = body.width() / 2.0;
             for (i, (on, label)) in items.into_iter().enumerate() {
-                let r = Rect::from_min_size(body.min + vec2((i % 2) as f32 * cell_w, (i / 2) as f32 * 38.0), vec2(cell_w, 34.0));
+                let r = Rect::from_min_size(body.min + vec2((i % 2) as f32 * cell_w, (i / 2) as f32 * 32.0), vec2(cell_w, 30.0));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                     toggle(ui, on, label);
                 });
@@ -1679,6 +1680,8 @@ fn status_word(r10: R10Status, gs_ok: bool) -> (Color32, &'static str) {
 /// Overlay content: status, club and battery on top; last shot (or what's wrong) below.
 /// Space for the battery at the right of the overlay's status row.
 const OVERLAY_BATTERY_W: f32 = 96.0;
+/// Height of the two-line overlay with the impact graphics.
+const OVERLAY_IMPACT_H: f32 = 96.0;
 
 /// What the overlay shows: the status word, the chosen extras and one line with the
 /// chosen values of the last shot (or what's wrong).
@@ -1692,6 +1695,17 @@ struct OverlayContent {
     line_color: Color32,
     one_line: bool,
     opacity: f32,
+    /// Angles for the impact graphics (when on and a shot is shown).
+    impact: Option<Impact>,
+}
+
+/// What the impact graphics show, in degrees: angle of attack and club path need club data.
+#[derive(Clone, Copy)]
+struct Impact {
+    aoa: Option<f64>,
+    vla: f64,
+    path: Option<f64>,
+    hla: f64,
 }
 
 impl OverlayContent {
@@ -1731,7 +1745,14 @@ impl OverlayContent {
             }
             (None, true) => (tr("Hit away").to_string(), SOFT),
         };
+        let impact = last.filter(|s| style.impact && ready && s.delivered).map(|s| Impact {
+            aoa: s.club.map(|c| c.angle_of_attack),
+            vla: s.ball.vla,
+            path: s.club.map(|c| c.path),
+            hla: s.ball.hla,
+        });
         Self {
+            impact,
             color,
             word,
             club: club.filter(|_| style.club).map(club_name),
@@ -1749,15 +1770,23 @@ impl OverlayContent {
         let w = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
         let extra = |text: &Option<String>, gap: f32| text.as_deref().map_or(0.0, |t| gap + w(t, FontId::proportional(14.0)));
         let battery = if self.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
-        if self.one_line {
+        let text = if self.one_line {
             let line = if self.line.is_empty() { 0.0 } else { 16.0 + w(&self.line, FontId::proportional(14.0)) };
             let width = 18.0 + 16.0 + w(self.word, cond(20.0)) + extra(&self.club, 12.0) + line + battery;
             vec2(width.ceil(), 40.0)
         } else {
             let top = 18.0 + 16.0 + w(self.word, cond(24.0)) + extra(&self.club, 12.0) + extra(&self.tempo, 24.0) + battery;
             let bottom = 18.0 + w(&self.line, FontId::proportional(14.0)) + 14.0;
-            vec2(top.max(bottom).max(OVERLAY_SIZE.x).ceil(), OVERLAY_SIZE.y)
-        }
+            // Taller with the impact graphics, which have their values underneath.
+            let h = if self.impact.is_some() { OVERLAY_IMPACT_H } else { OVERLAY_SIZE.y };
+            vec2(top.max(bottom).max(OVERLAY_SIZE.x).ceil(), h)
+        };
+        text + vec2(self.graphics_width(), 0.0)
+    }
+
+    /// Room for the two impact graphics on the right (none without them).
+    fn graphics_width(&self) -> f32 {
+        if self.impact.is_some() { 2.0 * (impact_panel_width(self.one_line) + 1.0) } else { 0.0 }
     }
 }
 
@@ -1797,9 +1826,25 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
         CornerRadius { nw: 7, sw: 7, ne: 0, se: 0 },
         c.color,
     );
+    // The impact graphics take the right end; the text the rest.
+    let graphics = c.graphics_width();
+    if let Some(impact) = c.impact {
+        let w = impact_panel_width(c.one_line);
+        let side = Rect::from_min_size(pos2(rect.right() - graphics + 1.0, rect.top()), vec2(w, rect.height()));
+        let top = side.translate(vec2(w + 1.0, 0.0));
+        for r in [side, top] {
+            p.line_segment([pos2(r.left() - 0.5, rect.top() + 1.0), pos2(r.left() - 0.5, rect.bottom() - 1.0)], Stroke::new(1.0, LINE));
+        }
+        let labels = !c.one_line;
+        impact_side(p, side, impact, labels);
+        impact_top(p, top, impact, labels);
+    }
+    let rect = Rect::from_min_max(rect.min, pos2(rect.right() - graphics, rect.bottom()));
 
     let left = rect.left() + 18.0;
-    let row_y = if c.one_line { rect.center().y } else { rect.top() + 20.0 };
+    // Two lines keep their distance in a taller overlay, centred.
+    let inset = 20.0 + ((rect.height() - OVERLAY_SIZE.y) / 2.0).max(0.0);
+    let row_y = if c.one_line { rect.center().y } else { rect.top() + inset };
     p.circle_filled(pos2(left + 4.0, row_y), 5.0, c.color);
     let size = if c.one_line { 20.0 } else { 24.0 };
     let mut x = caps_text(p, pos2(left + 16.0, row_y), egui::Align::Min, c.word, size, c.color).right();
@@ -1813,8 +1858,124 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
         let right = rect.right() - if c.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
         p.text(pos2(right, row_y), Align2::RIGHT_CENTER, tempo, FontId::proportional(14.0), SOFT);
     }
-    let line_pos = if c.one_line { pos2(x + 16.0, row_y) } else { pos2(left, rect.bottom() - 20.0) };
+    let line_pos = if c.one_line { pos2(x + 16.0, row_y) } else { pos2(left, rect.bottom() - inset) };
     p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
+}
+
+/// Width of one impact graphic: room for its caption with two lines, small in one line.
+fn impact_panel_width(one_line: bool) -> f32 {
+    if one_line { 50.0 } else { 150.0 }
+}
+
+/// Room for a graphic's caption underneath (two lines only).
+const IMPACT_CAPTION_H: f32 = 18.0;
+
+/// Two values under a graphic, centred, each in its colour: "AoA 3.5 D · VLA 17.4°".
+fn impact_caption(p: &egui::Painter, r: Rect, parts: &[(String, Color32)]) {
+    let font = FontId::proportional(11.0);
+    let sep = "  ·  ";
+    let galleys: Vec<_> = parts.iter().map(|(t, c)| p.layout_no_wrap(t.clone(), font.clone(), *c)).collect();
+    let sep_w = p.layout_no_wrap(sep.to_string(), font.clone(), MUTED).size().x;
+    let total = galleys.iter().map(|g| g.size().x).sum::<f32>() + sep_w * (galleys.len().saturating_sub(1)) as f32;
+    let y = r.bottom() - IMPACT_CAPTION_H / 2.0 - 2.0;
+    let mut x = r.center().x - total / 2.0;
+    for (k, g) in galleys.into_iter().enumerate() {
+        if k > 0 {
+            p.text(pos2(x, y), Align2::LEFT_CENTER, sep, font.clone(), MUTED);
+            x += sep_w;
+        }
+        let w = g.size().x;
+        p.galley(pos2(x, y - g.size().y / 2.0), g, WHITE);
+        x += w;
+    }
+}
+
+/// Map the part `view` of the mock's 118 × 94 drawing space into `r`, centred, same scale both ways.
+fn impact_space(r: Rect, view: Rect) -> impl Fn(f32, f32) -> egui::Pos2 {
+    let s = (r.width() / view.width()).min(r.height() / view.height());
+    let origin = r.center() - view.center().to_vec2() * s;
+    move |x, y| origin + vec2(x, y) * s
+}
+
+/// Filled arrow head at `tip`, pointing away from `from`.
+fn arrow_head(p: &egui::Painter, from: egui::Pos2, tip: egui::Pos2, size: f32, color: Color32) {
+    let d = (tip - from).normalized();
+    let n = vec2(-d.y, d.x);
+    let base = tip - d * size;
+    p.add(egui::Shape::convex_polygon(vec![tip, base + n * size * 0.55, base - n * size * 0.55], color, Stroke::NONE));
+}
+
+/// Side view of the impact: the club head arriving at the angle of attack (blue, negative is
+/// down), the ball leaving at the launch angle (white, dashed).
+fn impact_side(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
+    let draw = if labels { Rect::from_min_max(r.min + vec2(0.0, 2.0), r.max - vec2(0.0, IMPACT_CAPTION_H)) } else { r };
+    // Club and ball stay between y 20 and 84: zoom into that band.
+    let at = impact_space(draw, Rect::from_min_max(pos2(4.0, 20.0), pos2(114.0, 76.0)));
+    let s = at(1.0, 0.0).x - at(0.0, 0.0).x;
+    p.line_segment([at(6.0, 66.0), at(112.0, 66.0)], Stroke::new(2.0 * s, Color32::from_rgb(0x4b, 0x7a, 0x57)));
+    if let Some(aoa) = i.aoa {
+        let a = aoa.to_radians() as f32;
+        let start = at(56.0 - 46.0 * a.cos(), 62.0 + 46.0 * a.sin());
+        let end = at(56.0, 62.0);
+        p.line_segment([start, end - (end - start).normalized() * 6.0 * s], Stroke::new(3.0 * s, ICON));
+        arrow_head(p, start, end, 9.0 * s, ICON);
+    }
+    let v = i.vla.to_radians() as f32;
+    let ball = at(60.0, 62.0);
+    let out = at(60.0 + 50.0 * v.cos(), 62.0 - 50.0 * v.sin());
+    p.extend(egui::Shape::dashed_line(&[ball, out - (out - ball).normalized() * 6.0 * s], Stroke::new(2.0 * s, WHITE), 4.0 * s, 3.0 * s));
+    arrow_head(p, ball, out, 9.0 * s, WHITE);
+    p.circle_filled(ball, 4.0 * s, WHITE);
+    if labels {
+        let mut parts: Vec<(String, Color32)> = i.aoa.map(|aoa| (format!("AoA {}", dir(aoa, "U", "D")), ICON)).into_iter().collect();
+        parts.push((format!("VLA {}°", num(i.vla, 1)), WHITE));
+        impact_caption(p, r, &parts);
+    }
+}
+
+/// Top view of the impact over the target line (dashed): a broad arrow along the club path
+/// (blue, no outline) with a narrow arrow for the start direction on top (white). The angles are
+/// drawn three times larger; the numbers are the real ones.
+fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
+    let draw = if labels { Rect::from_min_max(r.min + vec2(0.0, 2.0), r.max - vec2(0.0, IMPACT_CAPTION_H)) } else { r };
+    let at = impact_space(draw, Rect::from_min_max(pos2(0.0, 2.0), pos2(118.0, 92.0)));
+    let s = at(1.0, 0.0).x - at(0.0, 0.0).x;
+    p.extend(egui::Shape::dashed_line(&[at(59.0, 4.0), at(59.0, 90.0)], Stroke::new(1.0, Color32::from_rgb(0x4b, 0x6a, 0x8f)), 3.0 * s, 3.0 * s));
+    // Outline of an arrow from the base (59, 88) at `deg`: shaft, neck, head, in drawing units.
+    let arrow = |deg: f64, len: f32, shaft: f32, head_w: f32, head_l: f32| {
+        let a = (deg * 3.0).to_radians() as f32;
+        let (ux, uy) = (a.sin(), -a.cos());
+        let (px, py) = (-uy, ux);
+        let pt = |along: f32, across: f32| at(59.0 + ux * along + px * across, 88.0 + uy * along + py * across);
+        let neck = len - head_l;
+        let shaft_pts = vec![pt(0.0, -shaft / 2.0), pt(neck, -shaft / 2.0), pt(neck, shaft / 2.0), pt(0.0, shaft / 2.0)];
+        let head_pts = vec![pt(neck, -head_w / 2.0), pt(len, 0.0), pt(neck, head_w / 2.0)];
+        let outline = vec![
+            pt(0.0, -shaft / 2.0),
+            pt(neck, -shaft / 2.0),
+            pt(neck, -head_w / 2.0),
+            pt(len, 0.0),
+            pt(neck, head_w / 2.0),
+            pt(neck, shaft / 2.0),
+            pt(0.0, shaft / 2.0),
+        ];
+        (shaft_pts, head_pts, outline)
+    };
+    if let Some(path) = i.path {
+        let (shaft, head, _) = arrow(path, 78.0, 22.0, 40.0, 26.0);
+        let blue = ICON.gamma_multiply(0.6);
+        p.add(egui::Shape::convex_polygon(shaft, blue, Stroke::NONE));
+        p.add(egui::Shape::convex_polygon(head, blue, Stroke::NONE));
+    }
+    let (shaft, head, outline) = arrow(i.hla, 70.0, 6.0, 16.0, 14.0);
+    p.add(egui::Shape::convex_polygon(shaft, WHITE, Stroke::NONE));
+    p.add(egui::Shape::convex_polygon(head, WHITE, Stroke::NONE));
+    p.add(egui::Shape::closed_line(outline, Stroke::new(1.0, PAGE)));
+    if labels {
+        let mut parts: Vec<(String, Color32)> = i.path.map(|path| (format!("{} {}", tr("Path"), dir(path, "I-O", "O-I")), ICON)).into_iter().collect();
+        parts.push((format!("Start {}", dir(i.hla, "R", "L")), WHITE));
+        impact_caption(p, r, &parts);
+    }
 }
 
 /// The overlay position as a small screen with eight spots; the middle turns the overlay off.
@@ -2033,8 +2194,11 @@ mod tests {
             save(&harness.render().unwrap(), name);
         }
 
+        // Wide enough for the impact graphics; cropped to the overlay below.
+        let drawn = std::rc::Rc::new(std::cell::Cell::new(Rect::ZERO));
+        let size_out = drawn.clone();
         let mut harness = Harness::builder()
-            .with_size(OVERLAY_SIZE)
+            .with_size(vec2(OVERLAY_SIZE.x + 2.0 * (impact_panel_width(false) + 1.0) + 120.0, OVERLAY_IMPACT_H + 20.0))
             .with_pixels_per_point(2.0)
             .wgpu()
             .build_ui(|ui| {
@@ -2042,6 +2206,7 @@ mod tests {
                 if ui.ctx().fonts(|f| f.families().contains(&FontFamily::Name("cond".into()))) {
                     let content = OverlayContent::live(&OverlayStyle::default(), true);
                     let rect = Rect::from_min_size(ui.max_rect().min, content.size(ui.ctx()));
+                    size_out.set(rect);
                     overlay_ui(ui.painter(), rect, &content);
                 } else {
                     setup_style(ui.ctx());
@@ -2050,7 +2215,10 @@ mod tests {
         for _ in 0..3 {
             harness.step();
         }
-        save(&harness.render().unwrap(), "screenshot-overlay.png");
+        let r = drawn.get();
+        let (min, size) = (r.min * 2.0, r.size() * 2.0);
+        let image = image::imageops::crop_imm(&harness.render().unwrap(), min.x as u32, min.y as u32, size.x as u32, size.y as u32).to_image();
+        save(&image, "screenshot-overlay.png");
     }
 
     #[test]

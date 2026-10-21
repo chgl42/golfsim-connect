@@ -260,6 +260,9 @@ pub struct OverlayStyle {
     pub spin_axis: bool,
     pub club_speed: bool,
     pub smash: bool,
+    /// Graphics of the impact next to the text: angle of attack and launch angle from the side,
+    /// club path and start direction from above.
+    pub impact: bool,
 }
 
 impl Default for OverlayStyle {
@@ -279,6 +282,7 @@ impl Default for OverlayStyle {
             spin_axis: false,
             club_speed: false,
             smash: true,
+            impact: true,
         }
     }
 }

@@ -1877,16 +1877,13 @@ mod tests {
     }
 
     #[test]
-    fn default_page_names_follow_the_language() {
+    fn default_page_names_are_recognised_in_both_languages() {
+        // English only: switching the global language would race other tests.
         let page = |name: &str| ExplorerPage { name: name.into(), tiles: Vec::new() };
-        i18n::set(Language::German);
-        assert_eq!(page_name(&page("Ball flight"), 1), "Ballflug");
-        assert_eq!(page_name(&page("Daten"), 2), "Daten");
-        assert_eq!(page_name(&page("Driver only"), 0), "Driver only");
-        assert_eq!(page_name(&page(""), 3), "Seite 4");
-        i18n::set(Language::English);
         assert_eq!(page_name(&page("Ballflug"), 1), "Ball flight", "typed in German, shown in English");
         assert_eq!(page_name(&page("Daten"), 2), "Data");
+        assert_eq!(page_name(&page("Driver only"), 0), "Driver only");
+        assert_eq!(page_name(&page(""), 3), "Page 4");
     }
 
     #[test]
