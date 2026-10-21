@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Exclude shots:** *Exclude* next to a shot on the shots page leaves it out of the averages and CSV exports
+  (e.g. a misread); it stays listed, struck through, and *Count* takes it back. Kept in the shot history.
+
 ### Fixed
 - Values that round to zero are shown as *0.0* instead of *-0.0* (play page, shots page, overlay, CSV exports).
 
