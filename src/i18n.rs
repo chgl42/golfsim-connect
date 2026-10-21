@@ -200,6 +200,9 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "Impact from the side" => "Treffmoment Seite",
+        "Impact from above" => "Treffmoment Aufsicht",
+        "Path" => "Bahn",
         "Range" => "Range",
         "Ball flight" => "Ballflug",
         "Data" => "Daten",
@@ -386,6 +389,13 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "missing German texts: {missing:#?}");
+    }
+
+    #[test]
+    fn texts_are_recognised_in_both_languages() {
+        assert!(is_text("Ball flight", "Ball flight"));
+        assert!(is_text("Ball flight", "Ballflug"));
+        assert!(!is_text("Ball flight", "Range"));
     }
 
     #[test]
