@@ -19,6 +19,7 @@ use openlaunch_connect::launcher;
 use openlaunch_connect::num;
 use openlaunch_connect::log;
 use openlaunch_connect::settings::{OverlayPos, OverlayStyle, Settings};
+use openlaunch_connect::shape::Shape;
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
 
@@ -1705,6 +1706,7 @@ struct OverlayContent {
 struct Impact {
     side: bool,
     top: bool,
+    spin_axis: f64,
     aoa: Option<f64>,
     vla: f64,
     path: Option<f64>,
@@ -1751,6 +1753,7 @@ impl OverlayContent {
         let impact = last.filter(|s| (style.impact_side || style.impact_top) && ready && s.delivered).map(|s| Impact {
             side: style.impact_side,
             top: style.impact_top,
+            spin_axis: s.ball.spin_axis,
             aoa: s.club.map(|c| c.angle_of_attack),
             vla: s.ball.vla,
             path: s.club.map(|c| c.path),
@@ -1869,6 +1872,12 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
     p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
 }
 
+/// A shot shape's name in the language shown ("Straight" is the only one golfers translate).
+fn shape_name(shape: Shape) -> String {
+    let name = shape.name();
+    if name == "Straight" { tr("Straight").to_string() } else { name }
+}
+
 /// Draws one impact graphic into a panel (with or without its caption).
 type ImpactGraphic = fn(&egui::Painter, Rect, Impact, bool);
 
@@ -1977,10 +1986,31 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
         p.add(egui::Shape::convex_polygon(shaft, blue, Stroke::NONE));
         p.add(egui::Shape::convex_polygon(head, blue, Stroke::NONE));
     }
-    let (shaft, head, outline) = arrow(i.hla, 70.0, 6.0, 16.0, 14.0);
+    // The start arrow, then the ball's flight curving by the spin axis (dashed, also exaggerated):
+    // together they show the shot shape.
+    let start_len = 46.0;
+    let (shaft, head, outline) = arrow(i.hla, start_len, 6.0, 16.0, 14.0);
+    let a = (i.hla * 3.0).to_radians() as f32;
+    let heading = vec2(a.sin(), -a.cos());
+    let tip = at(59.0 + heading.x * start_len, 88.0 + heading.y * start_len);
+    let bend = (i.spin_axis as f32 * 2.2).clamp(-40.0, 40.0);
+    let control = at(59.0 + heading.x * (start_len + 22.0), 88.0 + heading.y * (start_len + 22.0));
+    let end = at(59.0 + heading.x * 84.0 + bend, 88.0 + heading.y * 84.0);
+    let curve: Vec<egui::Pos2> = (0..=16)
+        .map(|k| {
+            let t = k as f32 / 16.0;
+            (tip.to_vec2() * (1.0 - t) * (1.0 - t) + control.to_vec2() * 2.0 * t * (1.0 - t) + end.to_vec2() * t * t).to_pos2()
+        })
+        .collect();
+    p.extend(egui::Shape::dashed_line(&curve, Stroke::new(2.0 * s, WHITE), 4.0 * s, 3.0 * s));
+    p.circle_filled(end, 2.5 * s, WHITE);
     p.add(egui::Shape::convex_polygon(shaft, WHITE, Stroke::NONE));
     p.add(egui::Shape::convex_polygon(head, WHITE, Stroke::NONE));
     p.add(egui::Shape::closed_line(outline, Stroke::new(1.0, PAGE)));
+    if labels {
+        let shape = Shape::of(i.hla, i.spin_axis, false);
+        p.text(r.left_top() + vec2(6.0, 4.0), Align2::LEFT_TOP, shape_name(shape), FontId::proportional(11.5), WHITE);
+    }
     if labels {
         let mut parts: Vec<(String, Color32)> = i.path.map(|path| (format!("{} {}", tr("Path"), dir(path, "I-O", "O-I")), ICON)).into_iter().collect();
         parts.push((format!("Start {}", dir(i.hla, "R", "L")), WHITE));
@@ -2304,6 +2334,39 @@ mod tests {
             assert_eq!(harness.ctx.zoom_factor(), 1.0);
             save(&harness.render().unwrap(), name);
         }
+    }
+
+    /// Renders the top-view impact graphic for a few shot shapes side by side:
+    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --bin openlaunch-connect impact_shapes -- --ignored`
+    #[test]
+    #[ignore = "writes screenshots; run on demand"]
+    fn impact_shapes() {
+        use egui_kittest::Harness;
+
+        i18n::set(Language::English);
+        // (HLA, spin axis, path): straight, push-draw, pull-fade, hook, slice.
+        let shots = [(0.3, 1.0, 0.5), (4.0, -6.0, 5.0), (-3.5, 7.0, -4.0), (-1.0, -14.0, 3.0), (1.0, 16.0, -6.0)];
+        let w = impact_panel_width(false);
+        let mut harness = Harness::builder()
+            .with_size(vec2(w * shots.len() as f32, OVERLAY_IMPACT_H))
+            .with_pixels_per_point(2.0)
+            .wgpu()
+            .build_ui(move |ui| {
+                if ui.ctx().fonts(|f| f.families().contains(&FontFamily::Name("cond".into()))) {
+                    for (k, &(hla, spin_axis, path)) in shots.iter().enumerate() {
+                        let r = Rect::from_min_size(pos2(k as f32 * w, 0.0), vec2(w, OVERLAY_IMPACT_H));
+                        ui.painter().rect_filled(r, 0.0, PAGE);
+                        let impact = Impact { side: false, top: true, spin_axis, aoa: None, vla: 15.0, path: Some(path), hla };
+                        impact_top(ui.painter(), r, impact, true);
+                    }
+                } else {
+                    setup_style(ui.ctx());
+                }
+            });
+        for _ in 0..3 {
+            harness.step();
+        }
+        save(&harness.render().unwrap(), "impact-shapes.png");
     }
 
     /// Layer transforms apply to every viewport: scaling the overlay must not shrink the main window.

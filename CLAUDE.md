@@ -18,6 +18,7 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
   - `engine.rs` – R10 thread (BLE, reconnect, events → status) and start of the GSPro thread; `test_shot()`, `demo_session()`
   - `flight.rs` – estimated ball flight from the launch data (`fly()`: drag/lift from the spin factor, 3D,
     no wind; rough roll-out) → carry, total, apex, lateral, descent, path. GSPro doesn't send its results back.
+  - `shape.rs` – shot shape from HLA and spin axis (`Shape::of`, names like "Push-Draw"; right-hander's names)
   - `gspro.rs` – OpenConnect client (`Link`), heartbeats, reconnect, reply parsing (codes 200/201/5xx)
   - `mapping.rs` – R10 data → OpenConnect (m/s → mph, **spin axis inverted**, back/side spin from total + axis), `Tempo`
   - `state.rs` – shared status for the GUI (R10/GSPro status, device, battery, last shot, session shots, club/hand, log)

@@ -13,6 +13,7 @@ pub mod log;
 pub mod mapping;
 pub mod notify;
 pub mod settings;
+pub mod shape;
 pub mod state;
 pub mod update;
 
