@@ -853,12 +853,9 @@ impl App {
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
             ui.label(RichText::new(tr("Click a tile in the preview to choose what it shows, drag it to move it.")).size(13.0).color(SOFT));
-            ui.label(RichText::new(tr("The status always comes first; one line shows the tiles in a row.")).size(12.0).color(MUTED));
+            ui.label(RichText::new(tr("+ at the end of the tiles adds a column. The status always comes first.")).size(12.0).color(MUTED));
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                if ui.add(secondary_button(tr("+ Column"))).on_hover_text(tr("Add an empty column at the end")).clicked() {
-                    style.layout.push([None, None]);
-                }
                 if ui
                     .add_enabled(style.layout != OverlayItem::default_layout(), secondary_button(tr("Reset")))
                     .on_hover_text(tr("Back to the tiles as they came"))
@@ -867,18 +864,9 @@ impl App {
                     style.layout = OverlayItem::default_layout();
                 }
             });
-            ui.add_space(4.0);
-            let body = ui.available_rect_before_wrap();
-            let cell_w = body.width() / 2.0;
-            for (i, (on, label)) in [(&mut style.impact_side, tr("Impact from the side")), (&mut style.impact_top, tr("Impact from above"))]
-                .into_iter()
-                .enumerate()
-            {
-                let r = Rect::from_min_size(body.min + vec2(i as f32 * cell_w, 0.0), vec2(cell_w, 30.0));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    toggle(ui, on, label);
-                });
-            }
+            ui.add_space(2.0);
+            toggle(ui, &mut style.impact_side, tr("Impact from the side"));
+            toggle(ui, &mut style.impact_top, tr("Impact from above"));
         });
 
         // Below the cards, down to the page's bottom margin (the cards move the layout cursor).
@@ -983,6 +971,20 @@ impl App {
                     style.layout.remove(k);
                 }
             });
+        }
+        // + right after the last column adds one.
+        if let Some(right) = tiles.iter().map(|t| t.2.right()).reduce(f32::max) {
+            let top = tiles.iter().map(|t| t.2.top()).fold(f32::MAX, f32::min);
+            let bottom = tiles.iter().map(|t| t.2.bottom()).fold(f32::MIN, f32::max);
+            let r = Rect::from_center_size(pos2(right, (top + bottom) / 2.0), vec2(20.0, 20.0));
+            let add = ui.interact(r, ui.id().with("overlay-add-column"), Sense::click());
+            let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("overlay-add")));
+            fg.circle(r.center(), 9.5, if add.hovered() { ACCENT } else { BUTTON }, Stroke::new(1.0, if add.hovered() { ACCENT_HOVER } else { BUTTON_LINE }));
+            fg.line_segment([r.center() - vec2(4.5, 0.0), r.center() + vec2(4.5, 0.0)], Stroke::new(1.6, WHITE));
+            fg.line_segment([r.center() - vec2(0.0, 4.5), r.center() + vec2(0.0, 4.5)], Stroke::new(1.6, WHITE));
+            if add.on_hover_text(tr("Add an empty column at the end")).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                style.layout.push([None, None]);
+            }
         }
         if let Some(((k1, r1), (k2, r2))) = swap
             && k1 < style.layout.len()
