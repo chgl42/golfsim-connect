@@ -1857,7 +1857,7 @@ impl OverlayContent {
                         OverlayItem::Vla => value(None, format!("VLA {}°", num(b.vla, 1))),
                         OverlayItem::Hla => value(None, format!("HLA {}°", num(b.hla, 1))),
                         OverlayItem::SpinAxis => value(None, format!("{} {}°", tr("Axis"), num(b.spin_axis, 1))),
-                        OverlayItem::Tempo => value(None, format!("{} {:.1}:1", tr("Tempo"), s.tempo?.ratio())),
+                        OverlayItem::Tempo => value(Some(Glyph::Tempo), format!("{:.1} : 1", s.tempo?.ratio())),
                         _ => None,
                     }
                 }
@@ -2179,6 +2179,8 @@ enum Glyph {
     Spin,
     /// A flag: distance to the pin.
     Pin,
+    /// A stopwatch: swing tempo.
+    Tempo,
 }
 
 /// A golf ball: white with a few dimples.
@@ -2255,6 +2257,16 @@ fn draw_glyph(p: &egui::Painter, c: egui::Pos2, glyph: Glyph, color: Color32) {
                 color,
                 Stroke::NONE,
             ));
+        }
+        Glyph::Tempo => {
+            // A stopwatch: round face, crown and button on top, a hand.
+            let face = c + vec2(0.0, 1.2);
+            p.circle_stroke(face, 6.0, Stroke::new(1.4, color));
+            p.rect_filled(Rect::from_center_size(c + vec2(0.0, -6.6), vec2(3.6, 1.8)), 0.6, color);
+            p.line_segment([c + vec2(0.0, -5.7), c + vec2(0.0, -4.6)], Stroke::new(1.4, color));
+            p.line_segment([c + vec2(4.6, -3.6), c + vec2(5.8, -4.8)], Stroke::new(1.4, color));
+            p.line_segment([face, face + vec2(2.6, -2.8)], Stroke::new(1.4, AMBER));
+            p.circle_filled(face, 1.1, color);
         }
         Glyph::Pin => {
             p.line_segment([c + vec2(-3.0, 7.5), c + vec2(-3.0, -7.5)], Stroke::new(1.4, color));
@@ -2818,6 +2830,21 @@ mod tests {
             harness.step();
         }
         save(&harness.render().unwrap(), "impact-shapes.png");
+    }
+
+    #[test]
+    #[ignore = "writes screenshots; run on demand"]
+    fn overlay_symbols() {
+        use egui_kittest::Harness;
+        let glyphs = [Glyph::BallSpeed, Glyph::ClubSpeed, Glyph::Smash, Glyph::Spin, Glyph::Tempo, Glyph::Pin];
+        let mut harness = Harness::builder().with_size(vec2(32.0 * glyphs.len() as f32, 32.0)).with_pixels_per_point(6.0).wgpu().build_ui(move |ui| {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, PAGE);
+            for (k, g) in glyphs.iter().enumerate() {
+                draw_glyph(ui.painter(), pos2(16.0 + 32.0 * k as f32, 16.0), *g, LABEL);
+            }
+        });
+        harness.step();
+        save(&harness.render().unwrap(), "overlay-symbols.png");
     }
 
     #[test]
