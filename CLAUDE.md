@@ -45,8 +45,10 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
   (navy, tiles, condensed figures, status panel with READY, battery glyph). Layout base size 1000×470 (`BASE_SIZE`);
   with the interface size *Auto* (`ui_scale: None`) larger windows zoom the whole UI uniformly (`apply_window_zoom`,
   `fit_zoom`, aspect ratio locked); a fixed interface size (1.0–1.5) sets the zoom and leaves the window free, with a
-  minimum of the base size at that zoom (`min_size`), and pages get the extra room. The overlay divides the zoom out
-  (layer transform) so it keeps its size. The *Overlay* page sets the overlay's position, size, lines, opacity and
+  minimum of the base size at that zoom (`min_size`), and pages get the extra room. The overlay window ignores that zoom: its
+  pass runs with the overlay's size as zoom (`options.zoom_factor` set around `show_viewport_immediate`), and on macOS
+  its frame is set through AppKit (`mac::place_window`, native points, within the visible frame) – egui takes a second
+  window's size in native points but reports it in zoomed ones, and a layer transform isn't applied in it. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
   `OverlayContent` builds what both the overlay window and the preview draw. The *Shots* page is the explorer
   (`src/bin/openlaunch-connect/explorer.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
