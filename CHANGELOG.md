@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (tab *Tile*) choose its place, size (small, medium, large), background, the tile and its options, and whether it
   shows the whole session or only the shots with the club chosen in GSPro. Where it shares its place with the status
   overlay it sits right under it (above it at the bottom of the screen). A new shot flies in the 3D tile.
+- **Overlays placed by hand:** *Move on screen* on the Overlay page makes the status or the tile overlay grabbable;
+  drag it in GSPro into a gap of its display and let go – it stays there (also on another screen size) and lets clicks
+  through again. Choosing one of the nine places brings it back to that place.
 - **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
   the pin, from GSPro's results (in m or yd).
 - **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle

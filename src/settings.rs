@@ -27,6 +27,9 @@ pub struct Settings {
     pub debug: bool,
     /// Always-on-top status overlay for playing with GSPro in full screen.
     pub overlay: OverlayPos,
+    /// Placed by hand: its top left corner as fractions of the room the screen leaves (overrides
+    /// the place in `overlay`, which still turns it on or off).
+    pub overlay_spot: Option<[f32; 2]>,
     /// Size, background and contents of the overlay.
     pub overlay_style: OverlayStyle,
     /// A second overlay with one tile of the shots explorer.
@@ -339,6 +342,8 @@ impl OverlayItem {
 pub struct TileOverlay {
     /// Where it sits; `Off` hides it.
     pub pos: OverlayPos,
+    /// Placed by hand (like `Settings::overlay_spot`).
+    pub spot: Option<[f32; 2]>,
     /// What it shows (its size in cells is unused).
     pub tile: Tile,
     /// Width in points; the height is three quarters of it.
@@ -353,6 +358,7 @@ impl Default for TileOverlay {
     fn default() -> Self {
         Self {
             pos: OverlayPos::Off,
+            spot: None,
             tile: Tile { kind: TileKind::Dispersion, ..Tile::default() },
             width: 360.0,
             opacity: 0.85,
@@ -418,6 +424,7 @@ impl Default for Settings {
             meters: true,
             debug: false,
             overlay: OverlayPos::default(),
+            overlay_spot: None,
             overlay_style: OverlayStyle::default(),
             tile_overlay: TileOverlay::default(),
             export_format: ExportFormat::default(),
