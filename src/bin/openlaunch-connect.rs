@@ -1697,6 +1697,8 @@ struct OverlayContent {
     battery: Option<u8>,
     line: String,
     line_color: Color32,
+    /// The shot's values, each with its symbol (shown instead of `line` when there are any).
+    values: Vec<(Option<Glyph>, String)>,
     one_line: bool,
     opacity: f32,
     /// Angles for the impact graphics (when on and a shot is shown).
@@ -1741,18 +1743,19 @@ impl OverlayContent {
             .and_then(|s| s.tempo)
             .filter(|_| style.tempo && ready)
             .map(|t| format!("{} {:.1}:1", tr("Tempo"), t.ratio()));
+        let mut values = Vec::new();
         let (line, line_color) = match (last, ready) {
             (_, false) if r10 != R10Status::Ready => (tr_detail(r10_detail), AMBER),
             (_, false) => (tr("GSPro not connected").to_string(), AMBER),
             (Some(s), true) if !s.delivered => (tr("Last shot NOT delivered to GSPro").to_string(), AMBER),
             (Some(s), true) => {
-                let mut values = shot_values(s, style, metric);
-                values.extend(pin.filter(|_| style.to_pin));
+                values = shot_values(s, style, metric);
+                values.extend(pin.filter(|_| style.to_pin).map(|p| (Some(Glyph::Pin), p)));
                 // One line: the tempo joins the values instead of sitting next to the battery.
                 if style.one_line {
-                    values.extend(tempo.clone());
+                    values.extend(tempo.clone().map(|t| (None, t)));
                 }
-                (values.join("  ·  "), WHITE)
+                (String::new(), WHITE)
             }
             (None, true) => (tr("Hit away").to_string(), SOFT),
         };
@@ -1774,6 +1777,7 @@ impl OverlayContent {
             battery: battery.filter(|_| style.battery),
             line,
             line_color,
+            values,
             one_line: style.one_line,
             opacity: style.opacity,
         }
@@ -1784,13 +1788,21 @@ impl OverlayContent {
         let w = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
         let extra = |text: &Option<String>, gap: f32| text.as_deref().map_or(0.0, |t| gap + w(t, FontId::proportional(14.0)));
         let battery = if self.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
+        // The values with their symbols, or the message.
+        let line_w = if self.values.is_empty() {
+            w(&self.line, FontId::proportional(14.0))
+        } else {
+            let sep = w(VALUE_SEP, FontId::proportional(14.0));
+            self.values.iter().map(|(g, t)| w(t, FontId::proportional(14.0)) + if g.is_some() { GLYPH_W } else { 0.0 }).sum::<f32>()
+                + sep * (self.values.len() - 1) as f32
+        };
         let text = if self.one_line {
-            let line = if self.line.is_empty() { 0.0 } else { 16.0 + w(&self.line, FontId::proportional(14.0)) };
+            let line = if line_w == 0.0 { 0.0 } else { 16.0 + line_w };
             let width = 18.0 + 16.0 + w(self.word, cond(20.0)) + extra(&self.club, 12.0) + line + battery;
             vec2(width.ceil(), 40.0)
         } else {
             let top = 18.0 + 16.0 + w(self.word, cond(24.0)) + extra(&self.club, 12.0) + extra(&self.tempo, 24.0) + battery;
-            let bottom = 18.0 + w(&self.line, FontId::proportional(14.0)) + 14.0;
+            let bottom = 18.0 + line_w + 14.0;
             // Taller with the impact graphics, which have their values underneath.
             let h = if self.impact.is_some() { OVERLAY_IMPACT_H } else { OVERLAY_SIZE.y };
             vec2(top.max(bottom).max(OVERLAY_SIZE.x).ceil(), h)
@@ -1806,35 +1818,37 @@ impl OverlayContent {
 }
 
 /// The chosen values of a shot, e.g. "198.3 km/h", "VLA 16.5°", "7146 rpm".
-/// "Pin 139 m": the distance left to the pin, in metres or yards.
+/// "139 m": the distance left to the pin, in metres or yards (shown after a flag).
 fn pin_text(m: f64, meters: bool) -> String {
-    if meters { format!("{} {m:.0} m", tr("Pin")) } else { format!("{} {:.0} yd", tr("Pin"), m * M_TO_YD) }
+    if meters { format!("{m:.0} m") } else { format!("{:.0} yd", m * M_TO_YD) }
 }
 
-fn shot_values(s: &state::LastShot, style: &OverlayStyle, metric: bool) -> Vec<String> {
+/// The chosen values of a shot with their symbols: the speeds and the smash factor side by side,
+/// then the angles and the spin.
+fn shot_values(s: &state::LastShot, style: &OverlayStyle, metric: bool) -> Vec<(Option<Glyph>, String)> {
     let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
     let b = &s.ball;
     let mut values = Vec::new();
     if style.ball_speed {
-        values.push(format!("{:.1} {unit}", b.speed * factor));
-    }
-    if style.vla {
-        values.push(format!("VLA {}°", num(b.vla, 1)));
-    }
-    if style.hla {
-        values.push(format!("HLA {}°", num(b.hla, 1)));
-    }
-    if style.spin {
-        values.push(format!("{:.0} rpm", b.total_spin));
-    }
-    if style.spin_axis {
-        values.push(format!("{} {}°", tr("Axis"), num(b.spin_axis, 1)));
+        values.push((Some(Glyph::BallSpeed), format!("{:.1} {unit}", b.speed * factor)));
     }
     if let Some(c) = s.club.as_ref().filter(|_| style.club_speed) {
-        values.push(format!("{} {:.1} {unit}", tr("Club"), c.speed * factor));
+        values.push((Some(Glyph::ClubSpeed), format!("{:.1} {unit}", c.speed * factor)));
     }
     if let Some(smash) = history::smash(b, s.club.as_ref()).filter(|_| style.smash) {
-        values.push(format!("Smash {smash:.2}"));
+        values.push((Some(Glyph::Smash), format!("{smash:.2}")));
+    }
+    if style.vla {
+        values.push((None, format!("VLA {}°", num(b.vla, 1))));
+    }
+    if style.hla {
+        values.push((None, format!("HLA {}°", num(b.hla, 1))));
+    }
+    if style.spin {
+        values.push((Some(Glyph::Spin), format!("{:.0}", b.total_spin)));
+    }
+    if style.spin_axis {
+        values.push((None, format!("{} {}°", tr("Axis"), num(b.spin_axis, 1))));
     }
     values
 }
@@ -1880,7 +1894,99 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
         p.text(pos2(right, row_y), Align2::RIGHT_CENTER, tempo, FontId::proportional(14.0), SOFT);
     }
     let line_pos = if c.one_line { pos2(x + 16.0, row_y) } else { pos2(left, rect.bottom() - inset) };
-    p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
+    if c.values.is_empty() {
+        p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
+        return;
+    }
+    let mut x = line_pos.x;
+    for (k, (glyph, text)) in c.values.iter().enumerate() {
+        if k > 0 {
+            x = p.text(pos2(x, line_pos.y), Align2::LEFT_CENTER, VALUE_SEP, FontId::proportional(14.0), MUTED).right();
+        }
+        if let Some(g) = glyph {
+            draw_glyph(p, pos2(x + GLYPH_W / 2.0 - 2.0, line_pos.y), *g, LABEL);
+            x += GLYPH_W;
+        }
+        x = p.text(pos2(x, line_pos.y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), WHITE).right();
+    }
+}
+
+/// Between two values in the overlay.
+const VALUE_SEP: &str = "  ·  ";
+/// Room for a value's symbol in front of it.
+const GLYPH_W: f32 = 20.0;
+
+/// Symbols in front of the overlay's values.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Glyph {
+    /// A ball with speed lines: ball speed.
+    BallSpeed,
+    /// A club head: club speed.
+    ClubSpeed,
+    /// A burst: smash factor.
+    Smash,
+    /// A ball with an arrow around it: spin.
+    Spin,
+    /// A flag: distance to the pin.
+    Pin,
+}
+
+/// A 16 px symbol centred on `c`.
+fn draw_glyph(p: &egui::Painter, c: egui::Pos2, glyph: Glyph, color: Color32) {
+    let s = Stroke::new(1.4, color);
+    match glyph {
+        Glyph::BallSpeed => {
+            p.circle_stroke(c + vec2(3.0, 0.0), 4.6, s);
+            for (dy, len) in [(-3.0, 4.0), (0.0, 6.0), (3.0, 4.0)] {
+                p.line_segment([c + vec2(-2.8 - len, dy), c + vec2(-2.8, dy)], Stroke::new(1.2, color));
+            }
+        }
+        Glyph::ClubSpeed => {
+            // Shaft from the top right to a wood's head at the bottom left.
+            p.line_segment([c + vec2(6.5, -7.5), c + vec2(0.5, 2.5)], Stroke::new(1.2, color));
+            let head: Vec<egui::Pos2> = (0..16)
+                .map(|k| {
+                    let a = k as f32 / 16.0 * std::f32::consts::TAU;
+                    c + vec2(-2.5 + 4.6 * a.cos(), 4.6 + 2.6 * a.sin())
+                })
+                .collect();
+            p.add(egui::Shape::convex_polygon(head, color, Stroke::NONE));
+        }
+        Glyph::Smash => {
+            for k in 0..8 {
+                let a = k as f32 / 8.0 * std::f32::consts::TAU;
+                let (inner, outer) = if k % 2 == 0 { (2.5, 7.5) } else { (2.5, 5.0) };
+                p.line_segment([c + vec2(a.cos(), a.sin()) * inner, c + vec2(a.cos(), a.sin()) * outer], Stroke::new(1.3, color));
+            }
+            p.circle_filled(c, 1.6, color);
+        }
+        Glyph::Spin => {
+            p.circle_stroke(c, 3.6, s);
+            // Most of a circle around the ball, ending in an arrow head.
+            let r = 7.0;
+            let pts: Vec<egui::Pos2> = (0..=20)
+                .map(|k| {
+                    let a = -2.4 + k as f32 / 20.0 * 4.6;
+                    c + vec2(a.cos(), a.sin()) * r
+                })
+                .collect();
+            let end = pts[pts.len() - 1];
+            p.add(egui::Shape::line(pts, Stroke::new(1.2, color)));
+            let a: f32 = -2.4 + 4.6;
+            let tangent = vec2(-a.sin(), a.cos());
+            let normal = vec2(a.cos(), a.sin());
+            p.add(egui::Shape::convex_polygon(
+                vec![end + tangent * 3.0, end - tangent * 1.0 + normal * 2.5, end - tangent * 1.0 - normal * 2.5],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Glyph::Pin => {
+            p.line_segment([c + vec2(-3.0, 7.0), c + vec2(-3.0, -7.0)], s);
+            p.add(egui::Shape::convex_polygon(vec![c + vec2(-2.5, -7.0), c + vec2(6.0, -4.3), c + vec2(-2.5, -1.6)], RED, Stroke::NONE));
+            p.line_segment([c + vec2(-6.0, 7.0), c + vec2(0.0, 7.0)], Stroke::new(1.2, color));
+        }
+    }
 }
 
 /// A shot shape's name in the language shown ("Straight" is the only one golfers translate).

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **Overlay values with symbols** instead of words, to save room: a ball for the ball speed, a club for the club
+  speed, a burst for the smash factor, a ball with an arrow for the spin and a flag for the distance to the pin. Ball
+  speed, club speed and smash factor now stand side by side.
+
 ### Added
 - **Distance to the pin in the overlay** (Overlay page → *Distance to the pin*): after a shot on a course, the overlay
   shows how far the ball is left from the pin, from GSPro's results (e.g. *Pin 139 m*, in yards with yd).

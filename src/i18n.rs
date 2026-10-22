@@ -200,7 +200,6 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
-        "Pin" => "Fahne",
         "Distance to the pin" => "Zur Fahne",
         "Carry, total, apex, side and landing angle as GSPro computed them" => "Carry, Gesamt, Scheitelhöhe, Seitlich und Landewinkel so, wie GSPro sie berechnet hat",
         "GSPro results" => "GSPro-Werte",
