@@ -124,17 +124,33 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let far = ctx.paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
     let apex = ctx.paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
     let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
+    // Where the balls come down: nearest landing and farthest stop.
+    let land_near = ctx.paths.iter().filter_map(|p| p.air.last().map(|q| q[2])).fold(f32::MAX, f32::min).min(far * 0.6);
+    let land_far = ctx.paths.iter().map(|p| p.rest[2]).fold(land_near + 20.0, f32::max);
     let view = match camera {
         Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
         // From the right of the range, so the distance grows to the right.
         Camera::Side => View::new([far * 1.3, apex * 0.6, far * 0.5], [0.0, apex * 0.4, far * 0.5]),
-        Camera::Above => View::new([-far * 0.08, far * 0.6, -far * 0.3], [0.0, 0.0, far * 0.55]),
+        // Steeply from above onto where the balls land (the tee may be out of view).
+        Camera::Above => {
+            let span = (land_far - land_near).max(40.0) + 50.0;
+            let zc = (land_near + land_far) / 2.0;
+            View::new([0.0, span * 1.6, zc - span * 0.55], [0.0, 0.0, zc])
+        }
     };
-    // Fit what matters (the flights and the range's corners) into the tile, same scale both ways.
-    let mut fit: Vec<egui::Vec2> = ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)).collect();
-    // The near corners of the range only from above: from the tee they are right below the camera.
-    let near = if camera == Camera::Above { [[-half, 0.0, 0.0], [half, 0.0, 0.0]] } else { [[0.0, 0.0, 6.0]; 2] };
-    fit.extend([[-half, 0.0, far], [half, 0.0, far], [0.0, apex, far * 0.5]].iter().chain(&near).filter_map(|q| view.project(*q)));
+    let mut fit: Vec<egui::Vec2> = Vec::new();
+    if camera == Camera::Above {
+        // The landing area with some room around it.
+        fit.extend(ctx.paths.iter().flat_map(|p| p.air.last().into_iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
+        // Only as wide as the shots spread (plus a margin), so they spread out over the tile.
+        let (z0, z1) = ((land_near - 20.0).max(0.0), land_far + 15.0);
+        let w = ctx.paths.iter().flat_map(|p| p.air.last().into_iter().chain([&p.rest])).fold(8.0_f32, |m, q| m.max(q[0].abs())) + 6.0;
+        fit.extend([[-w, 0.0, z0], [w, 0.0, z0], [-w, 0.0, z1], [w, 0.0, z1]].iter().filter_map(|q| view.project(*q)));
+    } else {
+        // The flights and the range; the near corners would be right below the camera.
+        fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
+        fit.extend([[-half, 0.0, far], [half, 0.0, far], [0.0, apex, far * 0.5], [0.0, 0.0, 6.0]].iter().filter_map(|q| view.project(*q)));
+    }
     let (lo, hi) = fit.iter().fold((vec2(f32::MAX, f32::MAX), vec2(f32::MIN, f32::MIN)), |(lo, hi), q| (lo.min(*q), hi.max(*q)));
     let inner = rect.shrink(12.0);
     let (sx, sy) = (inner.width() / (hi.x - lo.x).max(1e-3), inner.height() / (hi.y - lo.y).max(1e-3));
@@ -143,7 +159,8 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let (kx, ky) = match camera {
         Camera::Tee => (3.0, 1.0),
         Camera::Side => (1.0, 2.5),
-        Camera::Above => (2.0, 1.0),
+        // From above the range may get a lot wider: the landing points spread out.
+        Camera::Above => (8.0, 1.0),
     };
     let base = sx.min(sy);
     let scale = vec2(sx.min(base * kx), sy.min(base * ky));
@@ -156,9 +173,10 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let p = ui.painter_at(rect);
     draw_range(&p, rect, camera, far, half, apex, u, &to_screen);
 
-    // What to draw: single shots, or the mean per club with the shots faint behind.
+    // What to draw: the single shots, or only the mean flight per club.
     let any_selected = ctx.shown.iter().any(|s| ctx.selected.contains(&key(s)));
-    let mut tracks: Vec<Track> = ctx
+    let mut tracks: Vec<Track> = if mean { mean_tracks(ctx) } else { Vec::new() };
+    let singles: Vec<Track> = ctx
         .shown
         .iter()
         .zip(ctx.paths)
@@ -166,8 +184,6 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
             let selected = ctx.selected.contains(&key(s));
             let weight = if s.excluded {
                 0.25
-            } else if mean {
-                0.22
             } else if any_selected && !selected {
                 0.5
             } else {
@@ -179,14 +195,13 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
                 color: (ctx.color_of)(&s.club_code),
                 weight,
                 selected,
-                shadow: !mean && !s.excluded,
+                shadow: !s.excluded,
                 bold: false,
             }
         })
+        .filter(|_| !mean)
         .collect();
-    if mean {
-        tracks.extend(mean_tracks(ctx));
-    }
+    tracks.extend(singles);
     // Background first, the selection on top.
     tracks.sort_by(|a, b| (a.selected, a.weight).partial_cmp(&(b.selected, b.weight)).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -205,24 +220,16 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
             continue;
         }
         let Some(top) = path.air.iter().copied().max_by(|a, b| a[1].total_cmp(&b[1])) else { continue };
-        if let (Some(a), Some(b)) = (to_screen(top), to_screen([top[0], 0.0, top[2]])) {
+        // From above the height can't be seen: carry only.
+        if camera != Camera::Above
+            && let (Some(a), Some(b)) = (to_screen(top), to_screen([top[0], 0.0, top[2]]))
+        {
             p.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0, WHITE.gamma_multiply(0.7)), 3.0, 3.0));
             badge(&p, a + vec2(0.0, -10.0), &format!("{}* {:.0} {}", tr("Apex"), u.dist(f.apex), u.dist_unit()));
         }
         if let Some(land) = path.air.last().and_then(|q| to_screen(*q)) {
             badge(&p, land + vec2(0.0, 14.0), &format!("{}* {:.0} {}", tr("Carry"), u.dist(f.carry), u.dist_unit()));
         }
-    }
-
-    // Switch between single shots and the mean per club, top right in the view.
-    let label = tr("Mean per club");
-    let galley = p.layout_no_wrap(label.to_string(), FontId::proportional(11.0), WHITE);
-    let chip = Rect::from_min_size(pos2(rect.right() - galley.size().x - 22.0, rect.top() + 6.0), galley.size() + vec2(16.0, 6.0));
-    let resp = ui.interact(chip, egui::Id::new(("flight-mean", i)), Sense::click());
-    p.rect(chip, 9.0, if mean { ACCENT } else { PAGE.gamma_multiply(0.75) }, Stroke::new(1.0, if resp.hovered() { ICON } else { BUTTON_LINE }), StrokeKind::Inside);
-    p.galley(chip.min + vec2(8.0, 3.0), galley, if mean { WHITE } else { SOFT });
-    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-        edits.push(Edit::Averages(i, !mean));
     }
 
     // Landing points: hover shows the shot, a click selects it.
@@ -253,8 +260,32 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
             })
         })
         .collect();
-    // No dots: the landing rings show where the balls came down.
-    draw_dots_quiet(ui, egui::Id::new(("flight", i)), rect, &dots)
+    // No dots: the landing rings show where the balls came down. None for the means.
+    let dots = if mean { Vec::new() } else { dots };
+    let clicked = draw_dots_quiet(ui, egui::Id::new(("flight", i)), rect, &dots);
+
+    // Shots or means, top right in the view (after the landing points, so it gets the clicks).
+    let options = [(false, tr("Shots")), (true, tr("Mean"))];
+    let font = FontId::proportional(11.0);
+    let widths: Vec<f32> = options.iter().map(|(_, l)| p.layout_no_wrap(l.to_string(), font.clone(), WHITE).size().x + 14.0).collect();
+    let total: f32 = widths.iter().sum();
+    let pill = Rect::from_min_size(pos2(rect.right() - total - 8.0, rect.top() + 6.0), vec2(total, 20.0));
+    p.rect(pill, 10.0, PAGE.gamma_multiply(0.8), Stroke::new(1.0, BUTTON_LINE), StrokeKind::Inside);
+    let mut x = pill.left();
+    for ((on, label), w) in options.into_iter().zip(widths) {
+        let r = Rect::from_min_size(pos2(x, pill.top()), vec2(w, pill.height()));
+        let resp = ui.interact(r, egui::Id::new(("flight-mode", i, on)), Sense::click());
+        if mean == on {
+            p.rect_filled(r.shrink(1.5), 9.0, ACCENT);
+        }
+        let color = if mean == on { WHITE } else if resp.hovered() { SOFT } else { MUTED };
+        p.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && mean != on {
+            edits.push(Edit::Averages(i, on));
+        }
+        x += w;
+    }
+    clicked
 }
 
 /// A small dark label with white text, centred on `at`.
@@ -429,7 +460,7 @@ fn draw_range(
         }
         let board_at = match camera {
             Camera::Side => to_screen([0.0, 0.0, dz]).map(|q| q + vec2(0.0, 12.0)),
-            Camera::Above => to_screen([half * 0.95, 0.0, dz]),
+            Camera::Above => to_screen([half * 0.5, 0.0, dz]).map(|q| q + vec2(16.0, 0.0)),
             Camera::Tee => to_screen([half * 0.55, 0.0, dz]).map(|q| q + vec2(0.0, -6.0)),
         };
         if let Some(at) = board_at.filter(|at| rect.contains(*at))
@@ -439,6 +470,8 @@ fn draw_range(
             let text = format!("{}", 50 * n);
             let galley = p.layout_no_wrap(text, FontId::proportional(10.0), WHITE);
             let r = Rect::from_center_size(at, galley.size() + vec2(8.0, 3.0));
+            // Kept inside the tile.
+            let r = r.translate(vec2((rect.right() - 4.0 - r.right()).min(0.0), 0.0));
             p.rect(r, 2.0, Color32::from_rgb(0x1c, 0x3a, 0x6b), Stroke::new(1.0, Color32::from_white_alpha(120)), StrokeKind::Inside);
             p.galley(r.min + vec2(4.0, 1.5), galley, WHITE);
             last_board = Some(at);

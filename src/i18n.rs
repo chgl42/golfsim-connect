@@ -200,7 +200,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
-        "Mean per club" => "Mittel je Schläger",
+        "Mean" => "Mittel",
         "Shape" => "Schlagform",
         "Straight" => "Gerade",
         "Impact from the side" => "Treffmoment Seite",

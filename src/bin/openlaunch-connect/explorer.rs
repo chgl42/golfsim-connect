@@ -63,6 +63,8 @@ pub(super) struct ExplorerState {
     confirm_remove: Option<usize>,
     /// Estimated flight of every shot seen, computed once.
     flights: HashMap<Key, FlightSummary>,
+    /// Where the tiles of the page shown were drawn (last frame).
+    tile_rects: Vec<Rect>,
     /// Flight paths for the 3D tiles, computed once when such a tile is shown.
     paths: HashMap<Key, Rc<FlightPath>>,
 }
@@ -523,6 +525,7 @@ impl App {
                 tile_ui(ui, rect, i, tile, ex.arrange, page_tiles.len(), &ctx, focus, &mut edits, &mut clicked);
                 rects.push(rect);
             }
+            ex.tile_rects = rects.clone();
             if ex.arrange {
                 drag_tiles(ui, &rects, &page_tiles, &mut edits);
                 if let Some(&(c, r, _, _)) = spots.last() {
@@ -1742,6 +1745,40 @@ mod tests {
         harness.step();
         let kinds: Vec<TileKind> = harness.state().saved.explorer.pages[0].tiles.iter().map(|t| t.kind).collect();
         assert_eq!(kinds, [TileKind::Dispersion, TileKind::Table, TileKind::Flight]);
+    }
+
+    /// The *Shots | Mean* switch in a 3D tile takes the click (not the landing points under it).
+    #[test]
+    fn flight_tile_switches_to_the_means() {
+        use egui_kittest::Harness;
+
+        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        let settings = Settings { overlay: OverlayPos::Off, ..Settings::default() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(settings, tx)
+        });
+        harness.state_mut().page = Page::Shots;
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_overlay = false;
+        harness.state_mut().explorer.page = 1; // Ball flight: 3D from the tee (2×2) first
+        for _ in 0..3 {
+            harness.step();
+        }
+        // The switch sits at the top right of the first tile's view, "Mean" on its right.
+        let tile = harness.state().explorer.tile_rects.first().copied().expect("tile drawn");
+        let at = pos2(tile.right() - 30.0, tile.top() + 28.0 + 4.0 + 16.0);
+        for event in [
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+        ] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        assert!(harness.state().saved.explorer.pages[1].tiles[0].averages, "switched to the means");
     }
 
     #[test]
