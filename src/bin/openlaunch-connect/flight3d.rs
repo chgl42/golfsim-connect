@@ -457,7 +457,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
 
     // Replay the selected (or latest) shot, bottom left in the view.
     let replay = ctx.shown.iter().rev().find(|s| ctx.selected.contains(&key(s))).or_else(|| ctx.shown.last());
-    if let Some(s) = replay.filter(|_| !mean) {
+    if let Some(s) = replay.filter(|_| !mean && !ctx.display) {
         let r = Rect::from_center_size(pos2(rect.left() + 18.0, rect.bottom() - 18.0), vec2(24.0, 24.0));
         let b = ui.interact(r, egui::Id::new(("flight-replay", i)), Sense::click());
         p.circle(r.center(), 11.0, PAGE.gamma_multiply(0.8), Stroke::new(1.0, if b.hovered() { ICON } else { BUTTON_LINE }));
@@ -469,6 +469,9 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     }
 
     // Shots or means, top right in the view (after the landing points, so it gets the clicks).
+    if ctx.display {
+        return clicked;
+    }
     let options = [(false, tr("Shots")), (true, tr("Mean"))];
     let font = FontId::proportional(11.0);
     let widths: Vec<f32> = options.iter().map(|(_, l)| p.layout_no_wrap(l.to_string(), font.clone(), WHITE).size().x + 14.0).collect();

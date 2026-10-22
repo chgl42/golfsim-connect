@@ -29,6 +29,8 @@ pub struct Settings {
     pub overlay: OverlayPos,
     /// Size, background and contents of the overlay.
     pub overlay_style: OverlayStyle,
+    /// A second overlay with one tile of the shots explorer.
+    pub tile_overlay: TileOverlay,
     /// Ask GitHub for a newer release on start.
     pub check_updates: bool,
     /// Last main window size in logical points (at zoom 1), restored on start.
@@ -331,6 +333,44 @@ impl OverlayItem {
     }
 }
 
+/// A second overlay with one tile of the shots explorer, e.g. the dispersion or the flights in 3D.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TileOverlay {
+    /// Where it sits; `Off` hides it.
+    pub pos: OverlayPos,
+    /// What it shows (its size in cells is unused).
+    pub tile: Tile,
+    /// Width in points; the height is three quarters of it.
+    pub width: f32,
+    /// Background opacity (0.7–1.0).
+    pub opacity: f32,
+    /// Only the shots with the club chosen in GSPro, else all of the session.
+    pub club_only: bool,
+}
+
+impl Default for TileOverlay {
+    fn default() -> Self {
+        Self {
+            pos: OverlayPos::Off,
+            tile: Tile { kind: TileKind::Dispersion, ..Tile::default() },
+            width: 360.0,
+            opacity: 0.85,
+            club_only: false,
+        }
+    }
+}
+
+impl TileOverlay {
+    /// The widths to choose from (small, medium, large).
+    pub const WIDTHS: [f32; 3] = [280.0, 360.0, 460.0];
+
+    #[must_use]
+    pub fn height(&self) -> f32 {
+        (self.width * 0.75).round()
+    }
+}
+
 /// Where the overlay sits on the screen: a corner, the middle of an edge, or off.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -379,6 +419,7 @@ impl Default for Settings {
             debug: false,
             overlay: OverlayPos::default(),
             overlay_style: OverlayStyle::default(),
+            tile_overlay: TileOverlay::default(),
             export_format: ExportFormat::default(),
             language: Language::default(),
             notifications: true,

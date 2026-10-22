@@ -18,7 +18,7 @@ use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
 use openlaunch_connect::num;
 use openlaunch_connect::log;
-use openlaunch_connect::settings::{OverlayItem, OverlayPos, OverlayStyle, Settings};
+use openlaunch_connect::settings::{OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
 use openlaunch_connect::shape::Shape;
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
@@ -31,6 +31,7 @@ const APP_NAME: &str = "OpenLaunch Connect";
 const MPH_TO_KMH: f64 = 1.609_344;
 const M_TO_YD: f64 = 1.093_613;
 const OVERLAY_TITLE: &str = "OpenLaunch Overlay";
+const TILE_OVERLAY_TITLE: &str = "OpenLaunch Tile Overlay";
 /// Size the layout is designed for. Larger windows zoom the whole UI uniformly, or, with a fixed
 /// interface size, give the pages more room.
 const BASE_SIZE: egui::Vec2 = vec2(1000.0, 470.0);
@@ -234,6 +235,14 @@ struct App {
     explorer: explorer::ExplorerState,
     /// Sample shot shown in the overlay preview.
     preview_shot: state::LastShot,
+    /// Overlay page: the tile overlay is edited (else the status overlay).
+    overlay_tile_tab: bool,
+    /// Sample shots for the tile overlay's preview while the session has none.
+    sample_shots: std::cell::OnceCell<Vec<ShotRecord>>,
+    /// Where the status overlay is on the screen this frame (native points), if shown.
+    status_rect: Option<Rect>,
+    /// Like `overlay_first`, for the tile overlay.
+    tile_overlay_first: Option<(egui::Pos2, egui::Vec2)>,
 }
 
 impl App {
@@ -282,6 +291,10 @@ impl App {
                     shot_number: 0,
                 }
             },
+            overlay_tile_tab: false,
+            sample_shots: std::cell::OnceCell::new(),
+            status_rect: None,
+            tile_overlay_first: None,
         }
     }
 
@@ -782,6 +795,7 @@ impl App {
 
     /// Always-on-top, click-through status panel for playing GSPro in full screen.
     fn overlay(&mut self, ctx: &egui::Context) {
+        self.status_rect = None;
         let Some((ax, ay)) = self.saved.overlay.anchor().filter(|_| self.show_overlay) else {
             return;
         };
@@ -832,8 +846,8 @@ impl App {
         let capture = &mut self.capture;
         let overlay_base = &self.overlay_base;
         let user_scale = style.scale;
-        #[cfg(target_os = "macos")]
         let pos_native = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
+        self.status_rect = Some(Rect::from_min_size(pos_native, size));
         // The overlay's pass takes the zoom from the options when it begins: the overlay's size
         // there, the main window's back right after (no repaint is triggered either way).
         ctx.options_mut(|o| o.zoom_factor = user_scale);
@@ -855,8 +869,67 @@ impl App {
         ctx.options_mut(|o| o.zoom_factor = zoom);
     }
 
+    /// Always-on-top, click-through window with one tile of the shots explorer. Where it shares its
+    /// place with the status overlay, it sits below it (above it at the bottom of the screen).
+    fn tile_overlay(&mut self, ctx: &egui::Context) {
+        let cfg = self.saved.tile_overlay.clone();
+        let Some((ax, ay)) = cfg.pos.anchor().filter(|_| self.show_overlay) else {
+            return;
+        };
+        let Some(screen) = ctx.input(|i| i.viewport().monitor_size) else {
+            return;
+        };
+        let zoom = ctx.zoom_factor();
+        let size = vec2(cfg.width, cfg.height()) + vec2(2.0, 2.0) * OVERLAY_BORDER;
+        #[cfg(target_os = "macos")]
+        let visible = mac::visible_frame();
+        #[cfg(not(target_os = "macos"))]
+        let visible: Option<Rect> = None;
+        let visible = visible.unwrap_or(Rect::from_min_size(egui::Pos2::ZERO, screen * zoom));
+        let free = (visible.size() - size - vec2(2.0, 2.0) * OVERLAY_MARGIN).max(egui::Vec2::ZERO);
+        let mut pos = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
+        if let Some(status) = self.status_rect.filter(|_| cfg.pos == self.saved.overlay) {
+            pos.y = if ay < 1.0 { status.bottom() + 8.0 } else { status.top() - 8.0 - size.y };
+        }
+        #[cfg(target_os = "macos")]
+        let (first_pos, size_asked) = *self.tile_overlay_first.get_or_insert((pos, size));
+        #[cfg(not(target_os = "macos"))]
+        let (first_pos, size_asked) = (pos, size);
+        let builder = egui::ViewportBuilder::default()
+            .with_title(TILE_OVERLAY_TITLE)
+            .with_position(first_pos)
+            .with_inner_size(size_asked)
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(false)
+            .with_maximize_button(false)
+            .with_window_level(egui::WindowLevel::AlwaysOnTop)
+            .with_mouse_passthrough(true)
+            .with_active(false)
+            .with_taskbar(false);
+        let (shots, club) = state::with(|s| (s.session.clone(), s.gspro_club.clone()));
+        let units = (self.saved.metric, self.saved.meters);
+        let gspro = self.saved.gspro_results;
+        let explorer = &mut self.explorer;
+        // Drawn at its own size, whatever the main window's zoom (see `overlay`).
+        ctx.options_mut(|o| o.zoom_factor = 1.0);
+        ctx.show_viewport_immediate(tile_overlay_id(), builder, |ui, _class| {
+            #[cfg(target_os = "macos")]
+            {
+                mac::float_over_fullscreen(TILE_OVERLAY_TITLE);
+                mac::place_window(TILE_OVERLAY_TITLE, pos, size);
+            }
+            let rect = Rect::from_min_size(pos2(OVERLAY_BORDER, OVERLAY_BORDER), vec2(cfg.width, cfg.height()));
+            explorer.overlay_tile(ui, rect, 0, &cfg, &shots, club.as_deref(), units, gspro);
+        });
+        ctx.options_mut(|o| o.zoom_factor = zoom);
+    }
+
     /// Overlay position, size and contents with a preview; changes apply and are saved at once.
     fn overlay_page(&mut self, ui: &mut egui::Ui) {
+        if self.overlay_tile_tab {
+            return self.tile_overlay_page(ui);
+        }
         let mut pos = self.saved.overlay;
         let mut style = self.saved.overlay_style.clone();
         let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 254.0), Sense::hover());
@@ -887,6 +960,7 @@ impl App {
                 segments(ui, &mut style.opacity, &[(0.7, "70 %"), (0.85, "85 %"), (1.0, tr("Solid"))]);
             });
         });
+        overlay_tabs(ui, left, &mut self.overlay_tile_tab);
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
             ui.label(RichText::new(tr("Click a tile in the preview to choose what it shows, drag it to move it.")).size(13.0).color(SOFT));
@@ -919,15 +993,94 @@ impl App {
         }
     }
 
+    /// The tile overlay's position, size and tile with a preview; changes apply and are saved at once.
+    fn tile_overlay_page(&mut self, ui: &mut egui::Ui) {
+        let mut cfg = self.saved.tile_overlay.clone();
+        // One card with everything (its tabs where the status overlay's are), the preview next to it.
+        let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+        let col_w = (area.width() - 10.0) / 2.0;
+        let left = Rect::from_min_size(area.min, vec2(col_w, area.height()));
+        let right = Rect::from_min_size(pos2(area.left() + col_w + 10.0, area.top()), vec2(col_w, area.height()));
+
+        card(ui, left, tr("LAYOUT"), Icon::Layout, |ui| {
+            ui.spacing_mut().item_spacing.y = 7.0;
+            ui.horizontal(|ui| {
+                setting_label(ui, tr("Position"), 72.0);
+                overlay_picker(ui, &mut cfg.pos);
+                ui.add_space(12.0);
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
+                let p = ui.painter();
+                p.text(r.left_center() - vec2(0.0, 12.0), Align2::LEFT_CENTER, overlay_name(cfg.pos), FontId::proportional(14.0), WHITE);
+                p.text(r.left_center() + vec2(0.0, 7.0), Align2::LEFT_CENTER, tr("Under the status at its place."), FontId::proportional(12.0), MUTED);
+                p.text(r.left_center() + vec2(0.0, 23.0), Align2::LEFT_CENTER, tr("Choose the middle to turn it off."), FontId::proportional(12.0), MUTED);
+            });
+            setting_row(ui, tr("Size"), |ui| {
+                let [s, m, l] = TileOverlay::WIDTHS;
+                segments(ui, &mut cfg.width, &[(s, tr("Small")), (m, tr("Medium")), (l, tr("Large"))]);
+            });
+            setting_row(ui, tr("Background"), |ui| {
+                segments(ui, &mut cfg.opacity, &[(0.7, "70 %"), (0.85, "85 %"), (1.0, tr("Solid"))]);
+            });
+            explorer::tile_options(ui, &mut cfg.tile, self.saved.metric, self.saved.meters);
+            setting_row(ui, tr("Shots"), |ui| {
+                segments(ui, &mut cfg.club_only, &[(false, tr("This session")), (true, tr("Club in GSPro"))]);
+            });
+        });
+        overlay_tabs(ui, left, &mut self.overlay_tile_tab);
+        self.tile_overlay_preview(ui, right, &cfg);
+
+        if cfg != self.saved.tile_overlay {
+            self.saved.tile_overlay = cfg.clone();
+            self.edit.tile_overlay = cfg;
+            if let Err(e) = self.saved.save() {
+                log::info(&format!("Saving the overlay settings failed: {e}"));
+            }
+        }
+    }
+
+    /// The tile overlay on the GSPro-like backdrop, scaled to fit, with the session's shots (or
+    /// samples while there are none).
+    fn tile_overlay_preview(&mut self, ui: &mut egui::Ui, area: Rect, cfg: &TileOverlay) {
+        let p = ui.painter();
+        backdrop(p, area);
+        let anchor = cfg.pos.anchor();
+        let label_right = anchor.is_some_and(|(ax, ay)| ay > 0.5 && ax < 1.0);
+        let (label_pos, label_align) = if label_right {
+            (pos2(area.right() - 12.0, area.bottom() - 14.0), egui::Align::Max)
+        } else {
+            (pos2(area.left() + 12.0, area.bottom() - 14.0), egui::Align::Min)
+        };
+        caps_text(p, label_pos, label_align, tr("PREVIEW"), 14.0, SOFT);
+        let Some((ax, ay)) = anchor else {
+            p.text(area.center(), Align2::CENTER_CENTER, tr("Overlay off"), FontId::proportional(14.0), SOFT);
+            return;
+        };
+        let (mut shots, club) = state::with(|s| (s.session.clone(), s.gspro_club.clone()));
+        if shots.is_empty() {
+            shots = self.sample_shots.get_or_init(engine::demo_session).clone();
+        }
+        let club = club.or_else(|| shots.last().and_then(|s| s.club_code.clone()));
+        let size = vec2(cfg.width, cfg.height());
+        let pad = 9.0;
+        let room = area.size() - vec2(2.0 * pad, 2.0 * pad);
+        let scale = (room.x / size.x).min(room.y / size.y).min(1.0);
+        let free = (room - size * scale).max(egui::Vec2::ZERO);
+        let origin = area.min + vec2(pad + free.x * ax, pad + free.y * ay);
+        // Scaled on its own layer, like the status overlay's preview.
+        let layer = egui::LayerId::new(egui::Order::Middle, egui::Id::new("tile-overlay-preview"));
+        ui.ctx().set_transform_layer(layer, egui::emath::TSTransform::new(origin.to_vec2(), scale));
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, size);
+        let clip = Rect::from_min_max(((area.min - origin) / scale).to_pos2(), ((area.max - origin) / scale).to_pos2());
+        let mut tile_ui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(rect));
+        tile_ui.set_clip_rect(clip);
+        let units = (self.saved.metric, self.saved.meters);
+        self.explorer.overlay_tile(&mut tile_ui, rect, 1, cfg, &shots, club.as_deref(), units, self.saved.gspro_results);
+    }
+
     /// The overlay with a sample shot on a GSPro-like backdrop, at its size and position.
     fn overlay_preview(&self, ui: &egui::Ui, area: Rect, pos: OverlayPos, style: &mut OverlayStyle) {
-        const SKY: Color32 = Color32::from_rgb(0x1f, 0x3a, 0x5c);
-        const FAIRWAY: Color32 = Color32::from_rgb(0x23, 0x50, 0x2f);
         let p = ui.painter();
-        p.rect_filled(area, 6.0, SKY);
-        let ground = Rect::from_min_max(pos2(area.left(), area.top() + area.height() * 0.58), area.max);
-        p.rect_filled(ground, CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, FAIRWAY);
-        p.rect_stroke(area, 6.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
+        backdrop(p, area);
         let anchor = pos.anchor();
         // The label goes to the bottom corner the overlay leaves free.
         let label_right = anchor.is_some_and(|(ax, ay)| ay > 0.5 && ax < 1.0);
@@ -1128,6 +1281,7 @@ impl eframe::App for App {
             });
         });
         self.overlay(ui.ctx());
+        self.tile_overlay(ui.ctx());
         self.capture.tick(ui.ctx(), self.saved.overlay != OverlayPos::Off);
         let scale = self.saved.ui_scale;
         let old_zoom = ui.ctx().zoom_factor();
@@ -1271,6 +1425,10 @@ impl App {
 
 fn overlay_id() -> egui::ViewportId {
     egui::ViewportId::from_hash_of("overlay")
+}
+
+fn tile_overlay_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("tile-overlay")
 }
 
 /// Layer the overlay draws on, scaled down by the main window's zoom.
@@ -1595,10 +1753,13 @@ fn setting_label(ui: &mut egui::Ui, label: &str, h: f32) {
 }
 
 fn setting_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.horizontal(|ui| {
-        ui.set_min_height(34.0);
-        setting_label(ui, label, 34.0);
-        add(ui);
+    // Its own id, so equal options in two rows (e.g. "Mittel") don't clash.
+    ui.push_id(label, |ui| {
+        ui.horizontal(|ui| {
+            ui.set_min_height(34.0);
+            setting_label(ui, label, 34.0);
+            add(ui);
+        });
     });
 }
 
@@ -2557,6 +2718,36 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
 }
 
 /// The overlay position as a small screen with eight spots; the middle turns the overlay off.
+/// Sky and fairway behind the overlay previews, like GSPro.
+fn backdrop(p: &egui::Painter, area: Rect) {
+    const SKY: Color32 = Color32::from_rgb(0x1f, 0x3a, 0x5c);
+    const FAIRWAY: Color32 = Color32::from_rgb(0x23, 0x50, 0x2f);
+    p.rect_filled(area, 6.0, SKY);
+    let ground = Rect::from_min_max(pos2(area.left(), area.top() + area.height() * 0.58), area.max);
+    p.rect_filled(ground, CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, FAIRWAY);
+    p.rect_stroke(area, 6.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
+}
+
+/// Which overlay the page edits: tabs in the header of the left card (`card`).
+fn overlay_tabs(ui: &mut egui::Ui, card: Rect, tile: &mut bool) {
+    let mut right = card.right() - 16.0;
+    for (on, label) in [(true, tr("TILE")), (false, tr("STATUS"))] {
+        let w = ui.painter().layout_no_wrap(label.to_string(), cond(15.0), WHITE).size().x;
+        let r = Rect::from_min_max(pos2(right - w, card.top() + 6.0), pos2(right, card.top() + 38.0));
+        let resp = ui.interact(r, ui.id().with(("overlay-tab", on)), Sense::click());
+        let active = *tile == on;
+        let color = if active { WHITE } else if resp.hovered() { SOFT } else { MUTED };
+        caps_text(ui.painter(), pos2(r.left(), card.top() + 21.0), egui::Align::Min, label, 15.0, color);
+        if active {
+            ui.painter().line_segment([pos2(r.left(), card.top() + 37.0), pos2(r.right(), card.top() + 37.0)], Stroke::new(2.0, ACCENT));
+        }
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            *tile = on;
+        }
+        right -= w + 18.0;
+    }
+}
+
 fn overlay_picker(ui: &mut egui::Ui, value: &mut OverlayPos) {
     let (screen, _) = ui.allocate_exact_size(vec2(128.0, 72.0), Sense::hover());
     ui.painter().rect(screen, 6.0, PAGE, Stroke::new(2.0, FIELD_LINE), StrokeKind::Inside);
@@ -2964,6 +3155,43 @@ mod tests {
             harness.step();
         }
         save(&harness.render().unwrap(), "impact-shapes.png");
+    }
+
+    /// The Overlay page's tile tab with a few tiles (range session).
+    #[test]
+    #[ignore = "writes screenshots; run on demand"]
+    fn tile_overlay_states() {
+        use egui_kittest::Harness;
+        use openlaunch_connect::settings::{Camera, Tile, TileKind};
+
+        let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") { Language::German } else { Language::English };
+        i18n::set(language);
+        demo_state();
+        state::with(|s| s.session = engine::demo_range());
+        let tile = |kind| Tile { kind, ..Tile::default() };
+        for (name, cfg) in [
+            ("tile-overlay-dispersion.png", TileOverlay { pos: OverlayPos::TopRight, ..TileOverlay::default() }),
+            (
+                "tile-overlay-flight.png",
+                TileOverlay { pos: OverlayPos::BottomLeft, tile: Tile { camera: Camera::Above, ..tile(TileKind::Flight) }, club_only: true, ..TileOverlay::default() },
+            ),
+            ("tile-overlay-table.png", TileOverlay { pos: OverlayPos::Right, tile: Tile { averages: true, ..tile(TileKind::Table) }, width: 460.0, ..TileOverlay::default() }),
+        ] {
+            let settings = Settings { tile_overlay: cfg, ..Settings::default() };
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut harness = Harness::builder().with_size(BASE_SIZE).with_pixels_per_point(2.0).wgpu().build_eframe(|cc| {
+                setup_style(&cc.egui_ctx);
+                App::new(settings, tx)
+            });
+            harness.state_mut().page = Page::Overlay;
+            harness.state_mut().overlay_tile_tab = true;
+            harness.state_mut().show_overlay = false;
+            harness.state_mut().remember_size = false;
+            for _ in 0..8 {
+                harness.step();
+            }
+            save(&harness.render().unwrap(), name);
+        }
     }
 
     #[test]

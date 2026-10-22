@@ -8,7 +8,7 @@ use openlaunch_connect::history::Stat;
 use std::rc::Rc;
 
 use openlaunch_connect::shape::Shape;
-use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileSize};
+use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileOverlay, TileSize};
 
 use super::*;
 
@@ -74,6 +74,10 @@ pub(super) struct ExplorerState {
     tile_rects: Vec<Rect>,
     /// Flight paths for the 3D tiles, computed once when such a tile is shown.
     paths: HashMap<Key, Rc<FlightPath>>,
+    /// The tile overlay: its 3D camera, the shot flying in it, the latest shot it has seen.
+    overlay_views: std::cell::RefCell<HashMap<(usize, usize), flight3d::TileView>>,
+    overlay_anim: Option<(Key, Instant)>,
+    overlay_latest: Option<Option<Key>>,
 }
 
 /// A flight for drawing: points through the air (thinned out) and where the ball comes to rest.
@@ -423,14 +427,7 @@ impl App {
         });
         ui.add_space(6.0);
 
-        // Clubs in bag order (driver to putter): their colours stay put while filtering.
-        let mut codes: Vec<Option<String>> = Vec::new();
-        for s in &shots {
-            if !codes.contains(&s.club_code) {
-                codes.push(s.club_code.clone());
-            }
-        }
-        codes.sort_by_key(|c| club_rank(c.as_deref()));
+        let codes = club_codes(&shots);
         let color_of = |code: &Option<String>| {
             CLUB_COLORS[codes.iter().position(|c| c == code).unwrap_or(0) % CLUB_COLORS.len()]
         };
@@ -446,28 +443,9 @@ impl App {
             .filter(|s| !ex.only_selected || ex.selected.contains(&key(s)))
             .collect();
         let export: Vec<ShotRecord> = if ex.export_dialog { shown.iter().map(|s| (*s).clone()).collect() } else { Vec::new() };
-        // The estimate of every shot (cached), with GSPro's numbers where chosen and sent.
         let use_gspro = self.saved.gspro_results;
-        let estimates: Vec<FlightSummary> =
-            shown.iter().map(|s| *ex.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball)))).collect();
-        fn gspro_of(s: &ShotRecord, on: bool) -> Option<&openlaunch_connect::gspro_db::GsproResult> {
-            s.gspro.as_ref().filter(|_| on)
-        }
-        let flights: Vec<FlightSummary> = shown.iter().zip(&estimates).map(|(s, e)| e.with_gspro(gspro_of(s, use_gspro))).collect();
         let page_has_flight = self.saved.explorer.pages.get(ex.page).is_some_and(|p| p.tiles.iter().any(|t| t.kind == TileKind::Flight));
-        let paths: Vec<Rc<FlightPath>> = if page_has_flight {
-            shown
-                .iter()
-                .zip(&estimates)
-                .zip(&flights)
-                .map(|((s, e), f)| {
-                    let path = ex.paths.entry(key(s)).or_insert_with(|| Rc::new(FlightPath::from(&flight::fly(&s.ball)))).clone();
-                    if gspro_of(s, use_gspro).is_some() { Rc::new(path.fitted(e, f)) } else { path }
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let (flights, paths) = ex.flights_of(&shown, use_gspro, page_has_flight);
 
         // Second row: the filter and what to do with the selection, or the page while arranging.
         let mut exclude: Option<bool> = None;
@@ -588,6 +566,7 @@ impl App {
                     color_of: &color_of,
                     units,
                     all_time: self.all_time,
+                    display: false,
                 };
                 tile_ui(ui, rect, i, tile, ex.arrange, page_tiles.len(), &ctx, focus, &mut edits, &mut clicked);
                 rects.push(rect);
@@ -706,6 +685,141 @@ impl App {
     }
 }
 
+impl ExplorerState {
+    /// The estimate of every shot (cached), with GSPro's numbers where chosen and sent, and their
+    /// paths for the 3D tiles when `with_paths` (else none).
+    fn flights_of(&mut self, shown: &[&ShotRecord], use_gspro: bool, with_paths: bool) -> (Vec<FlightSummary>, Vec<Rc<FlightPath>>) {
+        let estimates: Vec<FlightSummary> =
+            shown.iter().map(|s| *self.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball)))).collect();
+        let gspro_of = |s: &ShotRecord| s.gspro.filter(|_| use_gspro);
+        let flights: Vec<FlightSummary> = shown.iter().zip(&estimates).map(|(s, e)| e.with_gspro(gspro_of(s).as_ref())).collect();
+        let paths = if with_paths {
+            shown
+                .iter()
+                .zip(&estimates)
+                .zip(&flights)
+                .map(|((s, e), f)| {
+                    let path = self.paths.entry(key(s)).or_insert_with(|| Rc::new(FlightPath::from(&flight::fly(&s.ball)))).clone();
+                    if gspro_of(s).is_some() { Rc::new(path.fitted(e, f)) } else { path }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        (flights, paths)
+    }
+
+    /// The tile overlay's tile in `rect` (its window, or the preview `slot` 1): the session's shots,
+    /// or those with the club chosen in GSPro. Nothing to click; a new shot flies in the 3D tile.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn overlay_tile(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        slot: usize,
+        cfg: &TileOverlay,
+        shots: &[ShotRecord],
+        club: Option<&str>,
+        units: (bool, bool),
+        use_gspro: bool,
+    ) {
+        let latest = shots.last().map(key);
+        if let Some(seen) = &self.overlay_latest
+            && latest.is_some()
+            && *seen != latest
+        {
+            self.overlay_anim = latest.clone().map(|k| (k, Instant::now()));
+        }
+        self.overlay_latest = Some(latest);
+        if self.overlay_anim.as_ref().is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(15)) {
+            self.overlay_anim = None;
+        }
+        let codes = club_codes(shots);
+        let color_of = |code: &Option<String>| CLUB_COLORS[codes.iter().position(|c| c == code).unwrap_or(0) % CLUB_COLORS.len()];
+        let club = club.filter(|_| cfg.club_only);
+        let shown: Vec<&ShotRecord> = shots.iter().filter(|s| club.is_none() || s.club_code.as_deref() == club).collect();
+        let (flights, paths) = self.flights_of(&shown, use_gspro, cfg.tile.kind == TileKind::Flight);
+        let selected = BTreeSet::new();
+        let ctx = TileCtx {
+            shown: &shown,
+            flights: &flights,
+            paths: &paths,
+            gspro: use_gspro,
+            page: usize::MAX,
+            views: &self.overlay_views,
+            anim: self.overlay_anim.as_ref().map(|(k, t)| (k, t.elapsed().as_secs_f32())),
+            selected: &selected,
+            color_of: &color_of,
+            units: Units { metric: units.0, meters: units.1 },
+            all_time: false,
+            display: true,
+        };
+        let p = ui.painter();
+        p.rect(rect, 8.0, TILE.gamma_multiply(cfg.opacity), Stroke::new(1.0, LINE), StrokeKind::Inside);
+        let head = Rect::from_min_size(rect.min, vec2(rect.width(), 28.0)).shrink2(vec2(10.0, 0.0));
+        let mut title = kind_name(cfg.tile.kind).to_uppercase();
+        if let Some(code) = club {
+            title = format!("{title} · {}", club_name(code).to_uppercase());
+        }
+        p.text(head.left_center(), Align2::LEFT_CENTER, title, cond(14.0), LABEL);
+        p.line_segment([pos2(rect.left(), head.bottom()), pos2(rect.right(), head.bottom())], Stroke::new(1.0, LINE));
+        let body = Rect::from_min_max(pos2(rect.left() + 8.0, head.bottom() + 4.0), rect.max - vec2(8.0, 6.0));
+        // The last shot is the one the details show.
+        let focus = shown.last().copied();
+        tile_body(ui, body, 1000 + slot, &cfg.tile, &ctx, focus, &mut Vec::new(), &mut None);
+    }
+}
+
+/// What the tile overlay shows, on the Overlay page: the kind of tile and its switches.
+pub(super) fn tile_options(ui: &mut egui::Ui, tile: &mut Tile, metric: bool, meters: bool) {
+    let u = Units { metric, meters };
+    setting_row(ui, tr("Tile"), |ui| {
+        egui::ComboBox::from_id_salt("tile-overlay-kind").width(150.0).selected_text(kind_name(tile.kind)).show_ui(ui, |ui| {
+            for k in TileKind::ALL {
+                ui.selectable_value(&mut tile.kind, k, kind_name(k));
+            }
+        });
+    });
+    match tile.kind {
+        TileKind::Table => setting_row(ui, tr("Shows"), |ui| {
+            segments(ui, &mut tile.averages, &[(false, tr("Shots")), (true, tr("Averages"))]);
+        }),
+        TileKind::Dispersion => setting_row(ui, tr("Shows"), |ui| {
+            segments(ui, &mut tile.total, &[(false, tr("Carry")), (true, tr("Total"))]);
+        }),
+        TileKind::Flight => {
+            setting_row(ui, tr("Camera"), |ui| {
+                segments(ui, &mut tile.camera, &Camera::ALL.map(|c| (c, camera_name(c))));
+            });
+            setting_row(ui, tr("Shows"), |ui| {
+                segments(ui, &mut tile.averages, &[(false, tr("Shots")), (true, tr("Mean"))]);
+            });
+        }
+        TileKind::Scatter => setting_row(ui, tr("Axes"), |ui| {
+            for (axis, value) in [("x", &mut tile.x), ("y", &mut tile.y)] {
+                egui::ComboBox::from_id_salt(("tile-overlay-axis", axis)).width(130.0).selected_text(metric_label(*value, u)).show_ui(ui, |ui| {
+                    for m in Metric::ALL {
+                        ui.selectable_value(value, m, metric_label(m, u));
+                    }
+                });
+            }
+        }),
+        TileKind::Details => {}
+    }
+}
+
+/// Clubs in bag order (driver to putter), so their colours stay put while filtering.
+fn club_codes(shots: &[ShotRecord]) -> Vec<Option<String>> {
+    let mut codes: Vec<Option<String>> = Vec::new();
+    for s in shots {
+        if !codes.contains(&s.club_code) {
+            codes.push(s.club_code.clone());
+        }
+    }
+    codes.sort_by_key(|c| club_rank(c.as_deref()));
+    codes
+}
+
 /// While arranging, tiles are dragged by their body onto another tile's place. The tile under
 /// the pointer is outlined, a label follows the pointer.
 fn drag_tiles(ui: &mut egui::Ui, rects: &[Rect], tiles: &[Tile], edits: &mut Vec<Edit>) {
@@ -802,6 +916,8 @@ struct TileCtx<'a> {
     color_of: &'a dyn Fn(&Option<String>) -> Color32,
     units: Units,
     all_time: bool,
+    /// Shown, not used (the tile overlay): no controls in the tiles.
+    display: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -902,6 +1018,21 @@ fn tile_ui(
         });
     }
 
+    tile_body(ui, body, i, tile, ctx, focus, edits, clicked);
+}
+
+/// What a tile shows, drawn into `body`.
+#[allow(clippy::too_many_arguments)]
+fn tile_body(
+    ui: &mut egui::Ui,
+    body: Rect,
+    i: usize,
+    tile: &Tile,
+    ctx: &TileCtx,
+    focus: Option<&ShotRecord>,
+    edits: &mut Vec<Edit>,
+    clicked: &mut Option<Key>,
+) {
     let mut body_ui = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
     body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
     match tile.kind {
@@ -1237,6 +1368,12 @@ fn scatter(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCtx, edits: &mut 
         let w = ((ui.available_width() - 36.0) / 2.0).max(40.0);
         for (axis, value) in [("Y", &mut y), ("X", &mut x)] {
             ui.label(RichText::new(axis).size(11.0).color(MUTED));
+            // On display only (the tile overlay) the axes are just named.
+            if ctx.display {
+                ui.label(RichText::new(metric_label(*value, u)).size(11.5).color(SOFT));
+                ui.add_space(8.0);
+                continue;
+            }
             egui::ComboBox::from_id_salt(("scatter", i, axis)).width(w).selected_text(RichText::new(metric_label(*value, u)).size(11.5)).show_ui(ui, |ui| {
                 for m in Metric::ALL {
                     ui.selectable_value(value, m, metric_label(m, u));
