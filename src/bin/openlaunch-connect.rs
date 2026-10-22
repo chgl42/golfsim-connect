@@ -18,7 +18,7 @@ use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
 use openlaunch_connect::num;
 use openlaunch_connect::log;
-use openlaunch_connect::settings::{OverlayPos, OverlayStyle, Settings};
+use openlaunch_connect::settings::{OverlayItem, OverlayPos, OverlayStyle, Settings};
 use openlaunch_connect::shape::Shape;
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
@@ -219,6 +219,8 @@ struct App {
     /// Session length when `all_shots` was loaded (new shots reload it).
     all_shots_session: usize,
     export_note: Option<String>,
+    /// Where the overlay preview's tiles were drawn (last frame).
+    overlay_tile_rects: std::cell::RefCell<Vec<(usize, usize, Rect)>>,
     /// Settings page: asking before the shots view is reset.
     confirm_reset: bool,
     /// Shots page: page shown, filter and selection.
@@ -257,6 +259,7 @@ impl App {
             all_shots: Vec::new(),
             all_shots_session: 0,
             export_note: None,
+            overlay_tile_rects: Default::default(),
             confirm_reset: false,
             explorer: explorer::ExplorerState::default(),
             preview_shot: {
@@ -849,42 +852,24 @@ impl App {
         });
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
-            let s = &mut style;
-            let items: [(&mut bool, &str); 13] = [
-                (&mut s.club, tr("Club")),
-                (&mut s.battery, tr("Battery")),
-                (&mut s.tempo, tr("Tempo")),
-                (&mut s.ball_speed, tr("Ball Speed")),
-                (&mut s.vla, "VLA"),
-                (&mut s.hla, "HLA"),
-                (&mut s.spin, tr("Total Spin")),
-                (&mut s.spin_axis, tr("Spin Axis")),
-                (&mut s.club_speed, tr("Club Speed")),
-                (&mut s.smash, tr("Smash Factor")),
-                (&mut s.impact_side, tr("Impact from the side")),
-                (&mut s.impact_top, tr("Impact from above")),
-                (&mut s.to_pin, tr("Distance to the pin")),
-            ];
-            let body = ui.max_rect();
-            let cell_w = body.width() / 2.0;
-            for (i, (on, label)) in items.into_iter().enumerate() {
-                let r = Rect::from_min_size(body.min + vec2((i % 2) as f32 * cell_w, (i / 2) as f32 * 28.0), vec2(cell_w, 26.0));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    toggle(ui, on, label);
-                });
-            }
+            ui.label(RichText::new(tr("Click a tile in the preview to choose what it shows, drag it to move it.")).size(13.0).color(SOFT));
+            ui.label(RichText::new(tr("+ at the end of the tiles adds a column. The status always comes first.")).size(12.0).color(MUTED));
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(style.layout != OverlayItem::default_layout(), secondary_button(tr("Reset")))
+                    .on_hover_text(tr("Back to the tiles as they came"))
+                    .clicked()
+                {
+                    style.layout = OverlayItem::default_layout();
+                }
+            });
+
         });
-        ui.painter().text(
-            pos2(right.right() - 16.0, right.top() + 21.0),
-            Align2::RIGHT_CENTER,
-            tr("The status is always shown"),
-            FontId::proportional(12.0),
-            MUTED,
-        );
 
         // Below the cards, down to the page's bottom margin (the cards move the layout cursor).
         let preview = Rect::from_min_max(pos2(area.left(), area.bottom() + 10.0), pos2(area.right(), ui.max_rect().bottom()));
-        self.overlay_preview(ui, preview, pos, &style);
+        self.overlay_preview(ui, preview, pos, &mut style);
 
         if pos != self.saved.overlay || style != self.saved.overlay_style {
             self.saved.overlay = pos;
@@ -898,7 +883,7 @@ impl App {
     }
 
     /// The overlay with a sample shot on a GSPro-like backdrop, at its size and position.
-    fn overlay_preview(&self, ui: &egui::Ui, area: Rect, pos: OverlayPos, style: &OverlayStyle) {
+    fn overlay_preview(&self, ui: &egui::Ui, area: Rect, pos: OverlayPos, style: &mut OverlayStyle) {
         const SKY: Color32 = Color32::from_rgb(0x1f, 0x3a, 0x5c);
         const FAIRWAY: Color32 = Color32::from_rgb(0x23, 0x50, 0x2f);
         let p = ui.painter();
@@ -921,7 +906,8 @@ impl App {
         };
         let ready = (R10Status::Ready, "", true);
         let pin = Some(pin_text(139.0, self.saved.meters));
-        let content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot), pin);
+        let mut content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot), pin);
+        content.edit = true;
         let size = content.size(ui.ctx());
         let pad = 9.0;
         let room = area.size() - vec2(2.0 * pad, 2.0 * pad);
@@ -933,7 +919,119 @@ impl App {
         let layer = egui::LayerId::new(egui::Order::Middle, egui::Id::new("overlay-preview"));
         ui.ctx().set_transform_layer(layer, egui::emath::TSTransform::new(origin.to_vec2(), scale));
         let clip = Rect::from_min_max(((area.min - origin) / scale).to_pos2(), ((area.max - origin) / scale).to_pos2());
-        overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(clip), Rect::from_min_size(egui::Pos2::ZERO, size), &content);
+        let tiles = overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(clip), Rect::from_min_size(egui::Pos2::ZERO, size), &content);
+
+        // A click on a tile picks what it shows; dragging it onto another tile swaps the two (the
+        // status stays where it is).
+        let to_page = |r: Rect| Rect::from_min_max(origin + r.min.to_vec2() * scale, origin + r.max.to_vec2() * scale);
+        let tiles: Vec<(usize, usize, Rect)> =
+            tiles.into_iter().filter(|(k, row, _)| (*k, *row) != (0, 0)).map(|(k, row, r)| (k, row, to_page(r).intersect(area))).collect();
+        *self.overlay_tile_rects.borrow_mut() = tiles.clone();
+        let pointer = ui.ctx().pointer_interact_pos();
+        let mut swap: Option<((usize, usize), (usize, usize))> = None;
+        let mut insert: Option<((usize, usize), usize)> = None;
+        // The lines between the columns (and after the last one): (place in the layout, x, top, bottom).
+        let (top, bottom) = tiles.iter().fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(t.2.top()), b.max(t.2.bottom())));
+        let mut lines: Vec<(usize, f32)> = Vec::new();
+        for &(k, _, r) in &tiles {
+            if k > 0 && !lines.iter().any(|l| l.0 == k) {
+                lines.push((k, r.left()));
+            }
+        }
+        if let Some(&(k, _, _)) = tiles.iter().max_by_key(|t| t.0) {
+            let right = tiles.iter().filter(|t| t.0 == k).map(|t| t.2.right()).fold(f32::MIN, f32::max);
+            lines.push((k + 1, right));
+        }
+        let line_at = |at: egui::Pos2| {
+            lines.iter().copied().filter(|l| (l.1 - at.x).abs() <= 7.0 && at.y >= top && at.y <= bottom).min_by(|a, b| (a.1 - at.x).abs().total_cmp(&(b.1 - at.x).abs()))
+        };
+        for &(k, row, r) in &tiles {
+            let resp = ui.interact(r, ui.id().with(("overlay-tile", k, row)), Sense::click_and_drag());
+            // Onto a line between two columns: a new column there; else onto a tile: swap.
+            let on_line = pointer.and_then(line_at);
+            let target = pointer
+                .filter(|_| on_line.is_none())
+                .and_then(|at| tiles.iter().find(|t| t.2.contains(at)))
+                .filter(|t| (t.0, t.1) != (k, row));
+            if resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("overlay-drag")));
+                fg.rect_filled(r, 4.0, Color32::from_black_alpha(90));
+                if let Some(t) = target {
+                    fg.rect_stroke(t.2.shrink(1.0), 4.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+                }
+                if let Some((_, x)) = on_line {
+                    fg.line_segment([pos2(x, top + 2.0), pos2(x, bottom - 2.0)], Stroke::new(3.0, ACCENT));
+                }
+                if let Some(at) = pointer {
+                    let name = style.layout.get(k).and_then(|c| c[row]).map_or(tr("Empty"), overlay_item_name);
+                    let galley = fg.layout_no_wrap(name.to_string(), FontId::proportional(12.0), WHITE);
+                    let label = Rect::from_min_size(at + vec2(12.0, 8.0), galley.size() + vec2(14.0, 6.0));
+                    fg.rect(label, 5.0, BUTTON, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+                    fg.galley(label.min + vec2(7.0, 3.0), galley, WHITE);
+                }
+            } else if resp.hovered() {
+                ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, ICON), StrokeKind::Inside);
+            }
+            if resp.drag_stopped() {
+                if let Some((at, _)) = on_line {
+                    insert = Some(((k, row), at));
+                } else if let Some(t) = target {
+                    swap = Some(((k, row), (t.0, t.1)));
+                }
+            }
+            let resp = resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(tr("Click to choose what this tile shows, drag to move it"));
+            egui::Popup::menu(&resp).show(|ui| {
+                let current = style.layout.get(k).and_then(|c| c[row]);
+                for item in OverlayItem::CHOICES {
+                    if item.is_graphic() && k == 0 {
+                        continue;
+                    }
+                    if item == OverlayItem::ImpactSide {
+                        ui.separator();
+                    }
+                    if ui.selectable_label(current == Some(item), overlay_item_name(item)).clicked() {
+                        set_tile(&mut style.layout, k, row, Some(item));
+                    }
+                }
+                ui.separator();
+                if ui.selectable_label(current.is_none(), tr("Empty")).clicked() {
+                    set_tile(&mut style.layout, k, row, None);
+                }
+                // A value may fill its column (not next to the status, not a graphic).
+                if k > 0
+                    && let Some(item) = current.filter(|i| !i.is_graphic())
+                {
+                    let tall = style.layout[k] == [Some(item), Some(item)];
+                    if ui.selectable_label(tall, tr("Double height")).clicked() {
+                        style.layout[k] = if tall { [Some(item), None] } else { [Some(item), Some(item)] };
+                    }
+                }
+                if k > 0 && ui.button(RichText::new(tr("Remove column")).color(RED)).clicked() {
+                    style.layout.remove(k);
+                }
+            });
+        }
+        // + right after the last column adds one.
+        if let Some(right) = tiles.iter().map(|t| t.2.right()).reduce(f32::max) {
+            let top = tiles.iter().map(|t| t.2.top()).fold(f32::MAX, f32::min);
+            let bottom = tiles.iter().map(|t| t.2.bottom()).fold(f32::MIN, f32::max);
+            let r = Rect::from_center_size(pos2(right, (top + bottom) / 2.0), vec2(20.0, 20.0));
+            let add = ui.interact(r, ui.id().with("overlay-add-column"), Sense::click());
+            let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("overlay-add")));
+            fg.circle(r.center(), 9.5, if add.hovered() { ACCENT } else { BUTTON }, Stroke::new(1.0, if add.hovered() { ACCENT_HOVER } else { BUTTON_LINE }));
+            fg.line_segment([r.center() - vec2(4.5, 0.0), r.center() + vec2(4.5, 0.0)], Stroke::new(1.6, WHITE));
+            fg.line_segment([r.center() - vec2(0.0, 4.5), r.center() + vec2(0.0, 4.5)], Stroke::new(1.6, WHITE));
+            if add.on_hover_text(tr("Add an empty column at the end")).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                style.layout.push([None, None]);
+            }
+        }
+        if let Some((a, b)) = swap {
+            swap_tiles(&mut style.layout, a, b);
+        }
+        if let Some((from, at)) = insert {
+            insert_tile(&mut style.layout, from, at);
+        }
     }
 
     fn log(&mut self, ui: &mut egui::Ui) {
@@ -1682,32 +1780,55 @@ fn status_word(r10: R10Status, gs_ok: bool) -> (Color32, &'static str) {
 }
 
 /// Overlay content: status, club and battery on top; last shot (or what's wrong) below.
-/// Space for the battery at the right of the overlay's status row.
-const OVERLAY_BATTERY_W: f32 = 96.0;
 /// Height of the two-line overlay with the impact graphics.
 const OVERLAY_IMPACT_H: f32 = 96.0;
+/// Room in front of the first tile (the status colour bar) and after the last one.
+const TILE_PAD_L: f32 = 18.0;
+const TILE_PAD_R: f32 = 16.0;
+/// Between two columns of tiles (a thin line in the middle).
+const TILE_GAP: f32 = 24.0;
+/// Room for a value's symbol in front of it.
+const GLYPH_W: f32 = 22.0;
+/// Size of the figures in a tile of double height.
+const TALL_SIZE: f32 = 30.0;
+/// Width of an empty place in the preview.
+const EMPTY_TILE_W: f32 = 44.0;
 
-/// What the overlay shows: the status word, the chosen extras and one line with the
-/// chosen values of the last shot (or what's wrong).
+/// What a tile shows.
+#[derive(Clone, PartialEq, Debug)]
+enum Cell {
+    /// Dot and status word in the status colour.
+    Status,
+    /// A value, with its symbol in front.
+    Value { glyph: Option<Glyph>, text: String, color: Color32 },
+    /// Battery level of the R10.
+    Battery(u8),
+    /// An impact graphic, filling its column.
+    Graphic(OverlayItem),
+    /// A value filling its column, in large figures.
+    Tall(Box<Cell>),
+}
+
+/// What the overlay shows: the tiles (columns of two), or the status and what's wrong.
 struct OverlayContent {
     color: Color32,
     word: &'static str,
-    club: Option<String>,
-    tempo: Option<String>,
-    battery: Option<u8>,
-    line: String,
-    line_color: Color32,
+    /// The tiles in columns (top, bottom); the first one holds the status.
+    columns: Vec<[Option<Cell>; 2]>,
+    /// Not ready, no shot yet or not delivered: shown next to the first column instead of the
+    /// others (the battery stays).
+    message: Option<(String, Color32)>,
     one_line: bool,
     opacity: f32,
-    /// Angles for the impact graphics (when on and a shot is shown).
+    /// Angles for the impact graphics (when a shot is shown).
     impact: Option<Impact>,
+    /// Shown in the overlay page's preview: empty places stay visible to put something there.
+    edit: bool,
 }
 
 /// What the impact graphics show, in degrees: angle of attack and club path need club data.
 #[derive(Clone, Copy)]
 struct Impact {
-    side: bool,
-    top: bool,
     spin_axis: f64,
     aoa: Option<f64>,
     vla: f64,
@@ -1737,150 +1858,476 @@ impl OverlayContent {
     ) -> Self {
         let (color, word) = status_word(r10, gs_ok);
         let ready = r10 == R10Status::Ready && gs_ok;
-        let tempo = last
-            .and_then(|s| s.tempo)
-            .filter(|_| style.tempo && ready)
-            .map(|t| format!("{} {:.1}:1", tr("Tempo"), t.ratio()));
-        let (line, line_color) = match (last, ready) {
-            (_, false) if r10 != R10Status::Ready => (tr_detail(r10_detail), AMBER),
-            (_, false) => (tr("GSPro not connected").to_string(), AMBER),
-            (Some(s), true) if !s.delivered => (tr("Last shot NOT delivered to GSPro").to_string(), AMBER),
-            (Some(s), true) => {
-                let mut values = shot_values(s, style, metric);
-                values.extend(pin.filter(|_| style.to_pin));
-                // One line: the tempo joins the values instead of sitting next to the battery.
-                if style.one_line {
-                    values.extend(tempo.clone());
-                }
-                (values.join("  ·  "), WHITE)
-            }
-            (None, true) => (tr("Hit away").to_string(), SOFT),
+        let message = match (last, ready) {
+            (_, false) if r10 != R10Status::Ready => Some((tr_detail(r10_detail), AMBER)),
+            (_, false) => Some((tr("GSPro not connected").to_string(), AMBER)),
+            (Some(s), true) if !s.delivered => Some((tr("Last shot NOT delivered to GSPro").to_string(), AMBER)),
+            (Some(_), true) => None,
+            (None, true) => Some((tr("Hit away").to_string(), SOFT)),
         };
-        let impact = last.filter(|s| (style.impact_side || style.impact_top) && ready && s.delivered).map(|s| Impact {
-            side: style.impact_side,
-            top: style.impact_top,
+        let shot = last.filter(|_| message.is_none());
+        let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
+        let value = |glyph, text: String| Some(Cell::Value { glyph, text, color: WHITE });
+        let cell = |item: OverlayItem| -> Option<Cell> {
+            match item {
+                OverlayItem::Status => Some(Cell::Status),
+                OverlayItem::Club => club.map(|c| Cell::Value { glyph: None, text: club_name(c), color: SOFT }),
+                OverlayItem::Battery => battery.map(Cell::Battery),
+                OverlayItem::Pin => pin.clone().filter(|_| shot.is_some()).and_then(|p| value(Some(Glyph::Pin), p)),
+                OverlayItem::ImpactSide | OverlayItem::ImpactTop => shot.map(|_| Cell::Graphic(item)),
+                _ => {
+                    let s = shot?;
+                    let b = &s.ball;
+                    match item {
+                        OverlayItem::BallSpeed => value(Some(Glyph::BallSpeed), format!("{:.1} {unit}", b.speed * factor)),
+                        OverlayItem::ClubSpeed => value(Some(Glyph::ClubSpeed), format!("{:.1} {unit}", s.club?.speed * factor)),
+                        OverlayItem::Smash => value(Some(Glyph::Smash), format!("{:.2}", history::smash(b, s.club.as_ref())?)),
+                        OverlayItem::Spin => value(Some(Glyph::Spin), format!("{:.0}", b.total_spin)),
+                        OverlayItem::Vla => value(None, format!("VLA {}°", num(b.vla, 1))),
+                        OverlayItem::Hla => value(None, format!("HLA {}°", num(b.hla, 1))),
+                        OverlayItem::SpinAxis => value(None, format!("{} {}°", tr("Axis"), num(b.spin_axis, 1))),
+                        OverlayItem::Tempo => value(Some(Glyph::Tempo), format!("{:.1} : 1", s.tempo?.ratio())),
+                        _ => None,
+                    }
+                }
+            }
+        };
+        // A graphic fills its column.
+        let mut columns: Vec<[Option<Cell>; 2]> = style
+            .layout
+            .iter()
+            .map(|[a, b]| match (a.filter(|i| i.is_graphic()), b.filter(|i| i.is_graphic())) {
+                (Some(g), _) | (None, Some(g)) => [cell(g), None],
+                // The same value in both places: one tile of double height.
+                _ if a.is_some() && a == b && *a != Some(OverlayItem::Status) => [a.and_then(cell).map(|c| Cell::Tall(Box::new(c))), None],
+                _ => [a.and_then(cell), b.and_then(cell)],
+            })
+            .collect();
+        // The status always comes first.
+        match columns.first_mut() {
+            Some(first) if first[0] != Some(Cell::Status) => first[0] = Some(Cell::Status),
+            None => columns.push([Some(Cell::Status), None]),
+            _ => {}
+        }
+        let impact = last.filter(|_| ready).filter(|s| s.delivered).map(|s| Impact {
             spin_axis: s.ball.spin_axis,
             aoa: s.club.map(|c| c.angle_of_attack),
             vla: s.ball.vla,
             path: s.club.map(|c| c.path),
             hla: s.ball.hla,
         });
-        Self {
-            impact,
-            color,
-            word,
-            club: club.filter(|_| style.club).map(club_name),
-            tempo: tempo.filter(|_| !style.one_line),
-            battery: battery.filter(|_| style.battery),
-            line,
-            line_color,
-            one_line: style.one_line,
-            opacity: style.opacity,
+        Self { color, word, columns, message, one_line: style.one_line, opacity: style.opacity, impact, edit: false }
+    }
+
+    /// The columns drawn with their place in the layout: all of them with a shot, else the first
+    /// one and the battery. While editing (the preview), empty columns and tiles stay as places.
+    fn shown_columns(&self) -> Vec<(usize, [Option<&Cell>; 2])> {
+        self.columns
+            .iter()
+            .enumerate()
+            .map(|(k, [a, b])| {
+                let shows = |c: &Cell| self.message.is_none() || k == 0 || matches!(c, Cell::Battery(_));
+                (k, [a.as_ref().filter(|c| shows(c)), b.as_ref().filter(|c| shows(c))])
+            })
+            .filter(|(_, [a, b])| a.is_some() || b.is_some() || (self.edit && self.message.is_none()))
+            .collect()
+    }
+
+    /// The tiles one after the other (one line): place in the layout and what it shows (`None`: an
+    /// empty place while editing).
+    fn shown_tiles(&self) -> Vec<(usize, usize, Option<&Cell>)> {
+        let mut out = Vec::new();
+        for (k, col) in self.shown_columns() {
+            let whole = matches!(col[0], Some(Cell::Graphic(_) | Cell::Tall(_)));
+            for (r, cell) in col.into_iter().enumerate() {
+                if cell.is_some() || (self.edit && self.message.is_none() && !(whole && r == 1)) {
+                    out.push((k, r, cell));
+                }
+            }
         }
+        out
     }
 
-    /// Panel size at scale 1: two lines at least `OVERLAY_SIZE`, wider for long contents.
+    /// Panel size at scale 1.
     fn size(&self, ctx: &egui::Context) -> egui::Vec2 {
-        let w = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
-        let extra = |text: &Option<String>, gap: f32| text.as_deref().map_or(0.0, |t| gap + w(t, FontId::proportional(14.0)));
-        let battery = if self.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
-        let text = if self.one_line {
-            let line = if self.line.is_empty() { 0.0 } else { 16.0 + w(&self.line, FontId::proportional(14.0)) };
-            let width = 18.0 + 16.0 + w(self.word, cond(20.0)) + extra(&self.club, 12.0) + line + battery;
-            vec2(width.ceil(), 40.0)
-        } else {
-            let top = 18.0 + 16.0 + w(self.word, cond(24.0)) + extra(&self.club, 12.0) + extra(&self.tempo, 24.0) + battery;
-            let bottom = 18.0 + w(&self.line, FontId::proportional(14.0)) + 14.0;
-            // Taller with the impact graphics, which have their values underneath.
-            let h = if self.impact.is_some() { OVERLAY_IMPACT_H } else { OVERLAY_SIZE.y };
-            vec2(top.max(bottom).max(OVERLAY_SIZE.x).ceil(), h)
-        };
-        text + vec2(self.graphics_width(), 0.0)
+        let measure = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
+        let (tiles, height) = self.tiles(&measure);
+        let width = tiles.last().map_or(TILE_PAD_L, |t| t.0 + t.1) + TILE_PAD_R;
+        vec2(width.ceil(), height)
     }
 
-    /// Room for the two impact graphics on the right (none without them).
-    fn graphics_width(&self) -> f32 {
-        let count = self.impact.map_or(0, |i| usize::from(i.side) + usize::from(i.top));
-        count as f32 * (impact_panel_width(self.one_line) + 1.0)
+    /// Where the columns go (left edge and width, from the panel's left) and the panel's height.
+    /// The message, if any, comes after the first column as one more "column".
+    fn tiles(&self, measure: &dyn Fn(&str, FontId) -> f32) -> (Vec<(f32, f32)>, f32) {
+        let columns = self.shown_columns();
+        let mut x = TILE_PAD_L;
+        let mut out = Vec::new();
+        let width = |cell: Option<&Cell>| cell.map_or(EMPTY_TILE_W, |c| cell_width(c, self.word, self.one_line, measure));
+        if self.one_line {
+            // One row: every tile after the other, the message after the first.
+            for (n, (_, _, cell)) in self.shown_tiles().into_iter().enumerate() {
+                let w = width(cell);
+                out.push((x, w));
+                x += w + 16.0;
+                if n == 0
+                    && let Some((text, _)) = &self.message
+                {
+                    let w = measure(text, FontId::proportional(14.0));
+                    out.push((x, w));
+                    x += w + 16.0;
+                }
+            }
+            return (out, 40.0);
+        }
+        for (n, (_, col)) in columns.iter().enumerate() {
+            let whole = matches!(col[0], Some(Cell::Graphic(_) | Cell::Tall(_)));
+            let w = if whole { width(col[0]) } else { col.iter().map(|c| width(*c)).fold(0.0, f32::max) };
+            out.push((x, w));
+            x += w + TILE_GAP;
+            if n == 0
+                && let Some((text, _)) = &self.message
+            {
+                let w = measure(text, FontId::proportional(14.0));
+                out.push((x, w));
+                x += w + TILE_GAP;
+            }
+        }
+        // Taller with an impact graphic, which has its values underneath.
+        let graphic = columns.iter().any(|(_, c)| matches!(c[0], Some(Cell::Graphic(_))));
+        (out, if graphic { OVERLAY_IMPACT_H } else { OVERLAY_SIZE.y })
     }
 }
 
-/// The chosen values of a shot, e.g. "198.3 km/h", "VLA 16.5°", "7146 rpm".
-/// "Pin 139 m": the distance left to the pin, in metres or yards.
+/// Width of a tile's contents.
+fn cell_width(cell: &Cell, word: &str, one_line: bool, measure: &dyn Fn(&str, FontId) -> f32) -> f32 {
+    match cell {
+        Cell::Status => 16.0 + measure(word, cond(if one_line { 20.0 } else { 24.0 })),
+        Cell::Value { glyph, text, .. } => (if glyph.is_some() { GLYPH_W } else { 0.0 }) + measure(text, FontId::proportional(14.0)),
+        Cell::Battery(level) => 32.0 + measure(&format!("{level} %"), FontId::proportional(13.0)),
+        // The panel spans the gaps on both sides.
+        Cell::Graphic(_) => impact_panel_width(one_line) - if one_line { 16.0 } else { TILE_GAP },
+        Cell::Tall(inner) if one_line => cell_width(inner, word, true, measure),
+        Cell::Tall(inner) => match inner.as_ref() {
+            Cell::Value { glyph, text, .. } => (if glyph.is_some() { GLYPH_W + 4.0 } else { 0.0 }) + measure(text, cond(TALL_SIZE)),
+            other => cell_width(other, word, false, measure),
+        },
+    }
+}
+
+/// Put `item` into a tile; an impact graphic takes the whole column, and a value put where a
+/// graphic was leaves the other place empty.
+fn set_tile(layout: &mut [[Option<OverlayItem>; 2]], k: usize, row: usize, item: Option<OverlayItem>) {
+    let Some(col) = layout.get_mut(k) else { return };
+    let tall = col[0].is_some() && col[0] == col[1];
+    if item.is_some_and(OverlayItem::is_graphic) || col.iter().flatten().any(|i| i.is_graphic()) {
+        *col = [item, None];
+    } else if tall {
+        // A tile of double height keeps its height with the new value.
+        *col = [item, item];
+    } else {
+        col[row] = item;
+    }
+}
+
+/// Swap two tiles; when one of them fills its column, the two columns swap (never the first,
+/// which holds the status).
+fn swap_tiles(layout: &mut [[Option<OverlayItem>; 2]], (k1, r1): (usize, usize), (k2, r2): (usize, usize)) {
+    if k1 >= layout.len() || k2 >= layout.len() {
+        return;
+    }
+    // Graphics and tiles of double height fill their column: they move with it.
+    let whole = |k: usize| layout[k].iter().flatten().any(|i| i.is_graphic()) || (layout[k][0].is_some() && layout[k][0] == layout[k][1]);
+    if whole(k1) || whole(k2) {
+        if k1 != 0 && k2 != 0 {
+            layout.swap(k1, k2);
+        }
+        return;
+    }
+    let a = layout[k1][r1];
+    layout[k1][r1] = layout[k2][r2];
+    layout[k2][r2] = a;
+}
+
+/// Move a tile into a new column at `at` (dropped on the line between two columns). A tile
+/// filling its column moves with it; a column left empty goes. Never before the status.
+fn insert_tile(layout: &mut Vec<[Option<OverlayItem>; 2]>, (k, row): (usize, usize), at: usize) {
+    if k == 0 && row == 0 || k >= layout.len() || at == 0 || at > layout.len() {
+        return;
+    }
+    let col = layout[k];
+    let whole = col.iter().flatten().any(|i| i.is_graphic()) || (col[0].is_some() && col[0] == col[1]);
+    if whole {
+        if k == 0 {
+            return;
+        }
+        let moved = layout.remove(k);
+        layout.insert(if at > k { at - 1 } else { at }, moved);
+        return;
+    }
+    let Some(item) = col[row] else { return };
+    layout[k][row] = None;
+    layout.insert(at, [Some(item), None]);
+    let old = if at <= k { k + 1 } else { k };
+    if old != 0 && layout[old] == [None, None] {
+        layout.remove(old);
+    }
+}
+
+/// Name of a tile's contents on the overlay page.
+fn overlay_item_name(item: OverlayItem) -> &'static str {
+    match item {
+        OverlayItem::Status => tr("Status"),
+        OverlayItem::Club => tr("Club"),
+        OverlayItem::BallSpeed => tr("Ball Speed"),
+        OverlayItem::ClubSpeed => tr("Club Speed"),
+        OverlayItem::Smash => tr("Smash Factor"),
+        OverlayItem::Spin => tr("Total Spin"),
+        OverlayItem::Vla => "VLA",
+        OverlayItem::Hla => "HLA",
+        OverlayItem::SpinAxis => tr("Spin Axis"),
+        OverlayItem::Tempo => tr("Tempo"),
+        OverlayItem::Pin => tr("Distance to the pin"),
+        OverlayItem::Battery => tr("Battery"),
+        OverlayItem::ImpactSide => tr("Impact from the side"),
+        OverlayItem::ImpactTop => tr("Impact from above"),
+    }
+}
+
+/// "139 m": the distance left to the pin, in metres or yards (shown after a flag).
 fn pin_text(m: f64, meters: bool) -> String {
-    if meters { format!("{} {m:.0} m", tr("Pin")) } else { format!("{} {:.0} yd", tr("Pin"), m * M_TO_YD) }
+    if meters { format!("{m:.0} m") } else { format!("{:.0} yd", m * M_TO_YD) }
 }
 
-fn shot_values(s: &state::LastShot, style: &OverlayStyle, metric: bool) -> Vec<String> {
-    let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
-    let b = &s.ball;
-    let mut values = Vec::new();
-    if style.ball_speed {
-        values.push(format!("{:.1} {unit}", b.speed * factor));
-    }
-    if style.vla {
-        values.push(format!("VLA {}°", num(b.vla, 1)));
-    }
-    if style.hla {
-        values.push(format!("HLA {}°", num(b.hla, 1)));
-    }
-    if style.spin {
-        values.push(format!("{:.0} rpm", b.total_spin));
-    }
-    if style.spin_axis {
-        values.push(format!("{} {}°", tr("Axis"), num(b.spin_axis, 1)));
-    }
-    if let Some(c) = s.club.as_ref().filter(|_| style.club_speed) {
-        values.push(format!("{} {:.1} {unit}", tr("Club"), c.speed * factor));
-    }
-    if let Some(smash) = history::smash(b, s.club.as_ref()).filter(|_| style.smash) {
-        values.push(format!("Smash {smash:.2}"));
-    }
-    values
-}
-
-fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) {
+/// Draw the overlay into `rect`; returns where each tile of the layout was drawn (column, row,
+/// rectangle), for picking what a tile shows in the preview.
+fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, usize, Rect)> {
     p.rect(rect, 8.0, PAGE.gamma_multiply(c.opacity), Stroke::new(1.0, LINE), StrokeKind::Inside);
     p.rect_filled(
         Rect::from_min_size(rect.min + vec2(1.0, 1.0), vec2(5.0, rect.height() - 2.0)),
         CornerRadius { nw: 7, sw: 7, ne: 0, se: 0 },
         c.color,
     );
-    // The impact graphics take the right end; the text the rest.
-    let graphics = c.graphics_width();
-    if let Some(impact) = c.impact {
-        let w = impact_panel_width(c.one_line);
-        let labels = !c.one_line;
-        let mut x = rect.right() - graphics + 1.0;
-        let panels: [(bool, ImpactGraphic); 2] = [(impact.side, impact_side), (impact.top, impact_top)];
-        for (_, draw) in panels.into_iter().filter(|(on, _)| *on) {
-            let r = Rect::from_min_size(pos2(x, rect.top()), vec2(w, rect.height()));
-            p.line_segment([pos2(r.left() - 0.5, rect.top() + 1.0), pos2(r.left() - 0.5, rect.bottom() - 1.0)], Stroke::new(1.0, LINE));
-            draw(p, r, impact, labels);
-            x += w + 1.0;
+
+    let measure = |text: &str, font: FontId| p.layout_no_wrap(text.to_string(), font, WHITE).size().x;
+    let (tiles, _) = c.tiles(&measure);
+    let draw_cell = |cell: &Cell, at: egui::Pos2| match cell {
+        Cell::Status => {
+            p.circle_filled(pos2(at.x + 4.0, at.y), 5.0, c.color);
+            caps_text(p, pos2(at.x + 16.0, at.y), egui::Align::Min, c.word, if c.one_line { 20.0 } else { 24.0 }, c.color);
+        }
+        Cell::Value { glyph, text, color } => {
+            let mut x = at.x;
+            if let Some(g) = glyph {
+                draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
+                x += GLYPH_W;
+            }
+            p.text(pos2(x, at.y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
+        }
+        Cell::Battery(level) => {
+            let w = cell_width(cell, c.word, c.one_line, &measure);
+            draw_battery(p, pos2(at.x + w, at.y), *level);
+        }
+        Cell::Tall(inner) => match inner.as_ref() {
+            // In one line just the value; two lines draw it large (see below).
+            Cell::Value { glyph, text, color } if !c.one_line => {
+                let mut x = at.x;
+                if let Some(g) = glyph {
+                    draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
+                    x += GLYPH_W + 4.0;
+                }
+                caps_text(p, pos2(x, at.y), egui::Align::Min, text, TALL_SIZE, *color);
+            }
+            Cell::Value { glyph, text, color } => {
+                let mut x = at.x;
+                if let Some(g) = glyph {
+                    draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
+                    x += GLYPH_W;
+                }
+                p.text(pos2(x, at.y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
+            }
+            Cell::Battery(level) => draw_battery(p, pos2(at.x + cell_width(inner, c.word, c.one_line, &measure), at.y), *level),
+            _ => {}
+        },
+        Cell::Graphic(item) => {
+            let Some(impact) = c.impact else { return };
+            let gap = if c.one_line { 16.0 } else { TILE_GAP };
+            let r = Rect::from_min_size(pos2(at.x - gap / 2.0, rect.top()), vec2(impact_panel_width(c.one_line), rect.height()));
+            let draw: ImpactGraphic = if *item == OverlayItem::ImpactSide { impact_side } else { impact_top };
+            draw(p, r, impact, !c.one_line);
+        }
+    };
+    // An empty place while editing: a dashed outline.
+    let placeholder = |r: Rect| {
+        let r = r.shrink2(vec2(2.0, 4.0));
+        let outline = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        p.extend(egui::Shape::dashed_line(&outline, Stroke::new(1.0, BUTTON_LINE), 4.0, 3.0));
+    };
+    let mut hit = Vec::new();
+    if c.one_line {
+        let y = rect.center().y;
+        let mut tile = tiles.iter();
+        for (n, (k, r, cell)) in c.shown_tiles().into_iter().enumerate() {
+            let Some(&(x, w)) = tile.next() else { break };
+            let area = Rect::from_min_size(pos2(rect.left() + x, rect.top()), vec2(w, rect.height()));
+            match cell {
+                Some(cell) => draw_cell(cell, pos2(rect.left() + x, y)),
+                None => placeholder(area),
+            }
+            hit.push((k, r, area));
+            // The message has its own place after the first tile.
+            if n == 0
+                && let Some((text, color)) = &c.message
+                && let Some(&(mx, _)) = tile.next()
+            {
+                p.text(pos2(rect.left() + mx, y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
+            }
+        }
+        return hit;
+    }
+    // Two rows, a thin line between the columns.
+    let inset = 20.0 + ((rect.height() - OVERLAY_SIZE.y) / 2.0).max(0.0);
+    let rows = [rect.top() + inset, rect.bottom() - inset];
+    let half = (rows[1] - rows[0]) / 2.0;
+    let mut tile = tiles.iter();
+    for (n, (k, col)) in c.shown_columns().into_iter().enumerate() {
+        let Some(&(x, w)) = tile.next() else { break };
+        if n > 0 {
+            let lx = rect.left() + x - TILE_GAP / 2.0;
+            p.line_segment([pos2(lx, rect.top() + 12.0), pos2(lx, rect.bottom() - 12.0)], Stroke::new(1.0, LINE));
+        }
+        if let Some(cell @ (Cell::Graphic(_) | Cell::Tall(_))) = col[0] {
+            draw_cell(cell, pos2(rect.left() + x, rect.center().y));
+            hit.push((k, 0, Rect::from_min_size(pos2(rect.left() + x - TILE_GAP / 2.0, rect.top()), vec2(w + TILE_GAP, rect.height()))));
+        } else {
+            for (r, cell) in col.iter().enumerate() {
+                let y = rows[r];
+                let area = Rect::from_center_size(pos2(rect.left() + x + w / 2.0, y), vec2(w + TILE_GAP - 2.0, half * 2.0));
+                match cell {
+                    Some(cell) => draw_cell(cell, pos2(rect.left() + x, y)),
+                    None if c.edit => placeholder(Rect::from_center_size(area.center(), vec2(w + 8.0, half * 2.0 - 4.0))),
+                    None => {}
+                }
+                hit.push((k, r, area));
+            }
+        }
+        if n == 0
+            && let Some((text, color)) = &c.message
+            && let Some(&(mx, _)) = tile.next()
+        {
+            p.text(pos2(rect.left() + mx, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
         }
     }
-    let rect = Rect::from_min_max(rect.min, pos2(rect.right() - graphics, rect.bottom()));
+    hit
+}
 
-    let left = rect.left() + 18.0;
-    // Two lines keep their distance in a taller overlay, centred.
-    let inset = 20.0 + ((rect.height() - OVERLAY_SIZE.y) / 2.0).max(0.0);
-    let row_y = if c.one_line { rect.center().y } else { rect.top() + inset };
-    p.circle_filled(pos2(left + 4.0, row_y), 5.0, c.color);
-    let size = if c.one_line { 20.0 } else { 24.0 };
-    let mut x = caps_text(p, pos2(left + 16.0, row_y), egui::Align::Min, c.word, size, c.color).right();
-    if let Some(club) = &c.club {
-        x = p.text(pos2(x + 12.0, row_y), Align2::LEFT_CENTER, club, FontId::proportional(14.0), SOFT).right();
+/// Symbols in front of the overlay's values.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Glyph {
+    /// A golf ball with speed lines: ball speed.
+    BallSpeed,
+    /// A driver's head on its shaft: club speed.
+    ClubSpeed,
+    /// Club face meeting the ball: smash factor.
+    Smash,
+    /// A golf ball with an arrow around it: spin.
+    Spin,
+    /// A flag: distance to the pin.
+    Pin,
+    /// A stopwatch: swing tempo.
+    Tempo,
+}
+
+/// A golf ball: white with a few dimples.
+fn golf_ball(p: &egui::Painter, c: egui::Pos2, r: f32) {
+    p.circle_filled(c, r, Color32::from_rgb(0xf2, 0xf5, 0xfa));
+    let dimple = Color32::from_rgb(0xa6, 0xb2, 0xc6);
+    for (dx, dy) in [(-0.35, -0.3), (0.25, -0.4), (0.4, 0.15), (-0.1, 0.1), (-0.4, 0.35), (0.15, 0.5)] {
+        p.circle_filled(c + vec2(dx, dy) * r, r * 0.13, dimple);
     }
-    if let Some(level) = c.battery {
-        draw_battery(p, pos2(rect.right() - 12.0, row_y), level);
+}
+
+/// A 16 px symbol centred on `c`.
+fn draw_glyph(p: &egui::Painter, c: egui::Pos2, glyph: Glyph, color: Color32) {
+    match glyph {
+        Glyph::BallSpeed => {
+            golf_ball(p, c + vec2(3.0, 0.0), 5.2);
+            for (dy, len) in [(-3.2, 3.5), (0.0, 5.5), (3.2, 3.5)] {
+                p.line_segment([c + vec2(-3.5 - len, dy), c + vec2(-3.5, dy)], Stroke::new(1.3, color));
+            }
+        }
+        Glyph::ClubSpeed => {
+            // A driver: shaft down to a big round head, the face on the left.
+            p.line_segment([c + vec2(6.5, -8.5), c + vec2(2.0, 1.5)], Stroke::new(1.4, color));
+            let head: Vec<egui::Pos2> = [
+                (2.8, 1.0),
+                (1.0, 0.2),
+                (-2.0, 0.0),
+                (-5.0, 0.8),
+                (-7.2, 2.6),
+                (-7.8, 5.0),
+                (-6.6, 7.0),
+                (-3.0, 7.6),
+                (1.5, 7.2),
+                (3.6, 5.6),
+                (3.8, 3.2),
+            ]
+            .iter()
+            .map(|&(x, y)| c + vec2(x, y))
+            .collect();
+            p.add(egui::Shape::convex_polygon(head, color, Stroke::NONE));
+            // The face, a little lighter.
+            p.line_segment([c + vec2(-7.0, 2.8), c + vec2(-7.3, 5.6)], Stroke::new(1.2, Color32::from_rgb(0xe6, 0xec, 0xf6)));
+        }
+        Glyph::Smash => {
+            // The face of a club meeting the ball, with a burst between them.
+            p.add(egui::Shape::convex_polygon(
+                vec![c + vec2(-8.0, -6.5), c + vec2(-5.0, -6.5), c + vec2(-5.0, 6.5), c + vec2(-8.0, 6.5)],
+                color,
+                Stroke::NONE,
+            ));
+            golf_ball(p, c + vec2(3.5, 0.0), 4.6);
+            for a in [-0.7_f32, 0.0, 0.7] {
+                let d = vec2(a.cos(), a.sin());
+                p.line_segment([c + vec2(-3.6, 0.0) + d * 0.5, c + vec2(-3.6, 0.0) + d * 2.8], Stroke::new(1.1, AMBER));
+            }
+        }
+        Glyph::Spin => {
+            golf_ball(p, c, 4.4);
+            // Most of a circle around the ball, ending in an arrow head.
+            let r = 7.3;
+            let (from, sweep) = (-2.6_f32, 4.4_f32);
+            let pts: Vec<egui::Pos2> = (0..=20)
+                .map(|k| {
+                    let a = from + k as f32 / 20.0 * sweep;
+                    c + vec2(a.cos(), a.sin()) * r
+                })
+                .collect();
+            let end = pts[pts.len() - 1];
+            p.add(egui::Shape::line(pts, Stroke::new(1.3, color)));
+            let a = from + sweep;
+            let (tangent, normal) = (vec2(-a.sin(), a.cos()), vec2(a.cos(), a.sin()));
+            p.add(egui::Shape::convex_polygon(
+                vec![end + tangent * 3.4, end - tangent * 1.0 + normal * 2.6, end - tangent * 1.0 - normal * 2.6],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Glyph::Tempo => {
+            // A stopwatch: round face, crown and button on top, a hand.
+            let face = c + vec2(0.0, 1.2);
+            p.circle_stroke(face, 6.0, Stroke::new(1.4, color));
+            p.rect_filled(Rect::from_center_size(c + vec2(0.0, -6.6), vec2(3.6, 1.8)), 0.6, color);
+            p.line_segment([c + vec2(0.0, -5.7), c + vec2(0.0, -4.6)], Stroke::new(1.4, color));
+            p.line_segment([c + vec2(4.6, -3.6), c + vec2(5.8, -4.8)], Stroke::new(1.4, color));
+            p.line_segment([face, face + vec2(2.6, -2.8)], Stroke::new(1.4, AMBER));
+            p.circle_filled(face, 1.1, color);
+        }
+        Glyph::Pin => {
+            p.line_segment([c + vec2(-3.0, 7.5), c + vec2(-3.0, -7.5)], Stroke::new(1.4, color));
+            p.add(egui::Shape::convex_polygon(vec![c + vec2(-2.5, -7.5), c + vec2(6.5, -4.6), c + vec2(-2.5, -1.7)], RED, Stroke::NONE));
+            p.add(egui::Shape::ellipse_filled(c + vec2(-3.0, 7.5), vec2(4.0, 1.3), color.gamma_multiply(0.6)));
+        }
     }
-    if let Some(tempo) = &c.tempo {
-        let right = rect.right() - if c.battery.is_some() { OVERLAY_BATTERY_W } else { 14.0 };
-        p.text(pos2(right, row_y), Align2::RIGHT_CENTER, tempo, FontId::proportional(14.0), SOFT);
-    }
-    let line_pos = if c.one_line { pos2(x + 16.0, row_y) } else { pos2(left, rect.bottom() - inset) };
-    p.text(line_pos, Align2::LEFT_CENTER, &c.line, FontId::proportional(14.0), c.line_color);
 }
 
 /// A shot shape's name in the language shown ("Straight" is the only one golfers translate).
@@ -2159,6 +2606,14 @@ mod tests {
             s.gspro_handed = Some("RH".into());
             s.shots_sent = 9;
             s.session = engine::demo_session();
+            s.gspro_result = Some(openlaunch_connect::gspro_db::GsproResult {
+                carry: 150.0,
+                total: 156.0,
+                side: 4.0,
+                apex: 28.0,
+                descent: 47.0,
+                to_pin: Some(139.0),
+            });
             s.last_shot = Some(state::LastShot {
                 ball,
                 club: Some(club),
@@ -2418,7 +2873,7 @@ mod tests {
                     for (k, &(hla, spin_axis, path)) in shots.iter().enumerate() {
                         let r = Rect::from_min_size(pos2(k as f32 * w, 0.0), vec2(w, OVERLAY_IMPACT_H));
                         ui.painter().rect_filled(r, 0.0, PAGE);
-                        let impact = Impact { side: false, top: true, spin_axis, aoa: None, vla: 15.0, path: Some(path), hla };
+                        let impact = Impact { spin_axis, aoa: None, vla: 15.0, path: Some(path), hla };
                         impact_top(ui.painter(), r, impact, true);
                     }
                 } else {
@@ -2429,6 +2884,133 @@ mod tests {
             harness.step();
         }
         save(&harness.render().unwrap(), "impact-shapes.png");
+    }
+
+    #[test]
+    #[ignore = "writes screenshots; run on demand"]
+    fn overlay_symbols() {
+        use egui_kittest::Harness;
+        let glyphs = [Glyph::BallSpeed, Glyph::ClubSpeed, Glyph::Smash, Glyph::Spin, Glyph::Tempo, Glyph::Pin];
+        let mut harness = Harness::builder().with_size(vec2(32.0 * glyphs.len() as f32, 32.0)).with_pixels_per_point(6.0).wgpu().build_ui(move |ui| {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, PAGE);
+            for (k, g) in glyphs.iter().enumerate() {
+                draw_glyph(ui.painter(), pos2(16.0 + 32.0 * k as f32, 16.0), *g, LABEL);
+            }
+        });
+        harness.step();
+        save(&harness.render().unwrap(), "overlay-symbols.png");
+    }
+
+    #[test]
+    fn overlay_graphics_move_as_columns() {
+        use OverlayItem::*;
+        let mut layout = OverlayItem::default_layout();
+        // Ball speed onto the side graphic: the two columns swap.
+        swap_tiles(&mut layout, (1, 0), (5, 0));
+        assert_eq!(layout[1], [Some(ImpactSide), None]);
+        assert_eq!(layout[5], [Some(BallSpeed), Some(ClubSpeed)]);
+        // Never with the status column.
+        swap_tiles(&mut layout, (0, 1), (1, 0));
+        assert_eq!(layout[0], [Some(Status), Some(Club)]);
+        // A graphic put into a tile takes the column; a value put there leaves the rest empty.
+        set_tile(&mut layout, 3, 1, Some(ImpactTop));
+        assert_eq!(layout[3], [Some(ImpactTop), None]);
+        set_tile(&mut layout, 3, 0, Some(Tempo));
+        assert_eq!(layout[3], [Some(Tempo), None]);
+        set_tile(&mut layout, 3, 1, Some(Pin));
+        assert_eq!(layout[3], [Some(Tempo), Some(Pin)]);
+        // A tile of double height keeps its height with another value and moves as a column.
+        layout[2] = [Some(BallSpeed), Some(BallSpeed)];
+        set_tile(&mut layout, 2, 0, Some(Spin));
+        assert_eq!(layout[2], [Some(Spin), Some(Spin)]);
+        swap_tiles(&mut layout, (2, 0), (3, 1));
+        assert_eq!((layout[2], layout[3]), ([Some(Tempo), Some(Pin)], [Some(Spin), Some(Spin)]));
+    }
+
+    #[test]
+    fn overlay_tiles_go_between_columns() {
+        use OverlayItem::*;
+        let mut layout = OverlayItem::default_layout();
+        let n = layout.len();
+        // Spin onto the line between status and speeds: a column of its own there.
+        insert_tile(&mut layout, (2, 1), 1);
+        assert_eq!(layout.len(), n + 1);
+        assert_eq!(layout[1], [Some(Spin), None]);
+        assert_eq!(layout[3], [Some(Smash), None]);
+        // Its old column emptied: gone. Smash after the last column.
+        let end = layout.len();
+        insert_tile(&mut layout, (3, 0), end);
+        assert_eq!(layout.len(), n + 1);
+        assert_eq!(layout.last(), Some(&[Some(Smash), None]));
+        assert!(!layout.contains(&[None, None]));
+        // Never before the status; the club below the status may leave.
+        insert_tile(&mut layout, (1, 0), 0);
+        assert_eq!(layout[1], [Some(Spin), None]);
+        insert_tile(&mut layout, (0, 1), 2);
+        assert_eq!(layout[0], [Some(Status), None]);
+        assert_eq!(layout[2], [Some(Club), None]);
+        // A graphic moves with its column.
+        let side = layout.iter().position(|c| c[0] == Some(ImpactSide)).unwrap();
+        insert_tile(&mut layout, (side, 0), 1);
+        assert_eq!(layout[1], [Some(ImpactSide), None]);
+    }
+
+    /// Dragging a tile in the overlay preview onto another swaps the two.
+    #[test]
+    fn overlay_tiles_are_dragged_into_place() {
+        use egui_kittest::Harness;
+
+        demo_state();
+        let settings = Settings { overlay: OverlayPos::TopRight, ..Settings::default() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(settings, tx)
+        });
+        harness.state_mut().page = Page::Overlay;
+        harness.state_mut().show_overlay = false;
+        harness.state_mut().remember_size = false;
+        for _ in 0..3 {
+            harness.step();
+        }
+        // Find two tiles by hovering over the preview: ball speed (column 1, top) and VLA (column 3, top).
+        let ids: Vec<(usize, usize, Rect)> = harness.state().overlay_tile_rects.borrow().clone();
+        let find = |k: usize, r: usize| ids.iter().find(|t| t.0 == k && t.1 == r).map(|t| t.2.center()).expect("tile");
+        let (from, to) = (find(1, 0), find(3, 0));
+        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        for event in [egui::Event::PointerMoved(from), press(from, true), egui::Event::PointerMoved(from + vec2(15.0, 0.0)), egui::Event::PointerMoved(to), press(to, false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        let layout = &harness.state().saved.overlay_style.layout;
+        assert_eq!((layout[1][0], layout[3][0]), (Some(OverlayItem::Vla), Some(OverlayItem::BallSpeed)));
+
+        // Spin dropped on the line before the speeds' column: a new column there.
+        let rects = harness.state().overlay_tile_rects.borrow().clone();
+        let spin = rects.iter().find(|t| t.0 == 2 && t.1 == 1).unwrap().2.center();
+        let line = rects.iter().filter(|t| t.0 == 1).map(|t| t.2.left()).fold(f32::MAX, f32::min);
+        let to = pos2(line, spin.y);
+        for event in [egui::Event::PointerMoved(spin), press(spin, true), egui::Event::PointerMoved(spin - vec2(15.0, 0.0)), egui::Event::PointerMoved(to), press(to, false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        assert_eq!(harness.state().saved.overlay_style.layout[1], [Some(OverlayItem::Spin), None]);
+
+        // + after the last column adds an empty one, which can be clicked in the preview.
+        let rects = harness.state().overlay_tile_rects.borrow().clone();
+        let right = rects.iter().map(|t| t.2.right()).fold(f32::MIN, f32::max);
+        let (top, bottom) = rects.iter().fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(t.2.top()), b.max(t.2.bottom())));
+        let plus = pos2(right, (top + bottom) / 2.0);
+        for event in [egui::Event::PointerMoved(plus), press(plus, true), press(plus, false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        let n = harness.state().saved.overlay_style.layout.len();
+        assert_eq!(n, OverlayItem::default_layout().len() + 2);
+        assert!(harness.state().overlay_tile_rects.borrow().iter().any(|t| t.0 == n - 1), "the empty column has places");
     }
 
     /// Layer transforms apply to every viewport: scaling the overlay must not shrink the main window.
