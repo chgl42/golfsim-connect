@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle
+  from GSPro's database in the CrossOver bottle (read-only) and keeps them with the shot. The chip *GSPro results*
+  on the shots page shows them in the tables, details, dispersion and 3D tiles instead of the estimate, where GSPro
+  sent them; the details say *from GSPro*.
 - **3D flight tile, interactive:** drag to turn the camera, scroll to zoom, double-click to go back; switching between
   *Tee*, *Side view* and *Above* glides there. A new shot flies in real time with a tracer, bounces and rolls out, and ▶
   plays the selected (or latest) shot again.
