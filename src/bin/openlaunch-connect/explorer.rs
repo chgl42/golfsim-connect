@@ -1257,6 +1257,11 @@ fn dispersion(ui: &mut egui::Ui, i: usize, total: bool, ctx: &TileCtx) -> Option
     draw_dots(ui, egui::Id::new(("dispersion", i)), rect, &dots)
 }
 
+/// Lateral distance for a table: "8 R", "3 L" or "0" (already in the unit shown).
+fn left_right(v: f64) -> String {
+    if v.abs() < 0.5 { "0".into() } else { format!("{:.0} {}", v.abs(), if v > 0.0 { "R" } else { "L" }) }
+}
+
 /// Lateral distance as "12 m R" / "3 yd L" (already in the unit shown).
 fn side_text(v: f64, u: Units) -> String {
     if v.abs() < 0.5 { format!("0 {}", u.dist_unit()) } else { format!("{:.0} {} {}", v.abs(), u.dist_unit(), if v > 0.0 { "R" } else { "L" }) }
@@ -1382,11 +1387,13 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
     let carry = format!("{}*", tr("Carry"));
     let total = format!("{}*", tr("Total"));
     // Header, width of the values and priority (lower first) of every column.
-    let all: [(&str, f32, u8); 14] = [
+    let side = format!("{}*", tr("Side"));
+    let all: [(&str, f32, u8); 15] = [
         (tr("Time"), if ctx.all_time { 84.0 } else { 52.0 }, 0),
         (tr("Club"), 24.0, 0),
         (&carry, 28.0, 0),
         (&total, 28.0, 3),
+        (&side, 34.0, 2),
         (tr("Ball"), 36.0, 1),
         ("VLA", 30.0, 1),
         ("HLA", 30.0, 4),
@@ -1410,6 +1417,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
             s.club_code.clone().unwrap_or_else(|| "–".into()),
             format!("{:.0}", u.dist(f.carry)),
             format!("{:.0}", u.dist(f.total)),
+            left_right(u.dist(f.carry_side)),
             format!("{:.1}", u.speed(s.ball.speed)),
             num(s.ball.vla, 1),
             num(s.ball.hla, 1),
@@ -1457,13 +1465,17 @@ fn averages_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) {
     let dist = |v: f64| u.dist(v);
     let carry = format!("{}* ({})", tr("Carry"), u.dist_unit());
     let total = format!("{}* ({})", tr("Total"), u.dist_unit());
+    let side = format!("{}* ({})", tr("Side"), u.dist_unit());
+    let width = format!("{}* ({})", tr("Width"), u.dist_unit());
     let ball = format!("{} ({})", tr("Ball"), u.speed_unit());
     let club = format!("{} ({})", tr("Club"), u.speed_unit());
-    let all: [(&str, f32, u8); 12] = [
+    let all: [(&str, f32, u8); 14] = [
         (tr("Club"), 90.0, 0),
         (tr("Shots"), 20.0, 0),
         (&carry, 50.0, 0),
         (&total, 50.0, 2),
+        (&side, 56.0, 1),
+        (&width, 30.0, 1),
         (&ball, 70.0, 1),
         (&club, 70.0, 4),
         (tr("Smash"), 70.0, 3),
@@ -1482,6 +1494,11 @@ fn averages_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) {
             c.shots.to_string(),
             fmt(c.carry, 0, &dist, c.shots),
             fmt(c.total, 0, &dist, c.shots),
+            c.side.map_or("–".into(), |st| {
+                let mean = left_right(u.dist(st.mean));
+                if c.shots > 1 { format!("{mean} ±{:.0}", u.dist(st.sd)) } else { mean }
+            }),
+            c.side_width.map_or("–".into(), |w| format!("{:.0}", u.dist(w))),
             fmt(c.ball_speed, 1, &speed, c.shots),
             fmt(c.club_speed, 1, &speed, c.shots),
             fmt(c.smash, 2, &id, c.shots),
@@ -1537,7 +1554,7 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
     let mut values: Vec<(String, String)> = vec![
         (format!("{}*", tr("Carry")), format!("{:.0} {}", u.dist(f.carry), u.dist_unit())),
         (format!("{}*", tr("Total")), format!("{:.0} {}", u.dist(f.total), u.dist_unit())),
-        (format!("{}*", tr("Side")), side(f.total_side)),
+        (format!("{}*", tr("Side")), side(f.carry_side)),
         (format!("{}*", tr("Apex")), format!("{:.0} {}", u.dist(f.apex), u.dist_unit())),
         (format!("{}*", tr("Descent")), format!("{:.0}°", f.descent)),
         (tr("Ball Speed").into(), format!("{:.1} {}", u.speed(s.ball.speed), u.speed_unit())),

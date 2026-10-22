@@ -200,6 +200,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "Width" => "Breite",
         "Shape" => "Schlagform",
         "Straight" => "Gerade",
         "Impact from the side" => "Treffmoment Seite",
