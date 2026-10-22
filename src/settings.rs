@@ -266,6 +266,8 @@ pub struct OverlayStyle {
     /// club path and start direction from above.
     pub impact_side: bool,
     pub impact_top: bool,
+    /// Distance left to the pin after the shot (from GSPro's results).
+    pub to_pin: bool,
 }
 
 impl Default for OverlayStyle {
@@ -287,6 +289,7 @@ impl Default for OverlayStyle {
             smash: true,
             impact_side: true,
             impact_top: true,
+            to_pin: true,
         }
     }
 }
