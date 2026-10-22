@@ -12,8 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   instead of words (a golf ball with speed lines, a driver, club face and ball, a ball with an arrow around it, a
   stopwatch for the tempo, a flag). On the Overlay page a click on a tile in the preview picks what it shows (any
   value, an impact graphic, which takes the column, or empty), lets a value fill its column in large figures
-  (*Double height*) or removes the column, dragging a tile swaps it with another, *+* after the last column adds one
-  and *Reset* brings back the default. One line shows the same tiles in a row.
+  (*Double height*) or removes the column, dragging a tile swaps it with another or, dropped on the line between two
+  columns, puts it into a new column there, *+* after the last column adds one and *Reset* brings back the default.
+  One line shows the same tiles in a row.
 
 ### Added
 - **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from

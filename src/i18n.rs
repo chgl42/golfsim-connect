@@ -209,7 +209,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Back to the tiles as they came" => "Zurück zur Standard-Anordnung",
         "Add an empty column at the end" => "Leere Spalte hinten anfügen",
         "+ at the end of the tiles adds a column. The status always comes first." => "+ am Ende der Kacheln fügt eine Spalte hinzu. Der Status steht immer vorn.",
-        "Click a tile in the preview to choose what it shows, drag it to move it." => "Kachel in der Vorschau anklicken wählt den Inhalt, Ziehen verschiebt sie.",
+        "Click a tile in the preview to choose what it shows, drag it to move it." => "Kachel in der Vorschau anklicken wählt den Inhalt, Ziehen verschiebt sie – auf einen Trennstrich gezogen in eine neue Spalte.",
         "Distance to the pin" => "Zur Fahne",
         "Carry, total, apex, side and landing angle as GSPro computed them" => "Carry, Gesamt, Scheitelhöhe, Seitlich und Landewinkel so, wie GSPro sie berechnet hat",
         "GSPro results" => "GSPro-Werte",

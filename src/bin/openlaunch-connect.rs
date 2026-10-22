@@ -929,15 +929,39 @@ impl App {
         *self.overlay_tile_rects.borrow_mut() = tiles.clone();
         let pointer = ui.ctx().pointer_interact_pos();
         let mut swap: Option<((usize, usize), (usize, usize))> = None;
+        let mut insert: Option<((usize, usize), usize)> = None;
+        // The lines between the columns (and after the last one): (place in the layout, x, top, bottom).
+        let (top, bottom) = tiles.iter().fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(t.2.top()), b.max(t.2.bottom())));
+        let mut lines: Vec<(usize, f32)> = Vec::new();
+        for &(k, _, r) in &tiles {
+            if k > 0 && !lines.iter().any(|l| l.0 == k) {
+                lines.push((k, r.left()));
+            }
+        }
+        if let Some(&(k, _, _)) = tiles.iter().max_by_key(|t| t.0) {
+            let right = tiles.iter().filter(|t| t.0 == k).map(|t| t.2.right()).fold(f32::MIN, f32::max);
+            lines.push((k + 1, right));
+        }
+        let line_at = |at: egui::Pos2| {
+            lines.iter().copied().filter(|l| (l.1 - at.x).abs() <= 7.0 && at.y >= top && at.y <= bottom).min_by(|a, b| (a.1 - at.x).abs().total_cmp(&(b.1 - at.x).abs()))
+        };
         for &(k, row, r) in &tiles {
             let resp = ui.interact(r, ui.id().with(("overlay-tile", k, row)), Sense::click_and_drag());
-            let target = pointer.and_then(|at| tiles.iter().find(|t| t.2.contains(at))).filter(|t| (t.0, t.1) != (k, row));
+            // Onto a line between two columns: a new column there; else onto a tile: swap.
+            let on_line = pointer.and_then(line_at);
+            let target = pointer
+                .filter(|_| on_line.is_none())
+                .and_then(|at| tiles.iter().find(|t| t.2.contains(at)))
+                .filter(|t| (t.0, t.1) != (k, row));
             if resp.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("overlay-drag")));
                 fg.rect_filled(r, 4.0, Color32::from_black_alpha(90));
                 if let Some(t) = target {
                     fg.rect_stroke(t.2.shrink(1.0), 4.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+                }
+                if let Some((_, x)) = on_line {
+                    fg.line_segment([pos2(x, top + 2.0), pos2(x, bottom - 2.0)], Stroke::new(3.0, ACCENT));
                 }
                 if let Some(at) = pointer {
                     let name = style.layout.get(k).and_then(|c| c[row]).map_or(tr("Empty"), overlay_item_name);
@@ -949,10 +973,12 @@ impl App {
             } else if resp.hovered() {
                 ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, ICON), StrokeKind::Inside);
             }
-            if resp.drag_stopped()
-                && let Some(t) = target
-            {
-                swap = Some(((k, row), (t.0, t.1)));
+            if resp.drag_stopped() {
+                if let Some((at, _)) = on_line {
+                    insert = Some(((k, row), at));
+                } else if let Some(t) = target {
+                    swap = Some(((k, row), (t.0, t.1)));
+                }
             }
             let resp = resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(tr("Click to choose what this tile shows, drag to move it"));
             egui::Popup::menu(&resp).show(|ui| {
@@ -1002,6 +1028,9 @@ impl App {
         }
         if let Some((a, b)) = swap {
             swap_tiles(&mut style.layout, a, b);
+        }
+        if let Some((from, at)) = insert {
+            insert_tile(&mut style.layout, from, at);
         }
     }
 
@@ -2019,6 +2048,31 @@ fn swap_tiles(layout: &mut [[Option<OverlayItem>; 2]], (k1, r1): (usize, usize),
     layout[k2][r2] = a;
 }
 
+/// Move a tile into a new column at `at` (dropped on the line between two columns). A tile
+/// filling its column moves with it; a column left empty goes. Never before the status.
+fn insert_tile(layout: &mut Vec<[Option<OverlayItem>; 2]>, (k, row): (usize, usize), at: usize) {
+    if k == 0 && row == 0 || k >= layout.len() || at == 0 || at > layout.len() {
+        return;
+    }
+    let col = layout[k];
+    let whole = col.iter().flatten().any(|i| i.is_graphic()) || (col[0].is_some() && col[0] == col[1]);
+    if whole {
+        if k == 0 {
+            return;
+        }
+        let moved = layout.remove(k);
+        layout.insert(if at > k { at - 1 } else { at }, moved);
+        return;
+    }
+    let Some(item) = col[row] else { return };
+    layout[k][row] = None;
+    layout.insert(at, [Some(item), None]);
+    let old = if at <= k { k + 1 } else { k };
+    if old != 0 && layout[old] == [None, None] {
+        layout.remove(old);
+    }
+}
+
 /// Name of a tile's contents on the overlay page.
 fn overlay_item_name(item: OverlayItem) -> &'static str {
     match item {
@@ -2873,6 +2927,34 @@ mod tests {
         assert_eq!((layout[2], layout[3]), ([Some(Tempo), Some(Pin)], [Some(Spin), Some(Spin)]));
     }
 
+    #[test]
+    fn overlay_tiles_go_between_columns() {
+        use OverlayItem::*;
+        let mut layout = OverlayItem::default_layout();
+        let n = layout.len();
+        // Spin onto the line between status and speeds: a column of its own there.
+        insert_tile(&mut layout, (2, 1), 1);
+        assert_eq!(layout.len(), n + 1);
+        assert_eq!(layout[1], [Some(Spin), None]);
+        assert_eq!(layout[3], [Some(Smash), None]);
+        // Its old column emptied: gone. Smash after the last column.
+        let end = layout.len();
+        insert_tile(&mut layout, (3, 0), end);
+        assert_eq!(layout.len(), n + 1);
+        assert_eq!(layout.last(), Some(&[Some(Smash), None]));
+        assert!(!layout.contains(&[None, None]));
+        // Never before the status; the club below the status may leave.
+        insert_tile(&mut layout, (1, 0), 0);
+        assert_eq!(layout[1], [Some(Spin), None]);
+        insert_tile(&mut layout, (0, 1), 2);
+        assert_eq!(layout[0], [Some(Status), None]);
+        assert_eq!(layout[2], [Some(Club), None]);
+        // A graphic moves with its column.
+        let side = layout.iter().position(|c| c[0] == Some(ImpactSide)).unwrap();
+        insert_tile(&mut layout, (side, 0), 1);
+        assert_eq!(layout[1], [Some(ImpactSide), None]);
+    }
+
     /// Dragging a tile in the overlay preview onto another swaps the two.
     #[test]
     fn overlay_tiles_are_dragged_into_place() {
@@ -2904,6 +2986,18 @@ mod tests {
         let layout = &harness.state().saved.overlay_style.layout;
         assert_eq!((layout[1][0], layout[3][0]), (Some(OverlayItem::Vla), Some(OverlayItem::BallSpeed)));
 
+        // Spin dropped on the line before the speeds' column: a new column there.
+        let rects = harness.state().overlay_tile_rects.borrow().clone();
+        let spin = rects.iter().find(|t| t.0 == 2 && t.1 == 1).unwrap().2.center();
+        let line = rects.iter().filter(|t| t.0 == 1).map(|t| t.2.left()).fold(f32::MAX, f32::min);
+        let to = pos2(line, spin.y);
+        for event in [egui::Event::PointerMoved(spin), press(spin, true), egui::Event::PointerMoved(spin - vec2(15.0, 0.0)), egui::Event::PointerMoved(to), press(to, false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        assert_eq!(harness.state().saved.overlay_style.layout[1], [Some(OverlayItem::Spin), None]);
+
         // + after the last column adds an empty one, which can be clicked in the preview.
         let rects = harness.state().overlay_tile_rects.borrow().clone();
         let right = rects.iter().map(|t| t.2.right()).fold(f32::MIN, f32::max);
@@ -2915,7 +3009,7 @@ mod tests {
         }
         harness.step();
         let n = harness.state().saved.overlay_style.layout.len();
-        assert_eq!(n, OverlayItem::default_layout().len() + 1);
+        assert_eq!(n, OverlayItem::default_layout().len() + 2);
         assert!(harness.state().overlay_tile_rects.borrow().iter().any(|t| t.0 == n - 1), "the empty column has places");
     }
 
