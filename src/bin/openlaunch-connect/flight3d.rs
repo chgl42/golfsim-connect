@@ -126,6 +126,8 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
     // Diagonally from above the range is as wide as a real one, so it covers the whole tile.
     let half = if camera == Camera::Above { half.max(far * 0.45) } else { half };
+    // Landing and resting points of the shots shown.
+    let lands: Vec<[f32; 3]> = ctx.paths.iter().flat_map(|p| p.air.last().copied().into_iter().chain([p.rest])).collect();
     let view = match camera {
         Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
         // From the right of the range, so the distance grows to the right.
@@ -136,15 +138,22 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         Camera::Above => {
             let aspect = rect.width() / rect.height().max(1.0);
             let turn = 35.0 + 30.0 * ((aspect - 0.6) / 1.4).clamp(0.0, 1.0);
-            let (zc, dist, el, az) = (far * 0.5, far * 1.2, 45_f32.to_radians(), turn.to_radians());
+            // Onto the middle of the landing area.
+            let zc = if lands.is_empty() { far * 0.6 } else { lands.iter().map(|q| q[2]).sum::<f32>() / lands.len() as f32 };
+            let (dist, el, az) = (far * 0.8, 45_f32.to_radians(), turn.to_radians());
             View::new([dist * el.cos() * az.sin(), dist * el.sin(), zc - dist * el.cos() * az.cos()], [0.0, 0.0, zc])
         }
     };
     let mut fit: Vec<egui::Vec2> = Vec::new();
     if camera == Camera::Above {
-        // The flights from the tee to where they stop fill the tile; the range runs on beyond.
-        fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
-        fit.extend([[0.0, 0.0, 0.0], [0.0, 0.0, far / 1.08]].iter().filter_map(|q| view.project(*q)));
+        // Zoomed onto where the balls land and stop, with a little room; the flights come in
+        // from outside and the range runs on beyond.
+        fit.extend(lands.iter().flat_map(|q| {
+            [[q[0] - 6.0, 0.0, q[2] - 6.0], [q[0] + 6.0, 0.0, q[2] + 6.0], [q[0] - 6.0, 0.0, q[2] + 6.0], [q[0] + 6.0, 0.0, q[2] - 6.0]]
+        }).filter_map(|q| view.project(q)));
+        if fit.is_empty() {
+            fit.extend([[0.0, 0.0, 0.0], [0.0, 0.0, far / 1.08]].iter().filter_map(|q| view.project(*q)));
+        }
     } else {
         // The flights and the range; the near corners would be right below the camera.
         fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
