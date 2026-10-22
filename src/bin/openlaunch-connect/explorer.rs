@@ -12,6 +12,10 @@ use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Met
 
 use super::*;
 
+// The 3D flight tile, next to this file.
+#[path = "flight3d.rs"]
+mod flight3d;
+
 /// Gap between tiles.
 const GAP: f32 = 8.0;
 /// Cell size the grid aims for; the rows are fitted to the height.
@@ -836,7 +840,7 @@ fn tile_ui(
             }
         }
         TileKind::Flight => {
-            if let Some(k) = flight_view(&mut body_ui, i, tile.camera, ctx) {
+            if let Some(k) = flight3d::flight_view(&mut body_ui, i, tile, ctx, edits) {
                 *clicked = Some(k);
             }
         }
@@ -849,159 +853,6 @@ fn camera_name(camera: Camera) -> &'static str {
         Camera::Side => tr("Side view"),
         Camera::Above => tr("Above"),
     }
-}
-
-/// A perspective camera looking from `eye` at `at` (metres; x right, y up, z down the range).
-struct View {
-    eye: [f32; 3],
-    right: [f32; 3],
-    up: [f32; 3],
-    forward: [f32; 3],
-}
-
-impl View {
-    fn new(eye: [f32; 3], at: [f32; 3]) -> Self {
-        let norm = |v: [f32; 3]| {
-            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
-            [v[0] / l, v[1] / l, v[2] / l]
-        };
-        let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-        let forward = norm([at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]]);
-        let right = norm(cross([0.0, 1.0, 0.0], forward));
-        let up = cross(forward, right);
-        Self { eye, right, up, forward }
-    }
-
-    /// Point on the image plane at distance 1 (x right, y up); `None` behind the camera.
-    fn project(&self, p: [f32; 3]) -> Option<egui::Vec2> {
-        let d = [p[0] - self.eye[0], p[1] - self.eye[1], p[2] - self.eye[2]];
-        let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
-        let z = dot(self.forward);
-        (z > 0.5).then(|| vec2(dot(self.right) / z, dot(self.up) / z))
-    }
-}
-
-/// The shots' estimated flights in 3D, fitted into the tile. Returns the shot clicked (at its
-/// landing point).
-fn flight_view(ui: &mut egui::Ui, i: usize, camera: Camera, ctx: &TileCtx) -> Option<Key> {
-    let rect = ui.available_rect_before_wrap();
-    let u = ctx.units;
-    // Range shown: a little beyond the longest shot, at least 100 m; half as wide as long, at most 60 m.
-    let far = ctx.paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
-    let apex = ctx.paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
-    let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
-    let view = match camera {
-        Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
-        // From the right of the range, so the distance grows to the right.
-        Camera::Side => View::new([far * 1.3, apex * 0.6, far * 0.5], [0.0, apex * 0.4, far * 0.5]),
-        Camera::Above => View::new([-far * 0.08, far * 0.6, -far * 0.3], [0.0, 0.0, far * 0.55]),
-    };
-    // Fit what matters (the flights and the range's corners) into the tile, same scale both ways.
-    let mut fit: Vec<egui::Vec2> = ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)).collect();
-    // The near corners of the range only from above: from the tee they are right below the camera.
-    let near = if camera == Camera::Above { [[-half, 0.0, 0.0], [half, 0.0, 0.0]] } else { [[0.0, 0.0, 6.0]; 2] };
-    fit.extend([[-half, 0.0, far], [half, 0.0, far], [0.0, apex, far * 0.5]].iter().chain(&near).filter_map(|q| view.project(*q)));
-    let (lo, hi) = fit.iter().fold((vec2(f32::MAX, f32::MAX), vec2(f32::MIN, f32::MIN)), |(lo, hi), q| (lo.min(*q), hi.max(*q)));
-    let inner = rect.shrink(12.0);
-    let (sx, sy) = (inner.width() / (hi.x - lo.x).max(1e-3), inner.height() / (hi.y - lo.y).max(1e-3));
-    // Same scale both ways, but a little stretch where the tile has room: from the tee the
-    // spread is narrow and the flights tall, from the side it is the other way round.
-    let (kx, ky) = match camera {
-        Camera::Tee => (3.0, 1.0),
-        Camera::Side => (1.0, 2.5),
-        Camera::Above => (2.0, 1.0),
-    };
-    let base = sx.min(sy);
-    let scale = vec2(sx.min(base * kx), sy.min(base * ky));
-    let mid = (lo + hi) / 2.0;
-    let to_screen = |q: [f32; 3]| view.project(q).map(|v| pos2(inner.center().x + (v.x - mid.x) * scale.x, inner.center().y - (v.y - mid.y) * scale.y));
-
-    let p = ui.painter_at(rect);
-    p.rect_filled(rect, 4.0, Color32::from_rgb(0x1a, 0x2f, 0x4d));
-    // Ground: rough, fairway, distance lines, target line.
-    let quad = |x0: f32, x1: f32, z0: f32, z1: f32| -> Vec<egui::Pos2> {
-        // Subdivided along the range so near points stay in front of the camera.
-        let mut pts = Vec::new();
-        for k in 0..=16 {
-            pts.extend(to_screen([x0, 0.0, z0 + (z1 - z0) * k as f32 / 16.0]));
-        }
-        for k in (0..=16).rev() {
-            pts.extend(to_screen([x1, 0.0, z0 + (z1 - z0) * k as f32 / 16.0]));
-        }
-        pts
-    };
-    let rough = Color32::from_rgb(0x22, 0x47, 0x2c);
-    // Everything below the horizon is grass, also right in front of the camera.
-    if let Some(h) = to_screen([0.0, 0.0, far * 1.4]) {
-        p.rect_filled(Rect::from_min_max(pos2(rect.left(), h.y.max(rect.top())), rect.max), 4.0, rough);
-    }
-    p.add(egui::Shape::convex_polygon(quad(-half * 3.0, half * 3.0, 0.0, far * 1.4), rough, Stroke::NONE));
-    p.add(egui::Shape::convex_polygon(quad(-half * 0.45, half * 0.45, 0.0, far * 1.4), Color32::from_rgb(0x2c, 0x5c, 0x37), Stroke::NONE));
-    let line = Color32::from_rgb(0x4b, 0x7a, 0x57);
-    let grass = Color32::from_rgb(0xcf, 0xe3, 0xd4);
-    let step_m = if u.meters { 50.0 } else { 50.0 / M_TO_YD as f32 };
-    let mut k = 1;
-    let mut last_label: Option<egui::Pos2> = None;
-    while step_m * k as f32 <= far {
-        let z = step_m * k as f32;
-        if let (Some(a), Some(b)) = (to_screen([-half, 0.0, z]), to_screen([half, 0.0, z])) {
-            p.line_segment([a, b], Stroke::new(1.0, line));
-            // From the side below the ground, else at the line's end; none where they would crowd.
-            let (at, align) = match camera {
-                Camera::Side => (to_screen([0.0, 0.0, z]).unwrap_or(b) + vec2(0.0, 6.0), Align2::CENTER_TOP),
-                _ => (b + vec2(3.0, 0.0), Align2::LEFT_CENTER),
-            };
-            if last_label.is_none_or(|l| (l.y - at.y).abs() > 13.0 || (l.x - at.x).abs() > 44.0) {
-                p.text(at, align, format!("{} {}", 50 * k, u.dist_unit()), FontId::proportional(10.0), grass);
-                last_label = Some(at);
-            }
-        }
-        k += 1;
-    }
-    if let (Some(a), Some(b)) = (to_screen([0.0, 0.0, 0.0]), to_screen([0.0, 0.0, far * 1.4])) {
-        p.line_segment([a, b], Stroke::new(1.0, grass.gamma_multiply(0.3)));
-    }
-
-    // Flights, selected ones on top; the roll-out dashed on the ground.
-    let mut dots: Vec<Dot> = Vec::new();
-    for selected in [false, true] {
-        for ((s, path), f) in ctx.shown.iter().zip(ctx.paths).zip(ctx.flights) {
-            let is_selected = ctx.selected.contains(&key(s));
-            if is_selected != selected {
-                continue;
-            }
-            let color = (ctx.color_of)(&s.club_code);
-            let (color, width) = match (selected, s.excluded) {
-                (true, _) => (WHITE, 2.4),
-                (false, true) => (color.gamma_multiply(0.25), 1.0),
-                (false, false) => (color.gamma_multiply(0.85), 1.3),
-            };
-            let air: Vec<egui::Pos2> = path.air.iter().filter_map(|q| to_screen(*q)).collect();
-            p.add(egui::Shape::line(air, Stroke::new(width, color)));
-            if let (Some(land), Some(rest)) = (path.air.last().and_then(|q| to_screen(*q)), to_screen(path.rest)) {
-                p.extend(egui::Shape::dashed_line(&[land, rest], Stroke::new(width * 0.8, color), 3.0, 3.0));
-                dots.push(Dot {
-                    pos: land,
-                    color: (ctx.color_of)(&s.club_code),
-                    selected,
-                    excluded: s.excluded,
-                    key: key(s),
-                    tip: format!(
-                        "{} · {}\n{}* {:.0} {} · {}* {:.0} {}",
-                        s.clock(),
-                        s.club_code.as_deref().unwrap_or("–"),
-                        tr("Carry"),
-                        u.dist(f.carry),
-                        u.dist_unit(),
-                        tr("Apex"),
-                        u.dist(f.apex),
-                        u.dist_unit(),
-                    ),
-                });
-            }
-        }
-    }
-    draw_dots(ui, egui::Id::new(("flight", i)), rect, &dots)
 }
 
 /// A value of a shot in the units shown; `None` where the shot doesn't have it.
@@ -1814,8 +1665,14 @@ mod tests {
             ("explorer-flight.png", |app, _| {
                 state::with(|s| s.session = engine::demo_range());
                 let tile = |size, camera| Tile { kind: TileKind::Flight, size, camera, ..Tile::default() };
-                app.saved.explorer.pages[0].tiles =
-                    vec![tile(TileSize::W4H2, Camera::Tee), tile(TileSize::W2H1, Camera::Side), tile(TileSize::W2H1, Camera::Above)];
+                app.saved.explorer.pages[0].tiles = vec![
+                    Tile { averages: true, ..tile(TileSize::W4H2, Camera::Tee) },
+                    tile(TileSize::W2H1, Camera::Side),
+                    tile(TileSize::W2H1, Camera::Above),
+                ];
+                // A driver selected: glow, apex line, labels.
+                let driver = state::with(|s| s.session.iter().find(|r| r.club_code.as_deref() == Some("DR")).map(key));
+                app.explorer.selected = driver.iter().cloned().collect();
                 app.explorer.hidden_clubs = [Some("W5"), Some("H3"), Some("I6"), Some("I8"), Some("GW"), Some("LW")]
                     .into_iter()
                     .map(|c| c.map(String::from))

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- **3D flight tile** looks like a driving range now: sky with haze at the horizon, mown fairway, target greens with
+  flags and distance boards every 50 m (yd), height lines in the side view. The flights cast shadows, fade in from the
+  tee and get thinner further away; each landing is marked with a ring, followed by its bounces and roll. A selected
+  shot glows and shows its apex and carry. *Mean per club* draws one bold mean flight per club with the single shots
+  faint behind.
+
 ## [1.1.0] – 2026-10-21
 
 ### Added
