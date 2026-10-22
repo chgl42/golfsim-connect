@@ -8,8 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 - **3D flight tile, interactive:** drag to turn the camera, scroll to zoom, double-click to go back; switching between
-  *Tee*, *Side view* and *Above* glides there. A new shot flies in real time with a tracer, and ▶ plays the selected
-  (or latest) shot again.
+  *Tee*, *Side view* and *Above* glides there. A new shot flies in real time with a tracer, bounces and rolls out, and ▶
+  plays the selected (or latest) shot again.
 
 ### Added
 - **Left/right in the tables:** the shots table shows where each ball landed left or right of the target line

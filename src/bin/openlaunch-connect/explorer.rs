@@ -1694,7 +1694,7 @@ mod tests {
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
-        let states: [(&str, Setup); 8] = [
+        let states: [(&str, Setup); 10] = [
             ("explorer-averages.png", |app, _| app.explorer.page = 2),
             ("explorer-selection.png", |app, keys| {
                 app.explorer.selected = keys.iter().cloned().collect();
@@ -1738,6 +1738,21 @@ mod tests {
                 app.explorer.page = 1;
                 let driver = state::with(|s| s.session.iter().find(|r| r.club_code.as_deref() == Some("DR")).map(key));
                 app.explorer.anim = driver.map(|k| (k, Instant::now() - Duration::from_millis(2200)));
+                app.explorer.last_latest = Some(state::with(|s| s.session.last().map(key)));
+            }),
+            ("explorer-orbit.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                app.explorer.page = 1;
+                let mut views = app.explorer.views.borrow_mut();
+                views.insert((1, 0), flight3d::TileView::turned(0.9, 0.25, 1.0));
+                views.insert((1, 1), flight3d::TileView::turned(-0.5, 0.5, 1.4));
+                views.insert((1, 2), flight3d::TileView::turned(2.4, -0.2, 1.0));
+            }),
+            ("explorer-roll.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                app.explorer.page = 1;
+                let driver = state::with(|s| s.session.iter().find(|r| r.club_code.as_deref() == Some("DR")).map(key));
+                app.explorer.anim = driver.map(|k| (k, Instant::now() - Duration::from_millis(6600)));
                 app.explorer.last_latest = Some(state::with(|s| s.session.last().map(key)));
             }),
             ("explorer-export.png", |app, _| app.explorer.export_dialog = true),
