@@ -252,45 +252,62 @@ pub struct OverlayStyle {
     pub one_line: bool,
     /// Background opacity (0.7–1.0).
     pub opacity: f32,
-    pub club: bool,
-    pub battery: bool,
-    pub tempo: bool,
-    pub ball_speed: bool,
-    pub vla: bool,
-    pub hla: bool,
-    pub spin: bool,
-    pub spin_axis: bool,
-    pub club_speed: bool,
-    pub smash: bool,
+    /// The overlay's tiles: columns of two (top, bottom). The first column starts with the status,
+    /// which can't be moved. One line shows them in this order.
+    pub layout: Vec<[Option<OverlayItem>; 2]>,
     /// Graphics of the impact next to the text: angle of attack and launch angle from the side,
     /// club path and start direction from above.
     pub impact_side: bool,
     pub impact_top: bool,
-    /// Distance left to the pin after the shot (from GSPro's results).
-    pub to_pin: bool,
 }
 
 impl Default for OverlayStyle {
-    /// The overlay as it was before it could be configured.
     fn default() -> Self {
         Self {
             scale: 1.0,
             one_line: false,
             opacity: 0.85,
-            club: true,
-            battery: true,
-            tempo: true,
-            ball_speed: true,
-            vla: true,
-            hla: false,
-            spin: true,
-            spin_axis: false,
-            club_speed: false,
-            smash: true,
+            layout: OverlayItem::default_layout(),
             impact_side: true,
             impact_top: true,
-            to_pin: true,
         }
+    }
+}
+
+/// Something the overlay can show in one of its tiles.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayItem {
+    Status,
+    Club,
+    BallSpeed,
+    ClubSpeed,
+    Smash,
+    Spin,
+    Vla,
+    Hla,
+    SpinAxis,
+    Tempo,
+    /// Distance left to the pin after the shot (from GSPro's results).
+    Pin,
+    Battery,
+}
+
+impl OverlayItem {
+    /// What can be put into a tile (the status has its fixed place).
+    pub const CHOICES: [Self; 11] =
+        [Self::Club, Self::BallSpeed, Self::ClubSpeed, Self::Smash, Self::Spin, Self::Vla, Self::Hla, Self::SpinAxis, Self::Tempo, Self::Pin, Self::Battery];
+
+    /// Status and club, the speeds, smash and spin, the launch angles, pin and battery.
+    #[must_use]
+    pub fn default_layout() -> Vec<[Option<Self>; 2]> {
+        vec![
+            [Some(Self::Status), Some(Self::Club)],
+            [Some(Self::BallSpeed), Some(Self::ClubSpeed)],
+            [Some(Self::Smash), Some(Self::Spin)],
+            [Some(Self::Vla), Some(Self::Hla)],
+            [Some(Self::Pin), Some(Self::Battery)],
+        ]
     }
 }
 
@@ -433,6 +450,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlay_layout_defaults_and_old_switches_are_ignored() {
+        let old = r#"{"scale":1.25,"club":true,"battery":false,"smash":true,"to_pin":true}"#;
+        let style: OverlayStyle = serde_json::from_str(old).unwrap();
+        assert_eq!(style.scale, 1.25);
+        assert_eq!(style.layout, OverlayItem::default_layout());
+        assert_eq!(style.layout[0][0], Some(OverlayItem::Status));
+        let json = serde_json::to_string(&style).unwrap();
+        assert!(json.contains(r#"["ball_speed","club_speed"]"#), "{json}");
+    }
 
     #[test]
     fn overlay_anchors() {

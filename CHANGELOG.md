@@ -7,13 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Changed
-- **Overlay values with symbols** instead of words, to save room: a ball for the ball speed, a club for the club
-  speed, a burst for the smash factor, a ball with an arrow for the spin and a flag for the distance to the pin. Ball
-  speed, club speed and smash factor now stand side by side.
+- **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed,
+  smash factor and spin, VLA and HLA, distance to the pin and battery – with symbols instead of words (a golf ball
+  with speed lines, an iron, club face and ball, a ball with an arrow around it, a flag). On the Overlay page a click
+  on a tile in the preview picks what it shows (or empties it, or removes the column), *+ Column* adds one and
+  *Reset* brings back the default. One line shows the same tiles in a row.
 
 ### Added
-- **Distance to the pin in the overlay** (Overlay page → *Distance to the pin*): after a shot on a course, the overlay
-  shows how far the ball is left from the pin, from GSPro's results (e.g. *Pin 139 m*, in yards with yd).
+- **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
+  the pin, from GSPro's results (in m or yd).
 - **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle
   from GSPro's database in the CrossOver bottle (read-only) and keeps them with the shot. The chip *GSPro results*
   on the shots page shows them in the tables, details, dispersion and 3D tiles instead of the estimate, where GSPro
