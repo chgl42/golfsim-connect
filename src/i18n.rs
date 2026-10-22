@@ -200,6 +200,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "Double height" => "Doppelte Höhe",
         "Reset" => "Zurücksetzen",
         "Status" => "Status",
         "Remove column" => "Spalte entfernen",

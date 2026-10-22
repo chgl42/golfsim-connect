@@ -255,10 +255,6 @@ pub struct OverlayStyle {
     /// The overlay's tiles: columns of two (top, bottom). The first column starts with the status,
     /// which can't be moved. One line shows them in this order.
     pub layout: Vec<[Option<OverlayItem>; 2]>,
-    /// Graphics of the impact next to the text: angle of attack and launch angle from the side,
-    /// club path and start direction from above.
-    pub impact_side: bool,
-    pub impact_top: bool,
 }
 
 impl Default for OverlayStyle {
@@ -268,8 +264,6 @@ impl Default for OverlayStyle {
             one_line: false,
             opacity: 0.85,
             layout: OverlayItem::default_layout(),
-            impact_side: true,
-            impact_top: true,
         }
     }
 }
@@ -291,14 +285,38 @@ pub enum OverlayItem {
     /// Distance left to the pin after the shot (from GSPro's results).
     Pin,
     Battery,
+    /// Graphic of the impact from the side: angle of attack and launch angle (a whole column).
+    ImpactSide,
+    /// Graphic from above: club path, start direction and the shot's shape (a whole column).
+    ImpactTop,
 }
 
 impl OverlayItem {
     /// What can be put into a tile (the status has its fixed place).
-    pub const CHOICES: [Self; 11] =
-        [Self::Club, Self::BallSpeed, Self::ClubSpeed, Self::Smash, Self::Spin, Self::Vla, Self::Hla, Self::SpinAxis, Self::Tempo, Self::Pin, Self::Battery];
+    pub const CHOICES: [Self; 13] = [
+        Self::Club,
+        Self::BallSpeed,
+        Self::ClubSpeed,
+        Self::Smash,
+        Self::Spin,
+        Self::Vla,
+        Self::Hla,
+        Self::SpinAxis,
+        Self::Tempo,
+        Self::Pin,
+        Self::Battery,
+        Self::ImpactSide,
+        Self::ImpactTop,
+    ];
 
-    /// Status and club, the speeds, smash and spin, the launch angles, pin and battery.
+    /// The impact graphics take a whole column.
+    #[must_use]
+    pub fn is_graphic(self) -> bool {
+        matches!(self, Self::ImpactSide | Self::ImpactTop)
+    }
+
+    /// Status and club, the speeds, smash and spin, the launch angles, pin and battery, then the
+    /// impact from the side and from above.
     #[must_use]
     pub fn default_layout() -> Vec<[Option<Self>; 2]> {
         vec![
@@ -307,6 +325,8 @@ impl OverlayItem {
             [Some(Self::Smash), Some(Self::Spin)],
             [Some(Self::Vla), Some(Self::Hla)],
             [Some(Self::Pin), Some(Self::Battery)],
+            [Some(Self::ImpactSide), None],
+            [Some(Self::ImpactTop), None],
         ]
     }
 }

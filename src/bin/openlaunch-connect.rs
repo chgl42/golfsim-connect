@@ -864,9 +864,7 @@ impl App {
                     style.layout = OverlayItem::default_layout();
                 }
             });
-            ui.add_space(2.0);
-            toggle(ui, &mut style.impact_side, tr("Impact from the side"));
-            toggle(ui, &mut style.impact_top, tr("Impact from above"));
+
         });
 
         // Below the cards, down to the page's bottom margin (the cards move the layout cursor).
@@ -908,7 +906,8 @@ impl App {
         };
         let ready = (R10Status::Ready, "", true);
         let pin = Some(pin_text(139.0, self.saved.meters));
-        let content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot), pin);
+        let mut content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot), pin);
+        content.edit = true;
         let size = content.size(ui.ctx());
         let pad = 9.0;
         let room = area.size() - vec2(2.0 * pad, 2.0 * pad);
@@ -959,13 +958,28 @@ impl App {
             egui::Popup::menu(&resp).show(|ui| {
                 let current = style.layout.get(k).and_then(|c| c[row]);
                 for item in OverlayItem::CHOICES {
+                    if item.is_graphic() && k == 0 {
+                        continue;
+                    }
+                    if item == OverlayItem::ImpactSide {
+                        ui.separator();
+                    }
                     if ui.selectable_label(current == Some(item), overlay_item_name(item)).clicked() {
-                        style.layout[k][row] = Some(item);
+                        set_tile(&mut style.layout, k, row, Some(item));
                     }
                 }
                 ui.separator();
                 if ui.selectable_label(current.is_none(), tr("Empty")).clicked() {
-                    style.layout[k][row] = None;
+                    set_tile(&mut style.layout, k, row, None);
+                }
+                // A value may fill its column (not next to the status, not a graphic).
+                if k > 0
+                    && let Some(item) = current.filter(|i| !i.is_graphic())
+                {
+                    let tall = style.layout[k] == [Some(item), Some(item)];
+                    if ui.selectable_label(tall, tr("Double height")).clicked() {
+                        style.layout[k] = if tall { [Some(item), None] } else { [Some(item), Some(item)] };
+                    }
                 }
                 if k > 0 && ui.button(RichText::new(tr("Remove column")).color(RED)).clicked() {
                     style.layout.remove(k);
@@ -986,13 +1000,8 @@ impl App {
                 style.layout.push([None, None]);
             }
         }
-        if let Some(((k1, r1), (k2, r2))) = swap
-            && k1 < style.layout.len()
-            && k2 < style.layout.len()
-        {
-            let a = style.layout[k1][r1];
-            style.layout[k1][r1] = style.layout[k2][r2];
-            style.layout[k2][r2] = a;
+        if let Some((a, b)) = swap {
+            swap_tiles(&mut style.layout, a, b);
         }
     }
 
@@ -1751,6 +1760,10 @@ const TILE_PAD_R: f32 = 16.0;
 const TILE_GAP: f32 = 24.0;
 /// Room for a value's symbol in front of it.
 const GLYPH_W: f32 = 22.0;
+/// Size of the figures in a tile of double height.
+const TALL_SIZE: f32 = 30.0;
+/// Width of an empty place in the preview.
+const EMPTY_TILE_W: f32 = 44.0;
 
 /// What a tile shows.
 #[derive(Clone, PartialEq, Debug)]
@@ -1761,6 +1774,10 @@ enum Cell {
     Value { glyph: Option<Glyph>, text: String, color: Color32 },
     /// Battery level of the R10.
     Battery(u8),
+    /// An impact graphic, filling its column.
+    Graphic(OverlayItem),
+    /// A value filling its column, in large figures.
+    Tall(Box<Cell>),
 }
 
 /// What the overlay shows: the tiles (columns of two), or the status and what's wrong.
@@ -1774,15 +1791,15 @@ struct OverlayContent {
     message: Option<(String, Color32)>,
     one_line: bool,
     opacity: f32,
-    /// Angles for the impact graphics (when on and a shot is shown).
+    /// Angles for the impact graphics (when a shot is shown).
     impact: Option<Impact>,
+    /// Shown in the overlay page's preview: empty places stay visible to put something there.
+    edit: bool,
 }
 
 /// What the impact graphics show, in degrees: angle of attack and club path need club data.
 #[derive(Clone, Copy)]
 struct Impact {
-    side: bool,
-    top: bool,
     spin_axis: f64,
     aoa: Option<f64>,
     vla: f64,
@@ -1828,6 +1845,7 @@ impl OverlayContent {
                 OverlayItem::Club => club.map(|c| Cell::Value { glyph: None, text: club_name(c), color: SOFT }),
                 OverlayItem::Battery => battery.map(Cell::Battery),
                 OverlayItem::Pin => pin.clone().filter(|_| shot.is_some()).and_then(|p| value(Some(Glyph::Pin), p)),
+                OverlayItem::ImpactSide | OverlayItem::ImpactTop => shot.map(|_| Cell::Graphic(item)),
                 _ => {
                     let s = shot?;
                     let b = &s.ball;
@@ -1845,37 +1863,60 @@ impl OverlayContent {
                 }
             }
         };
-        let mut columns: Vec<[Option<Cell>; 2]> =
-            style.layout.iter().map(|[a, b]| [a.and_then(cell), b.and_then(cell)]).collect();
+        // A graphic fills its column.
+        let mut columns: Vec<[Option<Cell>; 2]> = style
+            .layout
+            .iter()
+            .map(|[a, b]| match (a.filter(|i| i.is_graphic()), b.filter(|i| i.is_graphic())) {
+                (Some(g), _) | (None, Some(g)) => [cell(g), None],
+                // The same value in both places: one tile of double height.
+                _ if a.is_some() && a == b && *a != Some(OverlayItem::Status) => [a.and_then(cell).map(|c| Cell::Tall(Box::new(c))), None],
+                _ => [a.and_then(cell), b.and_then(cell)],
+            })
+            .collect();
         // The status always comes first.
         match columns.first_mut() {
             Some(first) if first[0] != Some(Cell::Status) => first[0] = Some(Cell::Status),
             None => columns.push([Some(Cell::Status), None]),
             _ => {}
         }
-        let impact = last.filter(|s| (style.impact_side || style.impact_top) && ready && s.delivered).map(|s| Impact {
-            side: style.impact_side,
-            top: style.impact_top,
+        let impact = last.filter(|_| ready).filter(|s| s.delivered).map(|s| Impact {
             spin_axis: s.ball.spin_axis,
             aoa: s.club.map(|c| c.angle_of_attack),
             vla: s.ball.vla,
             path: s.club.map(|c| c.path),
             hla: s.ball.hla,
         });
-        Self { color, word, columns, message, one_line: style.one_line, opacity: style.opacity, impact }
+        Self { color, word, columns, message, one_line: style.one_line, opacity: style.opacity, impact, edit: false }
     }
 
-    /// The columns drawn: all of them with a shot; else the first one and the battery.
-    fn shown_columns(&self) -> Vec<[Option<&Cell>; 2]> {
+    /// The columns drawn with their place in the layout: all of them with a shot, else the first
+    /// one and the battery. While editing (the preview), empty columns and tiles stay as places.
+    fn shown_columns(&self) -> Vec<(usize, [Option<&Cell>; 2])> {
         self.columns
             .iter()
             .enumerate()
             .map(|(k, [a, b])| {
                 let shows = |c: &Cell| self.message.is_none() || k == 0 || matches!(c, Cell::Battery(_));
-                [a.as_ref().filter(|c| shows(c)), b.as_ref().filter(|c| shows(c))]
+                (k, [a.as_ref().filter(|c| shows(c)), b.as_ref().filter(|c| shows(c))])
             })
-            .filter(|[a, b]| a.is_some() || b.is_some())
+            .filter(|(_, [a, b])| a.is_some() || b.is_some() || (self.edit && self.message.is_none()))
             .collect()
+    }
+
+    /// The tiles one after the other (one line): place in the layout and what it shows (`None`: an
+    /// empty place while editing).
+    fn shown_tiles(&self) -> Vec<(usize, usize, Option<&Cell>)> {
+        let mut out = Vec::new();
+        for (k, col) in self.shown_columns() {
+            let whole = matches!(col[0], Some(Cell::Graphic(_) | Cell::Tall(_)));
+            for (r, cell) in col.into_iter().enumerate() {
+                if cell.is_some() || (self.edit && self.message.is_none() && !(whole && r == 1)) {
+                    out.push((k, r, cell));
+                }
+            }
+        }
+        out
     }
 
     /// Panel size at scale 1.
@@ -1883,7 +1924,7 @@ impl OverlayContent {
         let measure = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
         let (tiles, height) = self.tiles(&measure);
         let width = tiles.last().map_or(TILE_PAD_L, |t| t.0 + t.1) + TILE_PAD_R;
-        vec2(width.ceil(), height) + vec2(self.graphics_width(), 0.0)
+        vec2(width.ceil(), height)
     }
 
     /// Where the columns go (left edge and width, from the panel's left) and the panel's height.
@@ -1892,29 +1933,29 @@ impl OverlayContent {
         let columns = self.shown_columns();
         let mut x = TILE_PAD_L;
         let mut out = Vec::new();
+        let width = |cell: Option<&Cell>| cell.map_or(EMPTY_TILE_W, |c| cell_width(c, self.word, self.one_line, measure));
         if self.one_line {
-            // One row: every tile after the other.
-            for cell in columns.iter().flatten().flatten() {
-                let w = cell_width(cell, self.word, true, measure);
+            // One row: every tile after the other, the message after the first.
+            for (n, (_, _, cell)) in self.shown_tiles().into_iter().enumerate() {
+                let w = width(cell);
                 out.push((x, w));
                 x += w + 16.0;
-            }
-            if let Some((text, _)) = &self.message {
-                out.insert(1.min(out.len()), (0.0, measure(text, FontId::proportional(14.0))));
-                // Re-lay out in order.
-                let mut x = TILE_PAD_L;
-                for t in &mut out {
-                    t.0 = x;
-                    x += t.1 + 16.0;
+                if n == 0
+                    && let Some((text, _)) = &self.message
+                {
+                    let w = measure(text, FontId::proportional(14.0));
+                    out.push((x, w));
+                    x += w + 16.0;
                 }
             }
             return (out, 40.0);
         }
-        for (k, col) in columns.iter().enumerate() {
-            let w = col.iter().flatten().map(|c| cell_width(c, self.word, false, measure)).fold(0.0, f32::max);
+        for (n, (_, col)) in columns.iter().enumerate() {
+            let whole = matches!(col[0], Some(Cell::Graphic(_) | Cell::Tall(_)));
+            let w = if whole { width(col[0]) } else { col.iter().map(|c| width(*c)).fold(0.0, f32::max) };
             out.push((x, w));
             x += w + TILE_GAP;
-            if k == 0
+            if n == 0
                 && let Some((text, _)) = &self.message
             {
                 let w = measure(text, FontId::proportional(14.0));
@@ -1922,14 +1963,9 @@ impl OverlayContent {
                 x += w + TILE_GAP;
             }
         }
-        let height = if self.impact.is_some() { OVERLAY_IMPACT_H } else { OVERLAY_SIZE.y };
-        (out, height)
-    }
-
-    /// Room for the impact graphics on the right (none without them).
-    fn graphics_width(&self) -> f32 {
-        let count = self.impact.map_or(0, |i| usize::from(i.side) + usize::from(i.top));
-        count as f32 * (impact_panel_width(self.one_line) + 1.0)
+        // Taller with an impact graphic, which has its values underneath.
+        let graphic = columns.iter().any(|(_, c)| matches!(c[0], Some(Cell::Graphic(_))));
+        (out, if graphic { OVERLAY_IMPACT_H } else { OVERLAY_SIZE.y })
     }
 }
 
@@ -1939,7 +1975,48 @@ fn cell_width(cell: &Cell, word: &str, one_line: bool, measure: &dyn Fn(&str, Fo
         Cell::Status => 16.0 + measure(word, cond(if one_line { 20.0 } else { 24.0 })),
         Cell::Value { glyph, text, .. } => (if glyph.is_some() { GLYPH_W } else { 0.0 }) + measure(text, FontId::proportional(14.0)),
         Cell::Battery(level) => 32.0 + measure(&format!("{level} %"), FontId::proportional(13.0)),
+        // The panel spans the gaps on both sides.
+        Cell::Graphic(_) => impact_panel_width(one_line) - if one_line { 16.0 } else { TILE_GAP },
+        Cell::Tall(inner) if one_line => cell_width(inner, word, true, measure),
+        Cell::Tall(inner) => match inner.as_ref() {
+            Cell::Value { glyph, text, .. } => (if glyph.is_some() { GLYPH_W + 4.0 } else { 0.0 }) + measure(text, cond(TALL_SIZE)),
+            other => cell_width(other, word, false, measure),
+        },
     }
+}
+
+/// Put `item` into a tile; an impact graphic takes the whole column, and a value put where a
+/// graphic was leaves the other place empty.
+fn set_tile(layout: &mut [[Option<OverlayItem>; 2]], k: usize, row: usize, item: Option<OverlayItem>) {
+    let Some(col) = layout.get_mut(k) else { return };
+    let tall = col[0].is_some() && col[0] == col[1];
+    if item.is_some_and(OverlayItem::is_graphic) || col.iter().flatten().any(|i| i.is_graphic()) {
+        *col = [item, None];
+    } else if tall {
+        // A tile of double height keeps its height with the new value.
+        *col = [item, item];
+    } else {
+        col[row] = item;
+    }
+}
+
+/// Swap two tiles; when one of them fills its column, the two columns swap (never the first,
+/// which holds the status).
+fn swap_tiles(layout: &mut [[Option<OverlayItem>; 2]], (k1, r1): (usize, usize), (k2, r2): (usize, usize)) {
+    if k1 >= layout.len() || k2 >= layout.len() {
+        return;
+    }
+    // Graphics and tiles of double height fill their column: they move with it.
+    let whole = |k: usize| layout[k].iter().flatten().any(|i| i.is_graphic()) || (layout[k][0].is_some() && layout[k][0] == layout[k][1]);
+    if whole(k1) || whole(k2) {
+        if k1 != 0 && k2 != 0 {
+            layout.swap(k1, k2);
+        }
+        return;
+    }
+    let a = layout[k1][r1];
+    layout[k1][r1] = layout[k2][r2];
+    layout[k2][r2] = a;
 }
 
 /// Name of a tile's contents on the overlay page.
@@ -1957,6 +2034,8 @@ fn overlay_item_name(item: OverlayItem) -> &'static str {
         OverlayItem::Tempo => tr("Tempo"),
         OverlayItem::Pin => tr("Distance to the pin"),
         OverlayItem::Battery => tr("Battery"),
+        OverlayItem::ImpactSide => tr("Impact from the side"),
+        OverlayItem::ImpactTop => tr("Impact from above"),
     }
 }
 
@@ -1974,20 +2053,6 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
         CornerRadius { nw: 7, sw: 7, ne: 0, se: 0 },
         c.color,
     );
-    // The impact graphics take the right end; the tiles the rest.
-    let graphics = c.graphics_width();
-    if let Some(impact) = c.impact {
-        let w = impact_panel_width(c.one_line);
-        let labels = !c.one_line;
-        let mut x = rect.right() - graphics + 1.0;
-        let panels: [(bool, ImpactGraphic); 2] = [(impact.side, impact_side), (impact.top, impact_top)];
-        for (_, draw) in panels.into_iter().filter(|(on, _)| *on) {
-            let r = Rect::from_min_size(pos2(x, rect.top()), vec2(w, rect.height()));
-            p.line_segment([pos2(r.left() - 0.5, rect.top() + 1.0), pos2(r.left() - 0.5, rect.bottom() - 1.0)], Stroke::new(1.0, LINE));
-            draw(p, r, impact, labels);
-            x += w + 1.0;
-        }
-    }
 
     let measure = |text: &str, font: FontId| p.layout_no_wrap(text.to_string(), font, WHITE).size().x;
     let (tiles, _) = c.tiles(&measure);
@@ -2008,37 +2073,59 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
             let w = cell_width(cell, c.word, c.one_line, &measure);
             draw_battery(p, pos2(at.x + w, at.y), *level);
         }
-    };
-    // Tiles of the layout drawn, by their place in it.
-    let places: Vec<(usize, usize)> = {
-        let mut v = Vec::new();
-        for (k, [a, b]) in c.columns.iter().enumerate() {
-            let keep = |x: &Option<Cell>| x.as_ref().is_some_and(|x| c.message.is_none() || k == 0 || matches!(x, Cell::Battery(_)));
-            if keep(a) || keep(b) {
-                v.push((k, [keep(a), keep(b)]));
+        Cell::Tall(inner) => match inner.as_ref() {
+            // In one line just the value; two lines draw it large (see below).
+            Cell::Value { glyph, text, color } if !c.one_line => {
+                let mut x = at.x;
+                if let Some(g) = glyph {
+                    draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
+                    x += GLYPH_W + 4.0;
+                }
+                caps_text(p, pos2(x, at.y), egui::Align::Min, text, TALL_SIZE, *color);
             }
+            Cell::Value { glyph, text, color } => {
+                let mut x = at.x;
+                if let Some(g) = glyph {
+                    draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
+                    x += GLYPH_W;
+                }
+                p.text(pos2(x, at.y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
+            }
+            Cell::Battery(level) => draw_battery(p, pos2(at.x + cell_width(inner, c.word, c.one_line, &measure), at.y), *level),
+            _ => {}
+        },
+        Cell::Graphic(item) => {
+            let Some(impact) = c.impact else { return };
+            let gap = if c.one_line { 16.0 } else { TILE_GAP };
+            let r = Rect::from_min_size(pos2(at.x - gap / 2.0, rect.top()), vec2(impact_panel_width(c.one_line), rect.height()));
+            let draw: ImpactGraphic = if *item == OverlayItem::ImpactSide { impact_side } else { impact_top };
+            draw(p, r, impact, !c.one_line);
         }
-        v.into_iter().flat_map(|(k, kept)| (0..2).filter(move |r| kept[*r]).map(move |r| (k, r))).collect()
+    };
+    // An empty place while editing: a dashed outline.
+    let placeholder = |r: Rect| {
+        let r = r.shrink2(vec2(2.0, 4.0));
+        let outline = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        p.extend(egui::Shape::dashed_line(&outline, Stroke::new(1.0, BUTTON_LINE), 4.0, 3.0));
     };
     let mut hit = Vec::new();
-    let message_color = c.message.as_ref().map_or(WHITE, |m| m.1);
     if c.one_line {
         let y = rect.center().y;
         let mut tile = tiles.iter();
-        let mut first = true;
-        for (k, r) in &places {
-            let Some(cell) = c.columns[*k][*r].as_ref() else { continue };
+        for (n, (k, r, cell)) in c.shown_tiles().into_iter().enumerate() {
             let Some(&(x, w)) = tile.next() else { break };
-            draw_cell(cell, pos2(rect.left() + x, y));
-            hit.push((*k, *r, Rect::from_min_size(pos2(rect.left() + x, rect.top()), vec2(w, rect.height()))));
-            if first {
-                first = false;
-                // The message has its own place after the first tile.
-                if let Some((text, _)) = &c.message
-                    && let Some(&(mx, _)) = tile.next()
-                {
-                    p.text(pos2(rect.left() + mx, y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), message_color);
-                }
+            let area = Rect::from_min_size(pos2(rect.left() + x, rect.top()), vec2(w, rect.height()));
+            match cell {
+                Some(cell) => draw_cell(cell, pos2(rect.left() + x, y)),
+                None => placeholder(area),
+            }
+            hit.push((k, r, area));
+            // The message has its own place after the first tile.
+            if n == 0
+                && let Some((text, color)) = &c.message
+                && let Some(&(mx, _)) = tile.next()
+            {
+                p.text(pos2(rect.left() + mx, y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
             }
         }
         return hit;
@@ -2046,24 +2133,28 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
     // Two rows, a thin line between the columns.
     let inset = 20.0 + ((rect.height() - OVERLAY_SIZE.y) / 2.0).max(0.0);
     let rows = [rect.top() + inset, rect.bottom() - inset];
-    let columns = c.shown_columns();
+    let half = (rows[1] - rows[0]) / 2.0;
     let mut tile = tiles.iter();
-    let mut k_layout = places.iter().map(|(k, _)| *k).collect::<Vec<_>>();
-    k_layout.dedup();
-    for (n, col) in columns.iter().enumerate() {
+    for (n, (k, col)) in c.shown_columns().into_iter().enumerate() {
         let Some(&(x, w)) = tile.next() else { break };
-        let k = k_layout.get(n).copied().unwrap_or(n);
         if n > 0 {
             let lx = rect.left() + x - TILE_GAP / 2.0;
             p.line_segment([pos2(lx, rect.top() + 12.0), pos2(lx, rect.bottom() - 12.0)], Stroke::new(1.0, LINE));
         }
-        for (r, cell) in col.iter().enumerate() {
-            let y = rows[r];
-            if let Some(cell) = cell {
-                draw_cell(cell, pos2(rect.left() + x, y));
+        if let Some(cell @ (Cell::Graphic(_) | Cell::Tall(_))) = col[0] {
+            draw_cell(cell, pos2(rect.left() + x, rect.center().y));
+            hit.push((k, 0, Rect::from_min_size(pos2(rect.left() + x - TILE_GAP / 2.0, rect.top()), vec2(w + TILE_GAP, rect.height()))));
+        } else {
+            for (r, cell) in col.iter().enumerate() {
+                let y = rows[r];
+                let area = Rect::from_center_size(pos2(rect.left() + x + w / 2.0, y), vec2(w + TILE_GAP - 2.0, half * 2.0));
+                match cell {
+                    Some(cell) => draw_cell(cell, pos2(rect.left() + x, y)),
+                    None if c.edit => placeholder(Rect::from_center_size(area.center(), vec2(w + 8.0, half * 2.0 - 4.0))),
+                    None => {}
+                }
+                hit.push((k, r, area));
             }
-            let half = (rows[1] - rows[0]) / 2.0;
-            hit.push((k, r, Rect::from_center_size(pos2(rect.left() + x + w / 2.0, y), vec2(w + TILE_GAP - 2.0, half * 2.0))));
         }
         if n == 0
             && let Some((text, color)) = &c.message
@@ -2080,7 +2171,7 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
 enum Glyph {
     /// A golf ball with speed lines: ball speed.
     BallSpeed,
-    /// An iron's head on its shaft: club speed.
+    /// A driver's head on its shaft: club speed.
     ClubSpeed,
     /// Club face meeting the ball: smash factor.
     Smash,
@@ -2109,22 +2200,27 @@ fn draw_glyph(p: &egui::Painter, c: egui::Pos2, glyph: Glyph, color: Color32) {
             }
         }
         Glyph::ClubSpeed => {
-            // Shaft down to an iron's head: a blade with a flat sole and a rounded toe.
-            p.line_segment([c + vec2(5.5, -8.0), c + vec2(2.5, 2.5)], Stroke::new(1.5, color));
-            let head = vec![
-                c + vec2(1.5, 1.5),
-                c + vec2(4.0, 1.5),
-                c + vec2(4.0, 6.5),
-                c + vec2(-5.5, 7.5),
-                c + vec2(-7.5, 6.5),
-                c + vec2(-7.5, 4.0),
-                c + vec2(-5.0, 2.5),
-            ];
+            // A driver: shaft down to a big round head, the face on the left.
+            p.line_segment([c + vec2(6.5, -8.5), c + vec2(2.0, 1.5)], Stroke::new(1.4, color));
+            let head: Vec<egui::Pos2> = [
+                (2.8, 1.0),
+                (1.0, 0.2),
+                (-2.0, 0.0),
+                (-5.0, 0.8),
+                (-7.2, 2.6),
+                (-7.8, 5.0),
+                (-6.6, 7.0),
+                (-3.0, 7.6),
+                (1.5, 7.2),
+                (3.6, 5.6),
+                (3.8, 3.2),
+            ]
+            .iter()
+            .map(|&(x, y)| c + vec2(x, y))
+            .collect();
             p.add(egui::Shape::convex_polygon(head, color, Stroke::NONE));
-            // Grooves.
-            for y in [4.0, 5.6] {
-                p.line_segment([c + vec2(-5.5, y), c + vec2(1.5, y - 0.4)], Stroke::new(0.7, PAGE));
-            }
+            // The face, a little lighter.
+            p.line_segment([c + vec2(-7.0, 2.8), c + vec2(-7.3, 5.6)], Stroke::new(1.2, Color32::from_rgb(0xe6, 0xec, 0xf6)));
         }
         Glyph::Smash => {
             // The face of a club meeting the ball, with a burst between them.
@@ -2711,7 +2807,7 @@ mod tests {
                     for (k, &(hla, spin_axis, path)) in shots.iter().enumerate() {
                         let r = Rect::from_min_size(pos2(k as f32 * w, 0.0), vec2(w, OVERLAY_IMPACT_H));
                         ui.painter().rect_filled(r, 0.0, PAGE);
-                        let impact = Impact { side: false, top: true, spin_axis, aoa: None, vla: 15.0, path: Some(path), hla };
+                        let impact = Impact { spin_axis, aoa: None, vla: 15.0, path: Some(path), hla };
                         impact_top(ui.painter(), r, impact, true);
                     }
                 } else {
@@ -2722,6 +2818,32 @@ mod tests {
             harness.step();
         }
         save(&harness.render().unwrap(), "impact-shapes.png");
+    }
+
+    #[test]
+    fn overlay_graphics_move_as_columns() {
+        use OverlayItem::*;
+        let mut layout = OverlayItem::default_layout();
+        // Ball speed onto the side graphic: the two columns swap.
+        swap_tiles(&mut layout, (1, 0), (5, 0));
+        assert_eq!(layout[1], [Some(ImpactSide), None]);
+        assert_eq!(layout[5], [Some(BallSpeed), Some(ClubSpeed)]);
+        // Never with the status column.
+        swap_tiles(&mut layout, (0, 1), (1, 0));
+        assert_eq!(layout[0], [Some(Status), Some(Club)]);
+        // A graphic put into a tile takes the column; a value put there leaves the rest empty.
+        set_tile(&mut layout, 3, 1, Some(ImpactTop));
+        assert_eq!(layout[3], [Some(ImpactTop), None]);
+        set_tile(&mut layout, 3, 0, Some(Tempo));
+        assert_eq!(layout[3], [Some(Tempo), None]);
+        set_tile(&mut layout, 3, 1, Some(Pin));
+        assert_eq!(layout[3], [Some(Tempo), Some(Pin)]);
+        // A tile of double height keeps its height with another value and moves as a column.
+        layout[2] = [Some(BallSpeed), Some(BallSpeed)];
+        set_tile(&mut layout, 2, 0, Some(Spin));
+        assert_eq!(layout[2], [Some(Spin), Some(Spin)]);
+        swap_tiles(&mut layout, (2, 0), (3, 1));
+        assert_eq!((layout[2], layout[3]), ([Some(Tempo), Some(Pin)], [Some(Spin), Some(Spin)]));
     }
 
     /// Dragging a tile in the overlay preview onto another swaps the two.
@@ -2754,6 +2876,20 @@ mod tests {
         harness.step();
         let layout = &harness.state().saved.overlay_style.layout;
         assert_eq!((layout[1][0], layout[3][0]), (Some(OverlayItem::Vla), Some(OverlayItem::BallSpeed)));
+
+        // + after the last column adds an empty one, which can be clicked in the preview.
+        let rects = harness.state().overlay_tile_rects.borrow().clone();
+        let right = rects.iter().map(|t| t.2.right()).fold(f32::MIN, f32::max);
+        let (top, bottom) = rects.iter().fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(t.2.top()), b.max(t.2.bottom())));
+        let plus = pos2(right, (top + bottom) / 2.0);
+        for event in [egui::Event::PointerMoved(plus), press(plus, true), press(plus, false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        let n = harness.state().saved.overlay_style.layout.len();
+        assert_eq!(n, OverlayItem::default_layout().len() + 1);
+        assert!(harness.state().overlay_tile_rects.borrow().iter().any(|t| t.0 == n - 1), "the empty column has places");
     }
 
     /// Layer transforms apply to every viewport: scaling the overlay must not shrink the main window.
