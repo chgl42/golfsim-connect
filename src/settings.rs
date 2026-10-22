@@ -44,6 +44,8 @@ pub struct Settings {
     pub export_format: ExportFormat,
     /// Pages and tiles of the shots explorer.
     pub explorer: Explorer,
+    /// Carry, total, apex and side from GSPro where it sent them (else the estimate).
+    pub gspro_results: bool,
 }
 
 /// The shots explorer: pages of tiles on a grid of square cells.
@@ -344,6 +346,7 @@ impl Default for Settings {
             window_size: None,
             ui_scale: None,
             explorer: Explorer::default(),
+            gspro_results: true,
         }
     }
 }

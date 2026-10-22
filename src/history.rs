@@ -35,6 +35,9 @@ pub struct ShotRecord {
     /// Left out of the stats and exports (e.g. a misread); stays in the history.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub excluded: bool,
+    /// GSPro's own result of the shot, read from its database after the ball came to rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gspro: Option<crate::gspro_db::GsproResult>,
 }
 
 impl ShotRecord {
@@ -49,6 +52,7 @@ impl ShotRecord {
             club,
             tempo: None,
             excluded: false,
+            gspro: None,
         }
     }
 
@@ -123,6 +127,16 @@ pub fn load_all() -> Vec<ShotRecord> {
 /// # Errors
 /// Returns a message if the file cannot be read or written.
 pub fn set_excluded(time: &str, shot_number: u32, excluded: bool) -> Result<(), String> {
+    update(time, shot_number, |rec| rec.excluded = excluded)
+}
+
+/// Keep GSPro's result with a recorded shot.
+pub fn set_gspro(time: &str, shot_number: u32, result: crate::gspro_db::GsproResult) -> Result<(), String> {
+    update(time, shot_number, |rec| rec.gspro = Some(result))
+}
+
+/// Change one recorded shot in the history file.
+fn update(time: &str, shot_number: u32, change: impl Fn(&mut ShotRecord)) -> Result<(), String> {
     if !PERSIST.load(Ordering::Relaxed) {
         return Ok(());
     }
@@ -133,7 +147,7 @@ pub fn set_excluded(time: &str, shot_number: u32, excluded: bool) -> Result<(), 
     for line in text.lines() {
         match serde_json::from_str::<ShotRecord>(line) {
             Ok(mut rec) if rec.time == time && rec.shot_number == shot_number => {
-                rec.excluded = excluded;
+                change(&mut rec);
                 out.push_str(&serde_json::to_string(&rec).map_err(|e| e.to_string())?);
             }
             _ => out.push_str(line),
@@ -426,9 +440,57 @@ pub struct ClubStats {
     pub side_width: Option<f64>,
 }
 
-/// Per-club statistics of the shots that aren't excluded, in order of first use.
+/// Where a shot came down and stopped, in metres (right positive): GSPro's numbers when `gspro`
+/// is chosen and GSPro sent them, else the estimate (`flight`). GSPro only reports the side where
+/// the ball stopped; the side at the landing is the estimate's, scaled to it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Distances {
+    pub carry: f64,
+    pub total: f64,
+    pub carry_side: f64,
+    pub total_side: f64,
+    pub apex: f64,
+    /// From GSPro (not estimated).
+    pub from_gspro: bool,
+}
+
+impl Distances {
+    /// From the estimate `f`, replaced by GSPro's result `g` where there is one.
+    #[must_use]
+    pub fn new(f: &Flight, g: Option<&crate::gspro_db::GsproResult>) -> Self {
+        match g {
+            Some(g) => {
+                let carry_side = if f.total_side.abs() > 0.5 { f.carry_side * g.side / f.total_side } else { g.side };
+                Self { carry: g.carry, total: g.total, carry_side, total_side: g.side, apex: g.apex, from_gspro: true }
+            }
+            None => Self {
+                carry: f.carry,
+                total: f.total,
+                carry_side: f.carry_side,
+                total_side: f.total_side,
+                apex: f.apex,
+                from_gspro: false,
+            },
+        }
+    }
+
+    /// For a recorded shot.
+    #[must_use]
+    pub fn of(rec: &ShotRecord, gspro: bool) -> Self {
+        Self::new(&flight::fly(&rec.ball), rec.gspro.as_ref().filter(|_| gspro))
+    }
+}
+
+/// Per-club statistics of the shots that aren't excluded, in order of first use (distances
+/// estimated).
 #[must_use]
 pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
+    club_stats_with(shots, false)
+}
+
+/// Like `club_stats`, with GSPro's distances where it sent them and `gspro` is chosen.
+#[must_use]
+pub fn club_stats_with(shots: &[ShotRecord], gspro: bool) -> Vec<ClubStats> {
     let shots: Vec<&ShotRecord> = shots.iter().filter(|s| !s.excluded).collect();
     let mut codes: Vec<Option<String>> = Vec::new();
     for s in &shots {
@@ -441,7 +503,7 @@ pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
         .map(|code| {
             let group: Vec<&ShotRecord> = shots.iter().copied().filter(|s| s.club_code == code).collect();
             let clubs = || group.iter().filter_map(|s| s.club.as_ref());
-            let flights: Vec<Flight> = group.iter().map(|s| flight::fly(&s.ball)).collect();
+            let flights: Vec<Distances> = group.iter().map(|s| Distances::of(s, gspro)).collect();
             ClubStats {
                 shots: group.len(),
                 ball_speed: Stat::of(group.iter().map(|s| s.ball.speed)),
@@ -496,6 +558,7 @@ mod tests {
             club,
             tempo: club_speed.map(|_| Tempo { backswing: 0.81, downswing: 0.27 }),
             excluded: false,
+            gspro: None,
         }
     }
 

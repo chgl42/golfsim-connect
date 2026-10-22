@@ -44,6 +44,8 @@ pub struct State {
     /// Handedness reported by GSPro ("RH"/"LH").
     pub gspro_handed: Option<String>,
     pub last_shot: Option<LastShot>,
+    /// GSPro's result of the latest shot (from its database), e.g. the distance left to the pin.
+    pub gspro_result: Option<crate::gspro_db::GsproResult>,
     pub shots_sent: u32,
     /// Newer release found by the update check.
     pub update: Option<crate::update::Release>,
@@ -66,6 +68,7 @@ impl Default for State {
             gspro_club: None,
             gspro_handed: None,
             last_shot: None,
+            gspro_result: None,
             shots_sent: 0,
             update: None,
             update_check: None,

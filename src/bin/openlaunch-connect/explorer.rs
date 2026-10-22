@@ -82,6 +82,19 @@ struct FlightPath {
     rest: [f32; 3],
 }
 
+impl FlightPath {
+    /// The estimated path bent onto GSPro's numbers `to` (from the estimate `from`): as far, as
+    /// high and landing and stopping where GSPro says.
+    fn fitted(&self, from: &FlightSummary, to: &FlightSummary) -> Self {
+        let carry = from.carry.max(1.0) as f32;
+        let kz = to.carry as f32 / carry;
+        let ky = to.apex as f32 / from.apex.max(0.5) as f32;
+        let shift = (to.carry_side - from.carry_side) as f32;
+        let air = self.air.iter().map(|q| [q[0] + shift * (q[2] / carry), q[1] * ky, q[2] * kz]).collect();
+        Self { air, rest: [to.total_side as f32, 0.0, to.total as f32] }
+    }
+}
+
 impl From<&Flight> for FlightPath {
     fn from(f: &Flight) -> Self {
         let last = f.path.len().saturating_sub(1);
@@ -104,6 +117,16 @@ struct FlightSummary {
     carry_side: f64,
     total_side: f64,
     apex: f64,
+}
+
+impl FlightSummary {
+    /// GSPro's numbers in place of the estimate. GSPro reports the side where the ball stopped;
+    /// the side at the landing is the estimate's, scaled to it.
+    fn with_gspro(self, g: Option<&openlaunch_connect::gspro_db::GsproResult>) -> Self {
+        let Some(g) = g else { return self };
+        let carry_side = if self.total_side.abs() > 0.5 { self.carry_side * g.side / self.total_side } else { g.side };
+        Self { carry: g.carry, total: g.total, carry_side, total_side: g.side, apex: g.apex }
+    }
 }
 
 impl From<&Flight> for FlightSummary {
@@ -423,13 +446,25 @@ impl App {
             .filter(|s| !ex.only_selected || ex.selected.contains(&key(s)))
             .collect();
         let export: Vec<ShotRecord> = if ex.export_dialog { shown.iter().map(|s| (*s).clone()).collect() } else { Vec::new() };
-        let flights: Vec<FlightSummary> = shown
-            .iter()
-            .map(|s| *ex.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball))))
-            .collect();
+        // The estimate of every shot (cached), with GSPro's numbers where chosen and sent.
+        let use_gspro = self.saved.gspro_results;
+        let estimates: Vec<FlightSummary> =
+            shown.iter().map(|s| *ex.flights.entry(key(s)).or_insert_with(|| FlightSummary::from(&flight::fly(&s.ball)))).collect();
+        fn gspro_of(s: &ShotRecord, on: bool) -> Option<&openlaunch_connect::gspro_db::GsproResult> {
+            s.gspro.as_ref().filter(|_| on)
+        }
+        let flights: Vec<FlightSummary> = shown.iter().zip(&estimates).map(|(s, e)| e.with_gspro(gspro_of(s, use_gspro))).collect();
         let page_has_flight = self.saved.explorer.pages.get(ex.page).is_some_and(|p| p.tiles.iter().any(|t| t.kind == TileKind::Flight));
         let paths: Vec<Rc<FlightPath>> = if page_has_flight {
-            shown.iter().map(|s| ex.paths.entry(key(s)).or_insert_with(|| Rc::new(FlightPath::from(&flight::fly(&s.ball)))).clone()).collect()
+            shown
+                .iter()
+                .zip(&estimates)
+                .zip(&flights)
+                .map(|((s, e), f)| {
+                    let path = ex.paths.entry(key(s)).or_insert_with(|| Rc::new(FlightPath::from(&flight::fly(&s.ball)))).clone();
+                    if gspro_of(s, use_gspro).is_some() { Rc::new(path.fitted(e, f)) } else { path }
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -453,7 +488,7 @@ impl App {
                     .sum::<f32>()
             };
             let chips_w: f32 = codes.iter().map(|c| chip_width(&row, c.as_deref().unwrap_or("–"), true) + 6.0).sum();
-            let room = row.available_width() - selection_w - chip_width(&row, tr("Hide excluded"), false) - 12.0;
+            let room = row.available_width() - selection_w - chip_width(&row, tr("Hide excluded"), false) - chip_width(&row, tr("GSPro results"), false) - 18.0;
             if chips_w <= room {
                 for code in &codes {
                     let on = !ex.hidden_clubs.contains(code);
@@ -471,6 +506,13 @@ impl App {
             }
             if chip(&mut row, tr("Hide excluded"), None, ex.hide_excluded).clicked() {
                 ex.hide_excluded = !ex.hide_excluded;
+            }
+            let gspro_chip = chip(&mut row, tr("GSPro results"), None, self.saved.gspro_results)
+                .on_hover_text(tr("Carry, total, apex and side as GSPro computed them, where it did; else the estimate (*)"));
+            if gspro_chip.clicked() {
+                self.saved.gspro_results = !self.saved.gspro_results;
+                self.edit.gspro_results = self.saved.gspro_results;
+                let _ = self.saved.save();
             }
             if !ex.selected.is_empty() {
                 row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -538,6 +580,7 @@ impl App {
                     shown: &shown,
                     flights: &flights,
                     paths: &paths,
+                    gspro: use_gspro,
                     page: ex.page,
                     views: &ex.views,
                     anim: ex.anim.as_ref().map(|(k, t)| (k, t.elapsed().as_secs_f32())),
@@ -748,6 +791,8 @@ struct TileCtx<'a> {
     flights: &'a [FlightSummary],
     /// Their paths, in the same order (empty unless a 3D tile is on the page).
     paths: &'a [Rc<FlightPath>],
+    /// GSPro's distances where it sent them (else the estimate).
+    gspro: bool,
     /// The page shown and the 3D tiles' cameras.
     page: usize,
     views: &'a std::cell::RefCell<HashMap<(usize, usize), flight3d::TileView>>,
@@ -1298,7 +1343,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
     let cols: Vec<(&str, f32)> = keep.iter().map(|&k| (all[k].0, all[k].1)).collect();
     let shown: Vec<&ShotRecord> = ctx.shown.iter().rev().copied().collect();
     let row = |s: &ShotRecord| {
-        let f: Flight = flight::fly(&s.ball);
+        let f = history::Distances::of(s, ctx.gspro);
         let c = s.club.as_ref();
         let time = if ctx.all_time { s.time.get(5..16).unwrap_or(&s.time).replace('T', " ") } else { s.clock().to_string() };
         let cells = [
@@ -1337,7 +1382,7 @@ fn shots_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) -> Option<Key> {
 fn averages_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) {
     let u = ctx.units;
     let shots: Vec<ShotRecord> = ctx.shown.iter().map(|s| (*s).clone()).collect();
-    let stats = history::club_stats(&shots);
+    let stats = history::club_stats_with(&shots, ctx.gspro);
     if stats.is_empty() {
         ui.label(RichText::new(no_shots(ctx)).color(MUTED));
         return;
@@ -1433,19 +1478,24 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
         return;
     };
     let u = ctx.units;
-    let f = flight::fly(&s.ball);
+    let estimate = flight::fly(&s.ball);
+    let gspro = s.gspro.as_ref().filter(|_| ctx.gspro);
+    let f = history::Distances::new(&estimate, gspro);
+    let descent = gspro.map_or(estimate.descent, |g| g.descent);
     let c = s.club.as_ref();
     let deg = |v: f64| format!("{}°", num(v, 1));
     let side = |v: f64| {
         let d = u.dist(v);
         if d.abs() < 0.5 { format!("0 {}", u.dist_unit()) } else { format!("{:.0} {} {}", d.abs(), u.dist_unit(), if d > 0.0 { "R" } else { "L" }) }
     };
+    // Estimated values are marked with *, GSPro's aren't.
+    let mark = |name: &str| if f.from_gspro { name.to_string() } else { format!("{name}*") };
     let mut values: Vec<(String, String)> = vec![
-        (format!("{}*", tr("Carry")), format!("{:.0} {}", u.dist(f.carry), u.dist_unit())),
-        (format!("{}*", tr("Total")), format!("{:.0} {}", u.dist(f.total), u.dist_unit())),
-        (format!("{}*", tr("Side")), side(f.carry_side)),
-        (format!("{}*", tr("Apex")), format!("{:.0} {}", u.dist(f.apex), u.dist_unit())),
-        (format!("{}*", tr("Descent")), format!("{:.0}°", f.descent)),
+        (mark(tr("Carry")), format!("{:.0} {}", u.dist(f.carry), u.dist_unit())),
+        (mark(tr("Total")), format!("{:.0} {}", u.dist(f.total), u.dist_unit())),
+        (mark(tr("Side")), side(f.carry_side)),
+        (mark(tr("Apex")), format!("{:.0} {}", u.dist(f.apex), u.dist_unit())),
+        (mark(tr("Descent")), format!("{descent:.0}°")),
         (tr("Ball Speed").into(), format!("{:.1} {}", u.speed(s.ball.speed), u.speed_unit())),
         ("VLA".into(), deg(s.ball.vla)),
         ("HLA".into(), deg(s.ball.hla)),
@@ -1477,6 +1527,10 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
         ui.label(RichText::new(time).size(12.0).color(MUTED));
         if s.excluded {
             ui.label(RichText::new(tr("excluded")).size(12.0).color(AMBER));
+        }
+        if f.from_gspro {
+            ui.label(RichText::new(tr("from GSPro")).size(12.0).color(GREEN))
+                .on_hover_text(tr("Carry, total, apex, side and landing angle as GSPro computed them"));
         }
     });
     ui.add_space(2.0);

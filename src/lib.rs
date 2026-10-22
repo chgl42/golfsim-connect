@@ -6,6 +6,7 @@
 pub mod engine;
 pub mod flight;
 pub mod gspro;
+pub mod gspro_db;
 pub mod history;
 pub mod i18n;
 pub mod launcher;

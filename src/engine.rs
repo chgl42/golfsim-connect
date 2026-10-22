@@ -53,6 +53,10 @@ pub fn start(cfg: Config) -> Sender<Cmd> {
     crate::history::PERSIST.store(!cfg.demo, std::sync::atomic::Ordering::Relaxed);
     let (tx, rx) = mpsc::channel::<Cmd>();
     let link = Link::new(cfg.gspro_addr.clone(), cfg.debug);
+    // GSPro's own results of the shots, from its database (not in the demo: nothing to match).
+    if !cfg.demo {
+        crate::gspro_db::watch();
+    }
     thread::Builder::new()
         .name("gspro".into())
         .spawn(move || link.run(&rx))
@@ -219,6 +223,16 @@ pub fn demo_range() -> Vec<crate::history::ShotRecord> {
             let secs = 17 * 3600 + n * 75;
             rec.time = format!("2026-10-21T{:02}:{:02}:{:02}+02:00", secs / 3600, secs / 60 % 60, secs % 60);
             rec.tempo = Some(mapping::Tempo { backswing: ((0.81 + 0.05 * next()) * 100.0).round() / 100.0, downswing: 0.27 });
+            // As if GSPro had sent its numbers: a little shorter and higher than the estimate.
+            let f = crate::flight::fly(&rec.ball);
+            rec.gspro = Some(crate::gspro_db::GsproResult {
+                carry: f.carry * 0.96,
+                total: f.total * 0.95,
+                side: f.total_side * 1.05,
+                apex: f.apex * 1.18,
+                descent: f.descent + 4.0,
+                to_pin: None,
+            });
             out.push(rec);
         }
     }
