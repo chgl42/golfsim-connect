@@ -63,6 +63,13 @@ pub(super) struct ExplorerState {
     confirm_remove: Option<usize>,
     /// Estimated flight of every shot seen, computed once.
     flights: HashMap<Key, FlightSummary>,
+    /// The 3D tiles' cameras, per page and tile (borrowed while the tiles are drawn).
+    views: std::cell::RefCell<HashMap<(usize, usize), flight3d::TileView>>,
+    /// A shot whose flight is being animated, since when.
+    anim: Option<(Key, Instant)>,
+    /// The session's latest shot when the page was last drawn (`None` before): a new one starts
+    /// its animation.
+    last_latest: Option<Option<Key>>,
     /// Where the tiles of the page shown were drawn (last frame).
     tile_rects: Vec<Rect>,
     /// Flight paths for the 3D tiles, computed once when such a tile is shown.
@@ -190,6 +197,8 @@ enum Edit {
     Move(usize, isize),
     /// Dragged onto another tile's place.
     MoveTo(usize, usize),
+    /// Play a shot's flight again (3D tiles).
+    Replay(Key),
     Add(TileKind),
     Remove(usize),
 }
@@ -229,6 +238,18 @@ struct Row {
 impl App {
     pub(super) fn shots(&mut self, ui: &mut egui::Ui) {
         let session: Vec<ShotRecord> = state::with(|s| s.session.clone());
+        // A new shot flies in the 3D tiles (not the ones there when the page first shows).
+        let latest = session.last().map(key);
+        if let Some(seen) = &self.explorer.last_latest
+            && latest.is_some()
+            && *seen != latest
+        {
+            self.explorer.anim = latest.clone().map(|k| (k, Instant::now()));
+        }
+        self.explorer.last_latest = Some(latest);
+        if self.explorer.anim.as_ref().is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(15)) {
+            self.explorer.anim = None;
+        }
         let units = Units { metric: self.saved.metric, meters: self.saved.meters };
 
         // Source, pages, arranging and export.
@@ -517,6 +538,9 @@ impl App {
                     shown: &shown,
                     flights: &flights,
                     paths: &paths,
+                    page: ex.page,
+                    views: &ex.views,
+                    anim: ex.anim.as_ref().map(|(k, t)| (k, t.elapsed().as_secs_f32())),
                     selected: &ex.selected,
                     color_of: &color_of,
                     units,
@@ -548,6 +572,8 @@ impl App {
                 ex.focus = Some(k);
             }
         }
+        let mut replay: Option<Key> = None;
+        let changes_layout = edits.iter().any(|e| !matches!(e, Edit::Replay(_)));
         if !edits.is_empty() {
             let tiles = &mut self.saved.explorer.pages[ex.page].tiles;
             for edit in edits {
@@ -559,6 +585,7 @@ impl App {
                     Edit::Axes(i, x, y) => (tiles[i].x, tiles[i].y) = (x, y),
                     Edit::Camera(i, camera) => tiles[i].camera = camera,
                     Edit::Add(kind) => tiles.push(Tile { kind, ..Tile::default() }),
+                    Edit::Replay(k) => replay = Some(k),
                     Edit::MoveTo(from, to) => {
                         let tile = tiles.remove(from);
                         tiles.insert(to.min(tiles.len()), tile);
@@ -574,7 +601,10 @@ impl App {
                     }
                 }
             }
-            layout_changed = true;
+            layout_changed |= changes_layout;
+        }
+        if let Some(k) = replay {
+            ex.anim = Some((k, Instant::now()));
         }
         if layout_changed {
             // Applies and saves at once, like the overlay's settings.
@@ -718,6 +748,11 @@ struct TileCtx<'a> {
     flights: &'a [FlightSummary],
     /// Their paths, in the same order (empty unless a 3D tile is on the page).
     paths: &'a [Rc<FlightPath>],
+    /// The page shown and the 3D tiles' cameras.
+    page: usize,
+    views: &'a std::cell::RefCell<HashMap<(usize, usize), flight3d::TileView>>,
+    /// The shot being animated and for how many seconds.
+    anim: Option<(&'a Key, f32)>,
     selected: &'a BTreeSet<Key>,
     color_of: &'a dyn Fn(&Option<String>) -> Color32,
     units: Units,
@@ -1659,7 +1694,7 @@ mod tests {
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
-        let states: [(&str, Setup); 7] = [
+        let states: [(&str, Setup); 10] = [
             ("explorer-averages.png", |app, _| app.explorer.page = 2),
             ("explorer-selection.png", |app, keys| {
                 app.explorer.selected = keys.iter().cloned().collect();
@@ -1697,6 +1732,28 @@ mod tests {
                     .into_iter()
                     .map(|c| c.map(String::from))
                     .collect();
+            }),
+            ("explorer-anim.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                app.explorer.page = 1;
+                let driver = state::with(|s| s.session.iter().find(|r| r.club_code.as_deref() == Some("DR")).map(key));
+                app.explorer.anim = driver.map(|k| (k, Instant::now() - Duration::from_millis(2200)));
+                app.explorer.last_latest = Some(state::with(|s| s.session.last().map(key)));
+            }),
+            ("explorer-orbit.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                app.explorer.page = 1;
+                let mut views = app.explorer.views.borrow_mut();
+                views.insert((1, 0), flight3d::TileView::turned(0.9, 0.25, 1.0));
+                views.insert((1, 1), flight3d::TileView::turned(-0.5, 0.5, 1.4));
+                views.insert((1, 2), flight3d::TileView::turned(2.4, -0.2, 1.0));
+            }),
+            ("explorer-roll.png", |app, _| {
+                state::with(|s| s.session = engine::demo_range());
+                app.explorer.page = 1;
+                let driver = state::with(|s| s.session.iter().find(|r| r.club_code.as_deref() == Some("DR")).map(key));
+                app.explorer.anim = driver.map(|k| (k, Instant::now() - Duration::from_millis(6600)));
+                app.explorer.last_latest = Some(state::with(|s| s.session.last().map(key)));
             }),
             ("explorer-export.png", |app, _| app.explorer.export_dialog = true),
             ("explorer-reset.png", |app, _| {
@@ -1796,6 +1853,52 @@ mod tests {
         }
         harness.step();
         assert!(harness.state().saved.explorer.pages[1].tiles[0].averages, "switched to the means");
+    }
+
+    /// Dragging in a 3D tile turns its camera, a double click goes back; a new shot flies.
+    #[test]
+    fn flight_tile_orbits_and_animates() {
+        use egui_kittest::Harness;
+
+        super::super::tests::demo_state();
+        let settings = Settings { overlay: OverlayPos::Off, ..Settings::default() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(settings, tx)
+        });
+        harness.state_mut().page = Page::Shots;
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_overlay = false;
+        harness.state_mut().explorer.page = 1; // Ball flight
+        for _ in 0..3 {
+            harness.step();
+        }
+        let tile = harness.state().explorer.tile_rects[0];
+        let from = tile.center();
+        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        for event in [egui::Event::PointerMoved(from), press(from, true), egui::Event::PointerMoved(from + vec2(60.0, 20.0)), press(from + vec2(60.0, 20.0), false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        let orbit = |h: &Harness<'_, App>| h.state().explorer.views.borrow().get(&(1, 0)).map(|v| v.orbit_state());
+        let (yaw, pitch, _) = orbit(&harness).expect("view kept");
+        assert!(yaw < 0.0 && pitch > 0.0, "turned: {yaw} {pitch}");
+        // Both clicks within one frame: kittest's clock doesn't move between steps.
+        harness.input_mut().events.extend([egui::Event::PointerMoved(from), press(from, true), press(from, false), press(from, true), press(from, false)]);
+        harness.step();
+        harness.step();
+        assert_eq!(orbit(&harness), Some((0.0, 0.0, 1.0)), "double click resets");
+
+        // A new shot in the session starts its flight.
+        assert!(harness.state().explorer.anim.is_none());
+        state::with(|s| {
+            let mut shot = s.session.last().cloned().unwrap();
+            shot.shot_number += 1000;
+            s.session.push(shot);
+        });
+        harness.step();
+        assert!(harness.state().explorer.anim.is_some());
     }
 
     #[test]

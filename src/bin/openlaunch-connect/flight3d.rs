@@ -36,11 +36,127 @@ impl View {
         (z > 0.5).then(|| vec2(dot(self.right) / z, dot(self.up) / z))
     }
 
+    /// A point in camera space: right, up, forward (metres).
+    fn camera_space(&self, p: [f32; 3]) -> [f32; 3] {
+        let d = [p[0] - self.eye[0], p[1] - self.eye[1], p[2] - self.eye[2]];
+        let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        [dot(self.right), dot(self.up), dot(self.forward)]
+    }
+
     /// Distance from the camera along its view.
     fn depth(&self, p: [f32; 3]) -> f32 {
         (p[0] - self.eye[0]) * self.forward[0] + (p[1] - self.eye[1]) * self.forward[1] + (p[2] - self.eye[2]) * self.forward[2]
     }
 }
+
+/// A camera: where it is, what it looks at, how much the picture may stretch.
+#[derive(Clone, Copy)]
+pub(super) struct Cam {
+    eye: [f32; 3],
+    at: [f32; 3],
+    stretch: egui::Vec2,
+}
+
+impl Cam {
+    /// Turned around `at`: `yaw` sideways, `pitch` up or down (radians), staying above the ground.
+    fn orbit(self, yaw: f32, pitch: f32) -> Self {
+        let v = [self.eye[0] - self.at[0], self.eye[1] - self.at[1], self.eye[2] - self.at[2]];
+        let r = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-3);
+        let el = ((v[1] / r).asin() + pitch).clamp(0.03, 1.5);
+        let az = v[0].atan2(-v[2]) + yaw;
+        let eye = [self.at[0] + r * el.cos() * az.sin(), self.at[1] + r * el.sin(), self.at[2] - r * el.cos() * az.cos()];
+        Self { eye, ..self }
+    }
+
+    /// Part of the way (`t` from 0 to 1) from here to `to`.
+    fn lerp(self, to: Self, t: f32) -> Self {
+        let l = |a: [f32; 3], b: [f32; 3]| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+        Self { eye: l(self.eye, to.eye), at: l(self.at, to.at), stretch: self.stretch + (to.stretch - self.stretch) * t }
+    }
+}
+
+/// From the camera's image plane to the tile: a fixed origin and scale, so turning the camera
+/// moves the picture but never re-fits it.
+struct Screen {
+    view: View,
+    origin: egui::Pos2,
+    scale: egui::Vec2,
+}
+
+impl Screen {
+    /// Nearest distance in front of the camera that is drawn.
+    const NEAR: f32 = 0.5;
+
+    fn plane(&self, v: egui::Vec2) -> egui::Pos2 {
+        pos2(self.origin.x + v.x * self.scale.x, self.origin.y - v.y * self.scale.y)
+    }
+
+    fn point(&self, q: [f32; 3]) -> Option<egui::Pos2> {
+        self.view.project(q).map(|v| self.plane(v))
+    }
+
+    /// A flat shape on the screen, cut where it passes behind the camera (so ground near and
+    /// behind the camera never folds over).
+    fn polygon(&self, pts: &[[f32; 3]]) -> Vec<egui::Pos2> {
+        let cam: Vec<[f32; 3]> = pts.iter().map(|q| self.view.camera_space(*q)).collect();
+        let mut clipped: Vec<[f32; 3]> = Vec::new();
+        for k in 0..cam.len() {
+            let (a, b) = (cam[k], cam[(k + 1) % cam.len()]);
+            let (ina, inb) = (a[2] >= Self::NEAR, b[2] >= Self::NEAR);
+            if ina {
+                clipped.push(a);
+            }
+            if ina != inb {
+                let t = (Self::NEAR - a[2]) / (b[2] - a[2]);
+                clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Self::NEAR]);
+            }
+        }
+        clipped.iter().map(|c| self.plane(vec2(c[0] / c[2], c[1] / c[2]))).collect()
+    }
+
+    /// Height of the horizon on the screen (the camera never rolls, so it is level).
+    fn horizon_y(&self) -> f32 {
+        let f = self.view.forward;
+        let l = (f[0] * f[0] + f[2] * f[2]).sqrt().max(1e-6);
+        let e = self.view.eye;
+        self.point([e[0] + f[0] / l * 1e6, 0.0, e[2] + f[2] / l * 1e6]).map_or(f32::MIN, |q| q.y)
+    }
+}
+
+/// A 3D tile's camera as the user left it, and a move between presets under way. Kept for the
+/// session.
+pub(super) struct TileView {
+    yaw: f32,
+    pitch: f32,
+    zoom: f32,
+    camera: Option<Camera>,
+    shown: Option<Cam>,
+    from: Option<(Cam, std::time::Instant)>,
+}
+
+#[cfg(test)]
+impl TileView {
+    /// Sideways turn, up/down turn and zoom, for tests.
+    pub(super) fn orbit_state(&self) -> (f32, f32, f32) {
+        (self.yaw, self.pitch, self.zoom)
+    }
+
+    /// A camera turned by hand, for screenshots.
+    pub(super) fn turned(yaw: f32, pitch: f32, zoom: f32) -> Self {
+        Self { yaw, pitch, zoom, ..Self::default() }
+    }
+}
+
+impl Default for TileView {
+    fn default() -> Self {
+        Self { yaw: 0.0, pitch: 0.0, zoom: 1.0, camera: None, shown: None, from: None }
+    }
+}
+
+/// Seconds per point of a flight path (the integration step times the thinning, see `FlightPath`).
+const PATH_STEP: f32 = 0.08;
+/// Seconds the animated ball takes for its bounces and roll.
+const ROLL_TIME: f32 = 1.6;
 
 /// One flight to draw: through the air, the bounces and roll, and who it belongs to.
 struct Track {
@@ -53,6 +169,8 @@ struct Track {
     shadow: bool,
     /// A club's mean flight: drawn bold.
     bold: bool,
+    /// Animated: seconds since the shot; the part flown (and rolled) so far is drawn, with the ball.
+    ball: Option<f32>,
 }
 
 /// The mean flight of each club's shots that count: every flight resampled to the same number of
@@ -85,7 +203,7 @@ fn mean_tracks(ctx: &TileCtx) -> Vec<Track> {
                 })
                 .collect();
             let rest = paths.iter().fold([0.0; 3], |a, p| [a[0] + p.rest[0] / n, 0.0, a[2] + p.rest[2] / n]);
-            Track { air, rest, color: (ctx.color_of)(&code), weight: 1.0, selected: false, shadow: true, bold: true }
+            Track { air, rest, color: (ctx.color_of)(&code), weight: 1.0, selected: false, shadow: true, bold: true, ball: None }
         })
         .collect()
 }
@@ -128,22 +246,75 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let half = if camera == Camera::Above { half.max(far * 0.45) } else { half };
     // Landing and resting points of the shots shown.
     let lands: Vec<[f32; 3]> = ctx.paths.iter().flat_map(|p| p.air.last().copied().into_iter().chain([p.rest])).collect();
-    let view = match camera {
-        Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
+    // The camera of the preset: where it is, what it looks at, and how much the picture may
+    // stretch where the tile has room (from the tee the spread is narrow and the flights tall,
+    // from the side it is the other way round).
+    let preset = match camera {
+        Camera::Tee => Cam { eye: [0.0, 2.0, -12.0], at: [0.0, apex * 0.35, far * 0.6], stretch: vec2(3.0, 1.0) },
         // From the right of the range, so the distance grows to the right.
-        Camera::Side => View::new([far * 1.3, apex * 0.6, far * 0.5], [0.0, apex * 0.4, far * 0.5]),
-        // Steeply from above onto where the balls land (the tee may be out of view).
+        Camera::Side => Cam { eye: [far * 1.3, apex * 0.6, far * 0.5], at: [0.0, apex * 0.4, far * 0.5], stretch: vec2(1.0, 2.5) },
         // Diagonally from the top right: 45° above the range, turned from behind to the right –
-        // 35° in a tall tile up to 65° in a wide one, so the flights run along the tile.
+        // 35° in a tall tile up to 65° in a wide one, so the flights run along the tile – onto
+        // the middle of the landing area.
         Camera::Above => {
             let aspect = rect.width() / rect.height().max(1.0);
             let turn = 35.0 + 30.0 * ((aspect - 0.6) / 1.4).clamp(0.0, 1.0);
-            // Onto the middle of the landing area.
             let zc = if lands.is_empty() { far * 0.6 } else { lands.iter().map(|q| q[2]).sum::<f32>() / lands.len() as f32 };
             let (dist, el, az) = (far * 0.8, 45_f32.to_radians(), turn.to_radians());
-            View::new([dist * el.cos() * az.sin(), dist * el.sin(), zc - dist * el.cos() * az.cos()], [0.0, 0.0, zc])
+            Cam {
+                eye: [dist * el.cos() * az.sin(), dist * el.sin(), zc - dist * el.cos() * az.cos()],
+                at: [0.0, 0.0, zc],
+                stretch: vec2(1.4, 1.4),
+            }
         }
     };
+
+    // Dragging turns the camera around what it looks at, scrolling zooms, a double click goes
+    // back to the preset; switching presets glides there.
+    let resp = ui.interact(rect, egui::Id::new(("flight", i)), Sense::click_and_drag());
+    let mut views = ctx.views.borrow_mut();
+    let tv = views.entry((ctx.page, i)).or_default();
+    if resp.dragged() {
+        let d = resp.drag_delta();
+        tv.yaw -= d.x * 0.008;
+        tv.pitch = (tv.pitch + d.y * 0.006).clamp(-1.2, 1.2);
+    }
+    if resp.hovered() {
+        let scroll = ui.input(|inp| inp.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            tv.zoom = (tv.zoom * (scroll * 0.004).exp()).clamp(0.5, 8.0);
+        }
+    }
+    if resp.double_clicked() {
+        (tv.yaw, tv.pitch, tv.zoom) = (0.0, 0.0, 1.0);
+    }
+    // A different preset glides there and starts from it unturned.
+    if tv.camera.is_some_and(|c| c != camera) {
+        if let Some(shown) = tv.shown {
+            tv.from = Some((shown, std::time::Instant::now()));
+        }
+        (tv.yaw, tv.pitch, tv.zoom) = (0.0, 0.0, 1.0);
+    }
+    tv.camera = Some(camera);
+    let target = preset;
+    let cam = match tv.from {
+        Some((from, start)) => {
+            let t = start.elapsed().as_secs_f32() / 0.45;
+            if t >= 1.0 {
+                tv.from = None;
+                target
+            } else {
+                ui.ctx().request_repaint();
+                from.lerp(target, t * t * (3.0 - 2.0 * t))
+            }
+        }
+        None => target,
+    };
+    tv.shown = Some(cam);
+    let (zoom, yaw, pitch) = (tv.zoom, tv.yaw, tv.pitch);
+    drop(views);
+    // The picture is fitted with the camera as preset; turning it keeps that fit.
+    let view = View::new(cam.eye, cam.at);
     let mut fit: Vec<egui::Vec2> = Vec::new();
     if camera == Camera::Above {
         // Zoomed onto where the balls land and stop, with a little room; the flights come in
@@ -162,19 +333,18 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let (lo, hi) = fit.iter().fold((vec2(f32::MAX, f32::MAX), vec2(f32::MIN, f32::MIN)), |(lo, hi), q| (lo.min(*q), hi.max(*q)));
     let inner = rect.shrink(12.0);
     let (sx, sy) = (inner.width() / (hi.x - lo.x).max(1e-3), inner.height() / (hi.y - lo.y).max(1e-3));
-    // Same scale both ways, but a little stretch where the tile has room: from the tee the
-    // spread is narrow and the flights tall, from the side it is the other way round.
-    let (kx, ky) = match camera {
-        Camera::Tee => (3.0, 1.0),
-        Camera::Side => (1.0, 2.5),
-        // From above the range may get a lot wider: the landing points spread out.
-        // The range's width may stretch to fill the tile.
-        Camera::Above => (1.4, 1.4),
-    };
+    // Same scale both ways, with the camera's stretch where the tile has room. Turned away from
+    // the preset the stretch eases out, so the perspective stays true; then the zoom.
     let base = sx.min(sy);
-    let scale = vec2(sx.min(base * kx), sy.min(base * ky));
+    let stretched = vec2(sx.min(base * cam.stretch.x), sy.min(base * cam.stretch.y));
+    let turned = ((yaw.abs() + pitch.abs()) / 0.3).clamp(0.0, 1.0);
+    let scale = stretched + (vec2(base, base) - stretched) * turned;
     let mid = (lo + hi) / 2.0;
-    let to_screen = |q: [f32; 3]| view.project(q).map(|v| pos2(inner.center().x + (v.x - mid.x) * scale.x, inner.center().y - (v.y - mid.y) * scale.y));
+    let c = inner.center();
+    let origin = pos2(c.x - mid.x * scale.x, c.y + mid.y * scale.y);
+    let screen = Screen { view: View::new(cam.orbit(yaw, pitch).eye, cam.at), origin: c + (origin - c) * zoom, scale: scale * zoom };
+    let view = &screen.view;
+    let to_screen = |q: [f32; 3]| screen.point(q);
     // Lines get thinner and fainter with distance (1 at the middle of the range).
     let ref_depth = view.depth([0.0, 0.0, far * 0.5]).max(1.0);
     let depth_factor = |q: [f32; 3]| (ref_depth / view.depth(q).max(1.0)).clamp(0.6, 1.25);
@@ -183,19 +353,29 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     // Where the flights peak on average: the tee view's height lines stand there.
     let peaks: Vec<f32> = ctx.paths.iter().filter_map(|p| p.air.iter().max_by(|a, b| a[1].total_cmp(&b[1])).map(|q| q[2])).collect();
     let apex_z = if peaks.is_empty() { far * 0.5 } else { peaks.iter().sum::<f32>() / peaks.len() as f32 };
-    draw_range(&p, rect, camera, (far, half, apex, apex_z), u, &to_screen);
+    draw_range(&p, rect, camera, (far, half, apex, apex_z), u, &screen);
 
     // What to draw: the single shots, or only the mean flight per club.
     let any_selected = ctx.shown.iter().any(|s| ctx.selected.contains(&key(s)));
     let mut tracks: Vec<Track> = if mean { mean_tracks(ctx) } else { Vec::new() };
+    // A shot being animated flies in real time; the others step back meanwhile.
+    let flying = ctx.anim.filter(|(k, t)| {
+        !mean && ctx.shown.iter().zip(ctx.paths).any(|(s, p)| &key(s) == *k && *t < p.air.len() as f32 * PATH_STEP + ROLL_TIME)
+    });
+    if flying.is_some() {
+        ui.ctx().request_repaint();
+    }
     let singles: Vec<Track> = ctx
         .shown
         .iter()
         .zip(ctx.paths)
         .map(|(s, path)| {
             let selected = ctx.selected.contains(&key(s));
+            let this_flying = flying.is_some_and(|(k, _)| k == &key(s));
             let weight = if s.excluded {
                 0.25
+            } else if flying.is_some() && !this_flying {
+                0.35
             } else if any_selected && !selected {
                 0.5
             } else {
@@ -206,9 +386,10 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
                 rest: path.rest,
                 color: (ctx.color_of)(&s.club_code),
                 weight,
-                selected,
+                selected: selected || this_flying,
                 shadow: !s.excluded,
                 bold: false,
+                ball: flying.filter(|_| this_flying).map(|(_, t)| t),
             }
         })
         .filter(|_| !mean)
@@ -223,7 +404,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         p.add(egui::Shape::line(ground, Stroke::new(1.0, Color32::from_black_alpha((50.0 * t.weight) as u8))));
     }
     for t in &tracks {
-        draw_track(&p, t, &to_screen, &depth_factor);
+        draw_track(&p, t, &screen, &depth_factor);
     }
 
     // The selected shot: drop line from the apex, carry and apex next to the flight.
@@ -272,7 +453,20 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         .collect();
     // No dots: the landing rings show where the balls came down. None for the means.
     let dots = if mean { Vec::new() } else { dots };
-    let clicked = draw_dots_quiet(ui, egui::Id::new(("flight", i)), rect, &dots);
+    let clicked = draw_dots_quiet(ui, &resp, rect, &dots);
+
+    // Replay the selected (or latest) shot, bottom left in the view.
+    let replay = ctx.shown.iter().rev().find(|s| ctx.selected.contains(&key(s))).or_else(|| ctx.shown.last());
+    if let Some(s) = replay.filter(|_| !mean) {
+        let r = Rect::from_center_size(pos2(rect.left() + 18.0, rect.bottom() - 18.0), vec2(24.0, 24.0));
+        let b = ui.interact(r, egui::Id::new(("flight-replay", i)), Sense::click());
+        p.circle(r.center(), 11.0, PAGE.gamma_multiply(0.8), Stroke::new(1.0, if b.hovered() { ICON } else { BUTTON_LINE }));
+        let c = r.center() + vec2(1.0, 0.0);
+        p.add(egui::Shape::convex_polygon(vec![c + vec2(-3.5, -5.0), c + vec2(5.0, 0.0), c + vec2(-3.5, 5.0)], WHITE, Stroke::NONE));
+        if b.on_hover_text(tr("Play the flight again")).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            edits.push(Edit::Replay(key(s)));
+        }
+    }
 
     // Shots or means, top right in the view (after the landing points, so it gets the clicks).
     let options = [(false, tr("Shots")), (true, tr("Mean"))];
@@ -307,22 +501,28 @@ fn badge(p: &egui::Painter, at: egui::Pos2, text: &str) {
 }
 
 /// Hover and click on the landing points without drawing dots (the tracks show them).
-fn draw_dots_quiet(ui: &mut egui::Ui, id: egui::Id, rect: Rect, dots: &[Dot]) -> Option<Key> {
-    let resp = ui.interact(rect, id, Sense::click());
+fn draw_dots_quiet(ui: &egui::Ui, resp: &egui::Response, rect: Rect, dots: &[Dot]) -> Option<Key> {
     let near = resp.hover_pos().and_then(|at| {
         dots.iter().map(|d| (d, d.pos.distance(at))).filter(|(_, dist)| *dist <= 9.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(d, _)| d)
     });
     let clicked = resp.clicked();
     let d = near?;
     ui.painter_at(rect).circle_stroke(d.pos, 6.5, Stroke::new(1.5, WHITE));
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&d.tip);
+    resp.clone().on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(&d.tip);
     clicked.then(|| d.key.clone())
 }
 
 /// One flight: a glow under a selected one, colour fading in from the tee, width and opacity by
 /// distance, a ring where it lands, then bounces and roll.
-fn draw_track(p: &egui::Painter, t: &Track, to_screen: &dyn Fn([f32; 3]) -> Option<egui::Pos2>, depth: &dyn Fn([f32; 3]) -> f32) {
-    let n = t.air.len().max(2);
+fn draw_track(p: &egui::Painter, t: &Track, screen: &Screen, depth: &dyn Fn([f32; 3]) -> f32) {
+    let to_screen = |q: [f32; 3]| screen.point(q);
+    // Animated: in the air only the part flown so far; then the bounces and roll bit by bit.
+    let air_time = t.air.len() as f32 * PATH_STEP;
+    let air: &[[f32; 3]] = match t.ball {
+        Some(s) if s < air_time => &t.air[..=((s / PATH_STEP) as usize).min(t.air.len().saturating_sub(1))],
+        _ => &t.air,
+    };
+    let n = air.len();
     let base_w = if t.bold {
         2.2
     } else if t.selected {
@@ -334,38 +534,63 @@ fn draw_track(p: &egui::Painter, t: &Track, to_screen: &dyn Fn([f32; 3]) -> Opti
     };
     let color = if t.selected { WHITE } else { t.color };
     if t.selected {
-        let glow: Vec<egui::Pos2> = t.air.iter().filter_map(|q| to_screen(*q)).collect();
+        let glow: Vec<egui::Pos2> = air.iter().filter_map(|q| to_screen(*q)).collect();
         p.add(egui::Shape::line(glow, Stroke::new(4.5, WHITE.gamma_multiply(0.14))));
     }
     // In a few joined pieces (smooth, no gaps at the bends): fainter near the tee, full towards
     // the landing, thinner and fainter far away.
+    // (A flight just starting has a single point: nothing to draw yet but the ball.)
     const PIECES: usize = 8;
-    for piece in 0..PIECES {
+    for piece in (0..PIECES).filter(|_| n >= 2) {
         let from = piece * (n - 1) / PIECES;
         let to = ((piece + 1) * (n - 1) / PIECES).min(n - 1);
         if to <= from {
             continue;
         }
-        let pts: Vec<egui::Pos2> = t.air[from..=to].iter().filter_map(|q| to_screen(*q)).collect();
+        let pts: Vec<egui::Pos2> = air[from..=to].iter().filter_map(|q| to_screen(*q)).collect();
         let along = (from + to) as f32 / 2.0 / (n - 1) as f32;
-        let d = depth(t.air[(from + to) / 2]);
+        let d = depth(air[(from + to) / 2]);
         let alpha = (0.6 + 0.4 * along.powf(0.7)) * t.weight * d.clamp(0.8, 1.1);
         p.add(egui::Shape::line(pts, Stroke::new(base_w * d, color.gamma_multiply(alpha.min(1.0)))));
     }
-    let Some(&land) = t.air.last() else { return };
+    let ball = |at: [f32; 3]| {
+        if let Some(head) = to_screen(at) {
+            p.circle_filled(head, 7.0, WHITE.gamma_multiply(0.25));
+            p.circle_filled(head, 3.2, WHITE);
+        }
+    };
+    let Some(&head) = air.last() else { return };
+    if t.ball.is_some_and(|s| s < air_time) {
+        ball(head);
+        return;
+    }
     // Landing ring flat on the ground.
-    let ring: Vec<egui::Pos2> = (0..=20)
-        .filter_map(|k| {
+    let ring: Vec<[f32; 3]> = (0..20)
+        .map(|k| {
             let a = k as f32 / 20.0 * std::f32::consts::TAU;
-            to_screen([land[0] + 1.6 * a.cos(), 0.0, land[2] + 1.6 * a.sin()])
+            [head[0] + 1.6 * a.cos(), 0.0, head[2] + 1.6 * a.sin()]
         })
         .collect();
+    let ring = screen.polygon(&ring);
     if ring.len() > 3 {
         p.add(egui::Shape::convex_polygon(ring.clone(), color.gamma_multiply(0.35 * t.weight), Stroke::NONE));
         p.add(egui::Shape::closed_line(ring, Stroke::new(1.0, color.gamma_multiply(0.9 * t.weight))));
     }
-    let hops: Vec<egui::Pos2> = bounces(land, t.rest).into_iter().filter_map(to_screen).collect();
+    let hops3 = bounces(head, t.rest);
+    // Rolling out: quick at first, slowing down to where it stops.
+    let shown = match t.ball {
+        Some(s) => {
+            let f = ((s - air_time) / ROLL_TIME).clamp(0.0, 1.0);
+            let f = 1.0 - (1.0 - f) * (1.0 - f);
+            ((f * (hops3.len() - 1) as f32).round() as usize).min(hops3.len() - 1)
+        }
+        None => hops3.len() - 1,
+    };
+    let hops: Vec<egui::Pos2> = hops3[..=shown].iter().copied().filter_map(to_screen).collect();
     p.add(egui::Shape::line(hops, Stroke::new(base_w * 0.7, color.gamma_multiply(0.75 * t.weight))));
+    if t.ball.is_some() {
+        ball(hops3[shown]);
+    }
 }
 
 /// Sky with haze at the horizon, rough and fairway with mowing stripes, target greens with flags,
@@ -377,15 +602,16 @@ fn draw_range(
     camera: Camera,
     (far, half, apex, apex_z): (f32, f32, f32, f32),
     u: Units,
-    to_screen: &dyn Fn([f32; 3]) -> Option<egui::Pos2>,
+    screen: &Screen,
 ) {
+    let to_screen = |q: [f32; 3]| screen.point(q);
     let sky_top = Color32::from_rgb(0x14, 0x26, 0x42);
     let haze = Color32::from_rgb(0x4a, 0x6e, 0x8e);
     let rough = Color32::from_rgb(0x22, 0x47, 0x2c);
     let fairway = Color32::from_rgb(0x2c, 0x5c, 0x37);
     let stripe = Color32::from_rgb(0x33, 0x68, 0x3e);
     let end = far * 1.4;
-    let horizon = to_screen([0.0, 0.0, end]).map_or(rect.top(), |h| h.y.clamp(rect.top(), rect.bottom()));
+    let horizon = screen.horizon_y().clamp(rect.top(), rect.bottom());
 
     // Sky: dark at the top, hazy at the horizon.
     let mut sky = egui::Mesh::default();
@@ -398,17 +624,10 @@ fn draw_range(
     p.add(sky);
     p.rect_filled(Rect::from_min_max(pos2(rect.left(), horizon), rect.max), 0.0, rough);
 
-    // Ground, subdivided along the range so near points stay in front of the camera; far away it
-    // fades into the haze.
+    // Ground in bands, cut where they pass behind the camera; far away it fades into the haze.
     let band = |x0: f32, x1: f32, z0: f32, z1: f32, color: Color32| {
-        let mut pts = Vec::new();
-        for k in 0..=6 {
-            pts.extend(to_screen([x0, 0.0, z0 + (z1 - z0) * k as f32 / 6.0]));
-        }
-        for k in (0..=6).rev() {
-            pts.extend(to_screen([x1, 0.0, z0 + (z1 - z0) * k as f32 / 6.0]));
-        }
-        if pts.len() > 3 {
+        let pts = screen.polygon(&[[x0, 0.0, z0], [x1, 0.0, z0], [x1, 0.0, z1], [x0, 0.0, z1]]);
+        if pts.len() > 2 {
             let fade = (z0 / end).powf(1.5) * 0.65;
             p.add(egui::Shape::convex_polygon(pts, mix(color, haze, fade), Stroke::NONE));
         }
@@ -456,12 +675,13 @@ fn draw_range(
         let dz = step_m * n as f32;
         let gx = if n % 2 == 0 { -half * 0.18 } else { half * 0.14 };
         let r = (4.0 + dz * 0.025).min(9.0);
-        let green: Vec<egui::Pos2> = (0..24)
-            .filter_map(|k| {
+        let green: Vec<[f32; 3]> = (0..24)
+            .map(|k| {
                 let a = k as f32 / 24.0 * std::f32::consts::TAU;
-                to_screen([gx + r * a.cos(), 0.0, dz + r * 0.8 * a.sin()])
+                [gx + r * a.cos(), 0.0, dz + r * 0.8 * a.sin()]
             })
             .collect();
+        let green = screen.polygon(&green);
         if green.len() > 3 {
             let fade = (dz / end).powf(1.5) * 0.6;
             p.add(egui::Shape::convex_polygon(green, mix(Color32::from_rgb(0x4c, 0x9a, 0x5a), haze, fade), Stroke::NONE));

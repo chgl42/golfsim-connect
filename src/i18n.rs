@@ -200,6 +200,7 @@ fn de(en: &str) -> Option<&'static str> {
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",
+        "Play the flight again" => "Flug noch einmal abspielen",
         "Width" => "Breite",
         "Mean" => "Mittel",
         "Shape" => "Schlagform",
