@@ -8,11 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - **3D flight tile** looks like a driving range now: sky with haze at the horizon, mown fairway, target greens with
-  flags and distance boards every 50 m (yd), height lines every 10 m. The flights cast shadows, fade in from the
-  tee and get thinner further away; each landing is marked with a ring, followed by its bounces and roll. A selected
+  flags and distance boards every 50 m (yd), height lines every 10 m. The flights cast shadows, fade in from the tee
+  and get thinner further away; each landing is marked with a ring, followed by its bounces and roll. A selected
   shot glows and shows its apex and carry. A switch *Shots / Mean* shows the single shots or one bold mean flight
-  per club. *Above* looks at 45° from above – from the side in a wide tile, from behind in a tall one – so the range
-  fills the tile; the tee view has height lines where the flights peak.
+  per club. *Above* looks diagonally from the top right at 45° (turned more to the side in wide tiles) onto a range
+  as wide as a real one, so it fills the tile; the tee view has height lines where the flights peak.
 
 ## [1.1.0] – 2026-10-21
 

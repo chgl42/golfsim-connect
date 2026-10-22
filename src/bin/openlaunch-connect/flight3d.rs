@@ -124,27 +124,27 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let far = ctx.paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
     let apex = ctx.paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
     let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
-    let wide = rect.width() >= rect.height();
+    // Diagonally from above the range is as wide as a real one, so it covers the whole tile.
+    let half = if camera == Camera::Above { half.max(far * 0.45) } else { half };
     let view = match camera {
         Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
         // From the right of the range, so the distance grows to the right.
         Camera::Side => View::new([far * 1.3, apex * 0.6, far * 0.5], [0.0, apex * 0.4, far * 0.5]),
         // Steeply from above onto where the balls land (the tee may be out of view).
-        // 45° from above, so the spread can be seen: in a wide tile from the side (the range
-        // runs across), in a tall one from behind (it runs up the tile).
+        // Diagonally from the top right: 45° above the range, turned from behind to the right –
+        // 35° in a tall tile up to 65° in a wide one, so the flights run along the tile.
         Camera::Above => {
-            let (zc, dist, el) = (far * 0.5, far * 1.3, 45_f32.to_radians());
-            if wide {
-                View::new([dist * el.cos(), dist * el.sin(), zc], [0.0, 0.0, zc])
-            } else {
-                View::new([0.0, dist * el.sin(), zc - dist * el.cos()], [0.0, 0.0, zc])
-            }
+            let aspect = rect.width() / rect.height().max(1.0);
+            let turn = 35.0 + 30.0 * ((aspect - 0.6) / 1.4).clamp(0.0, 1.0);
+            let (zc, dist, el, az) = (far * 0.5, far * 1.2, 45_f32.to_radians(), turn.to_radians());
+            View::new([dist * el.cos() * az.sin(), dist * el.sin(), zc - dist * el.cos() * az.cos()], [0.0, 0.0, zc])
         }
     };
     let mut fit: Vec<egui::Vec2> = Vec::new();
     if camera == Camera::Above {
-        // The range from the tee to beyond the longest shot fills the tile.
-        fit.extend([[-half, 0.0, 0.0], [half, 0.0, 0.0], [-half, 0.0, far], [half, 0.0, far]].iter().filter_map(|q| view.project(*q)));
+        // The flights from the tee to where they stop fill the tile; the range runs on beyond.
+        fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
+        fit.extend([[0.0, 0.0, 0.0], [0.0, 0.0, far / 1.08]].iter().filter_map(|q| view.project(*q)));
     } else {
         // The flights and the range; the near corners would be right below the camera.
         fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
@@ -160,8 +160,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         Camera::Side => (1.0, 2.5),
         // From above the range may get a lot wider: the landing points spread out.
         // The range's width may stretch to fill the tile.
-        Camera::Above if wide => (1.0, 3.0),
-        Camera::Above => (3.0, 1.0),
+        Camera::Above => (1.4, 1.4),
     };
     let base = sx.min(sy);
     let scale = vec2(sx.min(base * kx), sy.min(base * ky));
@@ -410,7 +409,8 @@ fn draw_range(
     let mut k = 0;
     while z < end {
         band(-half * 4.0, half * 4.0, z, z + step, rough);
-        band(-half * 0.45, half * 0.45, z, z + step, if k % 2 == 0 { fairway } else { stripe });
+        // The mown range is as wide as the range shown.
+        band(-half, half, z, z + step, if k % 2 == 0 { fairway } else { stripe });
         z += step;
         k += 1;
     }
@@ -465,7 +465,7 @@ fn draw_range(
         }
         let board_at = match camera {
             Camera::Side => to_screen([0.0, 0.0, dz]).map(|q| q + vec2(0.0, 12.0)),
-            Camera::Above => to_screen([half * 0.75, 0.0, dz]),
+            Camera::Above => to_screen([(far * 0.1).max(18.0), 0.0, dz]),
             Camera::Tee => to_screen([half * 0.55, 0.0, dz]).map(|q| q + vec2(0.0, -6.0)),
         };
         if let Some(at) = board_at.filter(|at| rect.contains(*at))
