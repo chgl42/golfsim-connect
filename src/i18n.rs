@@ -201,6 +201,7 @@ fn de(en: &str) -> Option<&'static str> {
         "System" => "System",
         "Interface" => "Oberfläche",
         "Width" => "Breite",
+        "Mean" => "Mittel",
         "Shape" => "Schlagform",
         "Straight" => "Gerade",
         "Impact from the side" => "Treffmoment Seite",

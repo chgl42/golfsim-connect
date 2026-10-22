@@ -11,6 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (*Side\**, e.g. *8 R*), the averages per club the mean side ± spread and the *Width\** of the dispersion
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
+### Changed
+- **3D flight tile** looks like a driving range now: sky with haze at the horizon, mown fairway, target greens with
+  flags and distance boards every 50 m (yd), height lines every 10 m. The flights cast shadows, fade in from the tee
+  and get thinner further away; each landing is marked with a ring, followed by its bounces and roll. A selected
+  shot glows and shows its apex and carry. A switch *Shots / Mean* shows the single shots or one bold mean flight
+  per club. *Above* looks diagonally from the top right at 45° (turned more to the side in wide tiles) zoomed onto
+  the landing area over a range as wide as a real one, so it fills the tile; the tee view has height lines where the
+  flights peak.
+
 ## [1.1.0] – 2026-10-21
 
 ### Added
