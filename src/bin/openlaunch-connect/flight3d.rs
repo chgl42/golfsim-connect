@@ -124,28 +124,27 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let far = ctx.paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
     let apex = ctx.paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
     let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
-    // Where the balls come down: nearest landing and farthest stop.
-    let land_near = ctx.paths.iter().filter_map(|p| p.air.last().map(|q| q[2])).fold(f32::MAX, f32::min).min(far * 0.6);
-    let land_far = ctx.paths.iter().map(|p| p.rest[2]).fold(land_near + 20.0, f32::max);
+    let wide = rect.width() >= rect.height();
     let view = match camera {
         Camera::Tee => View::new([0.0, 2.0, -12.0], [0.0, apex * 0.35, far * 0.6]),
         // From the right of the range, so the distance grows to the right.
         Camera::Side => View::new([far * 1.3, apex * 0.6, far * 0.5], [0.0, apex * 0.4, far * 0.5]),
         // Steeply from above onto where the balls land (the tee may be out of view).
+        // 45° from above, so the spread can be seen: in a wide tile from the side (the range
+        // runs across), in a tall one from behind (it runs up the tile).
         Camera::Above => {
-            let span = (land_far - land_near).max(40.0) + 50.0;
-            let zc = (land_near + land_far) / 2.0;
-            View::new([0.0, span * 1.6, zc - span * 0.55], [0.0, 0.0, zc])
+            let (zc, dist, el) = (far * 0.5, far * 1.3, 45_f32.to_radians());
+            if wide {
+                View::new([dist * el.cos(), dist * el.sin(), zc], [0.0, 0.0, zc])
+            } else {
+                View::new([0.0, dist * el.sin(), zc - dist * el.cos()], [0.0, 0.0, zc])
+            }
         }
     };
     let mut fit: Vec<egui::Vec2> = Vec::new();
     if camera == Camera::Above {
-        // The landing area with some room around it.
-        fit.extend(ctx.paths.iter().flat_map(|p| p.air.last().into_iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
-        // Only as wide as the shots spread (plus a margin), so they spread out over the tile.
-        let (z0, z1) = ((land_near - 20.0).max(0.0), land_far + 15.0);
-        let w = ctx.paths.iter().flat_map(|p| p.air.last().into_iter().chain([&p.rest])).fold(8.0_f32, |m, q| m.max(q[0].abs())) + 6.0;
-        fit.extend([[-w, 0.0, z0], [w, 0.0, z0], [-w, 0.0, z1], [w, 0.0, z1]].iter().filter_map(|q| view.project(*q)));
+        // The range from the tee to beyond the longest shot fills the tile.
+        fit.extend([[-half, 0.0, 0.0], [half, 0.0, 0.0], [-half, 0.0, far], [half, 0.0, far]].iter().filter_map(|q| view.project(*q)));
     } else {
         // The flights and the range; the near corners would be right below the camera.
         fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
@@ -160,7 +159,9 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         Camera::Tee => (3.0, 1.0),
         Camera::Side => (1.0, 2.5),
         // From above the range may get a lot wider: the landing points spread out.
-        Camera::Above => (8.0, 1.0),
+        // The range's width may stretch to fill the tile.
+        Camera::Above if wide => (1.0, 3.0),
+        Camera::Above => (3.0, 1.0),
     };
     let base = sx.min(sy);
     let scale = vec2(sx.min(base * kx), sy.min(base * ky));
@@ -168,10 +169,13 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let to_screen = |q: [f32; 3]| view.project(q).map(|v| pos2(inner.center().x + (v.x - mid.x) * scale.x, inner.center().y - (v.y - mid.y) * scale.y));
     // Lines get thinner and fainter with distance (1 at the middle of the range).
     let ref_depth = view.depth([0.0, 0.0, far * 0.5]).max(1.0);
-    let depth_factor = |q: [f32; 3]| (ref_depth / view.depth(q).max(1.0)).clamp(0.55, 1.6);
+    let depth_factor = |q: [f32; 3]| (ref_depth / view.depth(q).max(1.0)).clamp(0.6, 1.25);
 
     let p = ui.painter_at(rect);
-    draw_range(&p, rect, camera, far, half, apex, u, &to_screen);
+    // Where the flights peak on average: the tee view's height lines stand there.
+    let peaks: Vec<f32> = ctx.paths.iter().filter_map(|p| p.air.iter().max_by(|a, b| a[1].total_cmp(&b[1])).map(|q| q[2])).collect();
+    let apex_z = if peaks.is_empty() { far * 0.5 } else { peaks.iter().sum::<f32>() / peaks.len() as f32 };
+    draw_range(&p, rect, camera, (far, half, apex, apex_z), u, &to_screen);
 
     // What to draw: the single shots, or only the mean flight per club.
     let any_selected = ctx.shown.iter().any(|s| ctx.selected.contains(&key(s)));
@@ -208,7 +212,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     // Shadows on the ground.
     for t in tracks.iter().filter(|t| t.shadow) {
         let ground: Vec<egui::Pos2> = t.air.iter().filter_map(|q| to_screen([q[0], 0.0, q[2]])).collect();
-        p.add(egui::Shape::line(ground, Stroke::new(1.6, Color32::from_black_alpha((45.0 * t.weight) as u8))));
+        p.add(egui::Shape::line(ground, Stroke::new(1.0, Color32::from_black_alpha((50.0 * t.weight) as u8))));
     }
     for t in &tracks {
         draw_track(&p, t, &to_screen, &depth_factor);
@@ -220,9 +224,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
             continue;
         }
         let Some(top) = path.air.iter().copied().max_by(|a, b| a[1].total_cmp(&b[1])) else { continue };
-        // From above the height can't be seen: carry only.
-        if camera != Camera::Above
-            && let (Some(a), Some(b)) = (to_screen(top), to_screen([top[0], 0.0, top[2]]))
+        if let (Some(a), Some(b)) = (to_screen(top), to_screen([top[0], 0.0, top[2]]))
         {
             p.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0, WHITE.gamma_multiply(0.7)), 3.0, 3.0));
             badge(&p, a + vec2(0.0, -10.0), &format!("{}* {:.0} {}", tr("Apex"), u.dist(f.apex), u.dist_unit()));
@@ -314,18 +316,18 @@ fn draw_dots_quiet(ui: &mut egui::Ui, id: egui::Id, rect: Rect, dots: &[Dot]) ->
 fn draw_track(p: &egui::Painter, t: &Track, to_screen: &dyn Fn([f32; 3]) -> Option<egui::Pos2>, depth: &dyn Fn([f32; 3]) -> f32) {
     let n = t.air.len().max(2);
     let base_w = if t.bold {
-        3.0
+        2.2
     } else if t.selected {
-        2.6
+        1.8
     } else if t.weight >= 1.0 {
-        1.6
+        1.0
     } else {
-        1.2
+        0.8
     };
     let color = if t.selected { WHITE } else { t.color };
     if t.selected {
         let glow: Vec<egui::Pos2> = t.air.iter().filter_map(|q| to_screen(*q)).collect();
-        p.add(egui::Shape::line(glow, Stroke::new(8.0, WHITE.gamma_multiply(0.12))));
+        p.add(egui::Shape::line(glow, Stroke::new(4.5, WHITE.gamma_multiply(0.14))));
     }
     // In a few joined pieces (smooth, no gaps at the bends): fainter near the tee, full towards
     // the landing, thinner and fainter far away.
@@ -339,7 +341,7 @@ fn draw_track(p: &egui::Painter, t: &Track, to_screen: &dyn Fn([f32; 3]) -> Opti
         let pts: Vec<egui::Pos2> = t.air[from..=to].iter().filter_map(|q| to_screen(*q)).collect();
         let along = (from + to) as f32 / 2.0 / (n - 1) as f32;
         let d = depth(t.air[(from + to) / 2]);
-        let alpha = (0.35 + 0.65 * along.powf(0.7)) * t.weight * d.clamp(0.7, 1.15);
+        let alpha = (0.6 + 0.4 * along.powf(0.7)) * t.weight * d.clamp(0.8, 1.1);
         p.add(egui::Shape::line(pts, Stroke::new(base_w * d, color.gamma_multiply(alpha.min(1.0)))));
     }
     let Some(&land) = t.air.last() else { return };
@@ -365,9 +367,7 @@ fn draw_range(
     p: &egui::Painter,
     rect: Rect,
     camera: Camera,
-    far: f32,
-    half: f32,
-    apex: f32,
+    (far, half, apex, apex_z): (f32, f32, f32, f32),
     u: Units,
     to_screen: &dyn Fn([f32; 3]) -> Option<egui::Pos2>,
 ) {
@@ -415,17 +415,22 @@ fn draw_range(
         k += 1;
     }
 
-    // Height lines from the side.
-    if camera == Camera::Side {
-        let mut h = 10.0;
-        while h <= apex * 1.15 {
-            if let (Some(a), Some(b)) = (to_screen([0.0, h, 0.0]), to_screen([0.0, h, far])) {
-                p.line_segment([a, b], Stroke::new(1.0, Color32::from_white_alpha(18)));
-                let label = format!("{h:.0} {}", u.dist_unit());
-                p.text(pos2(a.x.max(rect.left()) + 4.0, a.y - 2.0), Align2::LEFT_BOTTOM, label, FontId::proportional(9.5), Color32::from_white_alpha(110));
-            }
-            h += 10.0;
+    // Height lines every 10 m (yd): from the side along the range, from the tee across it where
+    // the flights peak.
+    let step_h = if u.meters { 10.0 } else { 10.0 / M_TO_YD as f32 };
+    let mut n = 1;
+    while camera != Camera::Above && step_h * n as f32 <= apex * 1.15 {
+        let h = step_h * n as f32;
+        let (from, to) = match camera {
+            Camera::Tee => ([-half * 1.5, h, apex_z], [half * 1.5, h, apex_z]),
+            _ => ([0.0, h, 0.0], [0.0, h, far]),
+        };
+        if let (Some(a), Some(b)) = (to_screen(from), to_screen(to)) {
+            p.line_segment([a, b], Stroke::new(1.0, Color32::from_white_alpha(18)));
+            let label = format!("{} {}", 10 * n, u.dist_unit());
+            p.text(pos2(a.x.max(rect.left()) + 4.0, a.y - 2.0), Align2::LEFT_BOTTOM, label, FontId::proportional(9.5), Color32::from_white_alpha(110));
         }
+        n += 1;
     }
 
     // Target line from the tee.
@@ -460,7 +465,7 @@ fn draw_range(
         }
         let board_at = match camera {
             Camera::Side => to_screen([0.0, 0.0, dz]).map(|q| q + vec2(0.0, 12.0)),
-            Camera::Above => to_screen([half * 0.5, 0.0, dz]).map(|q| q + vec2(16.0, 0.0)),
+            Camera::Above => to_screen([half * 0.75, 0.0, dz]),
             Camera::Tee => to_screen([half * 0.55, 0.0, dz]).map(|q| q + vec2(0.0, -6.0)),
         };
         if let Some(at) = board_at.filter(|at| rect.contains(*at))
