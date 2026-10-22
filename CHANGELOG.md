@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **Distance to the pin in the overlay** (Overlay page → *Distance to the pin*): after a shot on a course, the overlay
+  shows how far the ball is left from the pin, from GSPro's results (e.g. *Pin 139 m*, in yards with yd).
 - **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle
   from GSPro's database in the CrossOver bottle (read-only) and keeps them with the shot. The chip *GSPro results*
   on the shots page shows them in the tables, details, dispersion and 3D tiles instead of the estimate, where GSPro

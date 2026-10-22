@@ -397,6 +397,8 @@ fn record_shot(ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, deliver
             s.shots_sent += 1;
         }
         s.last_shot = Some(state::LastShot { ball, club, tempo, at: Instant::now(), delivered, shot_number });
+        // GSPro's result of the previous shot no longer applies (the new one follows when it lands).
+        s.gspro_result = None;
         if test {
             return None;
         }

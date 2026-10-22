@@ -777,7 +777,7 @@ impl App {
             return;
         };
         let style = &self.saved.overlay_style;
-        let content = OverlayContent::live(style, self.saved.metric);
+        let content = OverlayContent::live(style, self.saved.metric, self.saved.meters);
         let base = content.size(ctx);
         // Sizes are in points, which grow with the main window's zoom; divide it out so the
         // overlay keeps its size on screen however large the main window is.
@@ -850,7 +850,7 @@ impl App {
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
             let s = &mut style;
-            let items: [(&mut bool, &str); 12] = [
+            let items: [(&mut bool, &str); 13] = [
                 (&mut s.club, tr("Club")),
                 (&mut s.battery, tr("Battery")),
                 (&mut s.tempo, tr("Tempo")),
@@ -863,11 +863,12 @@ impl App {
                 (&mut s.smash, tr("Smash Factor")),
                 (&mut s.impact_side, tr("Impact from the side")),
                 (&mut s.impact_top, tr("Impact from above")),
+                (&mut s.to_pin, tr("Distance to the pin")),
             ];
             let body = ui.max_rect();
             let cell_w = body.width() / 2.0;
             for (i, (on, label)) in items.into_iter().enumerate() {
-                let r = Rect::from_min_size(body.min + vec2((i % 2) as f32 * cell_w, (i / 2) as f32 * 32.0), vec2(cell_w, 30.0));
+                let r = Rect::from_min_size(body.min + vec2((i % 2) as f32 * cell_w, (i / 2) as f32 * 28.0), vec2(cell_w, 26.0));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
                     toggle(ui, on, label);
                 });
@@ -919,7 +920,8 @@ impl App {
             return;
         };
         let ready = (R10Status::Ready, "", true);
-        let content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot));
+        let pin = Some(pin_text(139.0, self.saved.meters));
+        let content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot), pin);
         let size = content.size(ui.ctx());
         let pad = 9.0;
         let room = area.size() - vec2(2.0 * pad, 2.0 * pad);
@@ -1715,11 +1717,13 @@ struct Impact {
 
 impl OverlayContent {
     /// From the shared status.
-    fn live(style: &OverlayStyle, metric: bool) -> Self {
-        let (r10, r10_detail, gs_ok, club, battery, last) = state::with(|s| {
-            (s.r10, s.r10_detail.clone(), s.gspro_connected, s.gspro_club.clone(), s.r10_battery, s.last_shot.clone())
+    fn live(style: &OverlayStyle, metric: bool, meters: bool) -> Self {
+        let (r10, r10_detail, gs_ok, club, battery, last, to_pin) = state::with(|s| {
+            let to_pin = s.gspro_result.and_then(|r| r.to_pin);
+            (s.r10, s.r10_detail.clone(), s.gspro_connected, s.gspro_club.clone(), s.r10_battery, s.last_shot.clone(), to_pin)
         });
-        Self::new(style, metric, (r10, &r10_detail, gs_ok), club.as_deref(), battery, last.as_ref())
+        let pin = to_pin.map(|m| pin_text(m, meters));
+        Self::new(style, metric, (r10, &r10_detail, gs_ok), club.as_deref(), battery, last.as_ref(), pin)
     }
 
     fn new(
@@ -1729,6 +1733,7 @@ impl OverlayContent {
         club: Option<&str>,
         battery: Option<u8>,
         last: Option<&state::LastShot>,
+        pin: Option<String>,
     ) -> Self {
         let (color, word) = status_word(r10, gs_ok);
         let ready = r10 == R10Status::Ready && gs_ok;
@@ -1742,6 +1747,7 @@ impl OverlayContent {
             (Some(s), true) if !s.delivered => (tr("Last shot NOT delivered to GSPro").to_string(), AMBER),
             (Some(s), true) => {
                 let mut values = shot_values(s, style, metric);
+                values.extend(pin.filter(|_| style.to_pin));
                 // One line: the tempo joins the values instead of sitting next to the battery.
                 if style.one_line {
                     values.extend(tempo.clone());
@@ -1800,6 +1806,11 @@ impl OverlayContent {
 }
 
 /// The chosen values of a shot, e.g. "198.3 km/h", "VLA 16.5°", "7146 rpm".
+/// "Pin 139 m": the distance left to the pin, in metres or yards.
+fn pin_text(m: f64, meters: bool) -> String {
+    if meters { format!("{} {m:.0} m", tr("Pin")) } else { format!("{} {:.0} yd", tr("Pin"), m * M_TO_YD) }
+}
+
 fn shot_values(s: &state::LastShot, style: &OverlayStyle, metric: bool) -> Vec<String> {
     let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
     let b = &s.ball;
@@ -2295,7 +2306,7 @@ mod tests {
             .build_ui(|ui| {
                 // Fonts set in one frame apply from the next; draw only once they are there.
                 if ui.ctx().fonts(|f| f.families().contains(&FontFamily::Name("cond".into()))) {
-                    let content = OverlayContent::live(&OverlayStyle::default(), true);
+                    let content = OverlayContent::live(&OverlayStyle::default(), true, true);
                     let rect = Rect::from_min_size(ui.max_rect().min, content.size(ui.ctx()));
                     size_out.set(rect);
                     overlay_ui(ui.painter(), rect, &content);
