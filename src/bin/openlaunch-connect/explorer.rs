@@ -771,7 +771,8 @@ impl ExplorerState {
 }
 
 /// What the tile overlay shows, on the Overlay page: the kind of tile and its switches.
-pub(super) fn tile_options(ui: &mut egui::Ui, tile: &mut Tile, metric: bool, meters: bool) {
+/// `extra` goes next to the choice of tile.
+pub(super) fn tile_options(ui: &mut egui::Ui, tile: &mut Tile, metric: bool, meters: bool, extra: impl FnOnce(&mut egui::Ui)) {
     let u = Units { metric, meters };
     setting_row(ui, tr("Tile"), |ui| {
         egui::ComboBox::from_id_salt("tile-overlay-kind").width(150.0).selected_text(kind_name(tile.kind)).show_ui(ui, |ui| {
@@ -779,6 +780,7 @@ pub(super) fn tile_options(ui: &mut egui::Ui, tile: &mut Tile, metric: bool, met
                 ui.selectable_value(&mut tile.kind, k, kind_name(k));
             }
         });
+        extra(ui);
     });
     match tile.kind {
         TileKind::Table => setting_row(ui, tr("Shows"), |ui| {
