@@ -32,8 +32,11 @@ pub struct Settings {
     pub overlay_spot: Option<[f32; 2]>,
     /// Size, background and contents of the overlay.
     pub overlay_style: OverlayStyle,
-    /// A second overlay with one tile of the shots explorer.
-    pub tile_overlay: TileOverlay,
+    /// Overlays with one tile of the shots explorer each.
+    pub tile_overlays: Vec<TileOverlay>,
+    /// Saved arrangements of all overlays; the one in use (`arrangement`) follows every change.
+    pub arrangements: Vec<Arrangement>,
+    pub arrangement: usize,
     /// Ask GitHub for a newer release on start.
     pub check_updates: bool,
     /// Last main window size in logical points (at zoom 1), restored on start.
@@ -336,11 +339,68 @@ impl OverlayItem {
     }
 }
 
-/// A second overlay with one tile of the shots explorer, e.g. the dispersion or the flights in 3D.
+/// The overlays as they were arranged, under a name: the status overlay and the tiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Arrangement {
+    pub name: String,
+    pub overlay: OverlayPos,
+    pub overlay_spot: Option<[f32; 2]>,
+    pub overlay_style: OverlayStyle,
+    pub tiles: Vec<TileOverlay>,
+}
+
+impl Default for Arrangement {
+    fn default() -> Self {
+        Self {
+            name: DEFAULT_ARRANGEMENT.into(),
+            overlay: OverlayPos::default(),
+            overlay_spot: None,
+            overlay_style: OverlayStyle::default(),
+            tiles: Vec::new(),
+        }
+    }
+}
+
+/// Name of the first arrangement, in English; the app shows it translated.
+pub const DEFAULT_ARRANGEMENT: &str = "Standard";
+
+impl Settings {
+    /// The overlays as they are now, as the arrangement in use (the first one if there is none).
+    pub fn keep_arrangement(&mut self) {
+        let name = self.arrangements.get(self.arrangement).map_or_else(|| DEFAULT_ARRANGEMENT.to_string(), |a| a.name.clone());
+        let now = Arrangement {
+            name,
+            overlay: self.overlay,
+            overlay_spot: self.overlay_spot,
+            overlay_style: self.overlay_style.clone(),
+            tiles: self.tile_overlays.clone(),
+        };
+        if self.arrangements.is_empty() {
+            self.arrangement = 0;
+            self.arrangements.push(now);
+        } else {
+            self.arrangement = self.arrangement.min(self.arrangements.len() - 1);
+            self.arrangements[self.arrangement] = now;
+        }
+    }
+
+    /// Shows the overlays as arrangement `i` has them.
+    pub fn use_arrangement(&mut self, i: usize) {
+        let Some(a) = self.arrangements.get(i).cloned() else { return };
+        self.arrangement = i;
+        self.overlay = a.overlay;
+        self.overlay_spot = a.overlay_spot;
+        self.overlay_style = a.overlay_style;
+        self.tile_overlays = a.tiles;
+    }
+}
+
+/// An overlay with one tile of the shots explorer, e.g. the dispersion or the flights in 3D.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct TileOverlay {
-    /// Where it sits; `Off` hides it.
+    /// Where it sits; `Off` hides it (the tile is kept).
     pub pos: OverlayPos,
     /// Placed by hand (like `Settings::overlay_spot`).
     pub spot: Option<[f32; 2]>,
@@ -357,7 +417,7 @@ pub struct TileOverlay {
 impl Default for TileOverlay {
     fn default() -> Self {
         Self {
-            pos: OverlayPos::Off,
+            pos: OverlayPos::Left,
             spot: None,
             tile: Tile { kind: TileKind::Dispersion, ..Tile::default() },
             width: 360.0,
@@ -378,7 +438,7 @@ impl TileOverlay {
 }
 
 /// Where the overlay sits on the screen: a corner, the middle of an edge, or off.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlayPos {
     Off,
@@ -426,7 +486,9 @@ impl Default for Settings {
             overlay: OverlayPos::default(),
             overlay_spot: None,
             overlay_style: OverlayStyle::default(),
-            tile_overlay: TileOverlay::default(),
+            tile_overlays: Vec::new(),
+            arrangements: Vec::new(),
+            arrangement: 0,
             export_format: ExportFormat::default(),
             language: Language::default(),
             notifications: true,
@@ -528,6 +590,28 @@ mod tests {
         assert_eq!(style.layout[0][0], Some(OverlayItem::Status));
         let json = serde_json::to_string(&style).unwrap();
         assert!(json.contains(r#"["ball_speed","club_speed"]"#), "{json}");
+    }
+
+    #[test]
+    fn arrangements_follow_the_overlays() {
+        let mut s = Settings::default();
+        s.keep_arrangement();
+        assert_eq!(s.arrangements.len(), 1);
+        assert_eq!(s.arrangements[0].name, DEFAULT_ARRANGEMENT);
+        // A second one with a tile; changes go to the one in use.
+        s.arrangements.push(Arrangement { name: "Range".into(), ..Arrangement::default() });
+        s.use_arrangement(1);
+        s.tile_overlays.push(TileOverlay::default());
+        s.overlay = OverlayPos::Bottom;
+        s.keep_arrangement();
+        assert_eq!(s.arrangements[1].tiles.len(), 1);
+        assert_eq!(s.arrangements[1].name, "Range");
+        // Back to the first: its overlays again.
+        s.use_arrangement(0);
+        assert!(s.tile_overlays.is_empty());
+        assert_eq!(s.overlay, OverlayPos::TopRight);
+        s.use_arrangement(1);
+        assert_eq!((s.overlay, s.tile_overlays.len()), (OverlayPos::Bottom, 1));
     }
 
     #[test]
