@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Left/right in the tables:** the shots table shows where each ball landed left or right of the target line
+  (*Side\**, e.g. *8 R*), the averages per club the mean side ± spread and the *Width\** of the dispersion
+  (left-most to right-most landing). The details' *Side\** is now also at the landing point.
+
 ### Changed
 - **3D flight tile** looks like a driving range now: sky with haze at the horizon, mown fairway, target greens with
   flags and distance boards every 50 m (yd), height lines every 10 m. The flights cast shadows, fade in from the tee

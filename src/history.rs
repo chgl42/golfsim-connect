@@ -420,6 +420,10 @@ pub struct ClubStats {
     /// Estimated carry and total distance in metres (see `flight`).
     pub carry: Option<Stat>,
     pub total: Option<Stat>,
+    /// Estimated deviation at the landing point in metres, right positive, and how far apart the
+    /// left-most and right-most landings are.
+    pub side: Option<Stat>,
+    pub side_width: Option<f64>,
 }
 
 /// Per-club statistics of the shots that aren't excluded, in order of first use.
@@ -450,6 +454,12 @@ pub fn club_stats(shots: &[ShotRecord]) -> Vec<ClubStats> {
                 tempo: Stat::of(group.iter().filter_map(|s| s.tempo.map(|t| t.ratio()))),
                 carry: Stat::of(flights.iter().map(|f| f.carry)),
                 total: Stat::of(flights.iter().map(|f| f.total)),
+                side: Stat::of(flights.iter().map(|f| f.carry_side)),
+                side_width: flights
+                    .iter()
+                    .map(|f| f.carry_side)
+                    .fold(None, |r: Option<(f64, f64)>, v| Some(r.map_or((v, v), |(lo, hi)| (lo.min(v), hi.max(v)))))
+                    .map(|(lo, hi)| hi - lo),
                 club_code: code,
             }
         })
@@ -540,6 +550,10 @@ mod tests {
         let (iron, driver) = (stats[0].carry.unwrap(), stats[1].carry.unwrap());
         assert!(iron.sd > 0.0 && driver.mean > iron.mean);
         assert!(stats[1].total.unwrap().mean > driver.mean);
+        // All test shots start 0.5° right with a 1° axis: right of the line, the same each time.
+        let side = stats[0].side.unwrap();
+        assert!(side.mean > 0.0, "right: {side:?}");
+        assert!(stats[0].side_width.unwrap() >= 0.0 && stats[1].side_width == Some(0.0), "one driver shot");
     }
 
     #[test]
