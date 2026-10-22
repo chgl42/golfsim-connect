@@ -243,6 +243,23 @@ struct App {
     status_rect: Option<Rect>,
     /// Like `overlay_first`, for the tile overlay.
     tile_overlay_first: Option<(egui::Pos2, egui::Vec2)>,
+    /// An overlay being moved by hand.
+    moving: Option<Moving>,
+    /// Whether clicks were last set to go through the status and the tile overlay.
+    passthrough: [Option<bool>; 2],
+}
+
+/// An overlay being moved by hand: it takes the mouse until it is dropped.
+#[derive(Default)]
+struct Moving {
+    /// The tile overlay (else the status overlay).
+    tile: bool,
+    /// Where the mouse and the overlay were when the drag started (native points).
+    grab: Option<(egui::Pos2, egui::Pos2)>,
+    /// How far it has been dragged where the mouse can't be read from the system.
+    dragged: egui::Vec2,
+    /// Where it is now (native points, top left).
+    at: Option<egui::Pos2>,
 }
 
 impl App {
@@ -295,6 +312,8 @@ impl App {
             sample_shots: std::cell::OnceCell::new(),
             status_rect: None,
             tile_overlay_first: None,
+            moving: None,
+            passthrough: [None; 2],
         }
     }
 
@@ -797,6 +816,8 @@ impl App {
     fn overlay(&mut self, ctx: &egui::Context) {
         self.status_rect = None;
         let Some((ax, ay)) = self.saved.overlay.anchor().filter(|_| self.show_overlay) else {
+            self.moving = self.moving.take().filter(|m| m.tile);
+            self.passthrough[0] = None;
             return;
         };
         let Some(screen) = ctx.input(|i| i.viewport().monitor_size) else {
@@ -818,9 +839,8 @@ impl App {
         #[cfg(not(target_os = "macos"))]
         let visible: Option<Rect> = None;
         let visible = visible.unwrap_or(Rect::from_min_size(egui::Pos2::ZERO, screen * zoom));
-        // Never off the left or top edge, even when wider than the screen.
-        let free = (visible.size() - size - vec2(2.0, 2.0) * OVERLAY_MARGIN).max(egui::Vec2::ZERO);
-        let pos = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
+        let moving = self.moving.as_ref().filter(|m| !m.tile);
+        let pos = moving.and_then(|m| m.at).unwrap_or_else(|| overlay_origin(visible, size, (ax, ay), self.saved.overlay_spot));
         // On macOS the window is placed through AppKit (below): egui takes the size and place
         // of this window in native points but reports them with the zoom, so the builder only
         // gives the first ones and then stays the same.
@@ -831,6 +851,7 @@ impl App {
         let size_asked = size / style.scale;
         #[cfg(not(target_os = "macos"))]
         let pos = pos / style.scale;
+        let grabbable = moving.is_some();
         let builder = egui::ViewportBuilder::default()
             .with_title(OVERLAY_TITLE)
             .with_position(pos)
@@ -840,14 +861,16 @@ impl App {
             .with_resizable(false)
             .with_maximize_button(false)
             .with_window_level(egui::WindowLevel::AlwaysOnTop)
-            .with_mouse_passthrough(true)
+            .with_mouse_passthrough(!grabbable)
             .with_active(false)
             .with_taskbar(false);
         let capture = &mut self.capture;
         let overlay_base = &self.overlay_base;
         let user_scale = style.scale;
-        let pos_native = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
+        let pos_native = moving.and_then(|m| m.at).unwrap_or_else(|| overlay_origin(visible, size, (ax, ay), self.saved.overlay_spot));
         self.status_rect = Some(Rect::from_min_size(pos_native, size));
+        let mut moving = self.moving.as_mut().filter(|m| !m.tile);
+        let mut dropped = None;
         // The overlay's pass takes the zoom from the options when it begins: the overlay's size
         // there, the main window's back right after (no repaint is triggered either way).
         ctx.options_mut(|o| o.zoom_factor = user_scale);
@@ -864,9 +887,36 @@ impl App {
             // overlay is drawn at its base size: no scaling of shapes or layers needed.
             let rect = Rect::from_min_size(pos2(OVERLAY_BORDER, OVERLAY_BORDER), own);
             overlay_ui(&ui.ctx().layer_painter(overlay_layer()).with_clip_rect(rect.expand(OVERLAY_BORDER)), rect, &content);
+            if let Some(m) = moving.as_deref_mut() {
+                dropped = drag_overlay(ui, rect, m, pos_native, user_scale);
+            }
             capture.save_from(ui.ctx());
         });
         ctx.options_mut(|o| o.zoom_factor = zoom);
+        self.set_passthrough(ctx, 0, !grabbable);
+        if let Some(at) = dropped {
+            self.saved.overlay_spot = Some(overlay_spot(visible, size, at));
+            self.edit.overlay_spot = self.saved.overlay_spot;
+            self.placed_by_hand();
+        }
+    }
+
+    /// Lets clicks go through the status (`k` 0) or the tile overlay (1), or not while it is moved;
+    /// told to the window when it changes.
+    fn set_passthrough(&mut self, ctx: &egui::Context, k: usize, on: bool) {
+        if self.passthrough[k] != Some(on) {
+            let id = if k == 0 { overlay_id() } else { tile_overlay_id() };
+            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::MousePassthrough(on));
+            self.passthrough[k] = Some(on);
+        }
+    }
+
+    /// An overlay was dropped where it should stay: saved (clicks go through it again next frame).
+    fn placed_by_hand(&mut self) {
+        self.moving = None;
+        if let Err(e) = self.saved.save() {
+            log::info(&format!("Saving the overlay settings failed: {e}"));
+        }
     }
 
     /// Always-on-top, click-through window with one tile of the shots explorer. Where it shares its
@@ -874,6 +924,8 @@ impl App {
     fn tile_overlay(&mut self, ctx: &egui::Context) {
         let cfg = self.saved.tile_overlay.clone();
         let Some((ax, ay)) = cfg.pos.anchor().filter(|_| self.show_overlay) else {
+            self.moving = self.moving.take().filter(|m| !m.tile);
+            self.passthrough[1] = None;
             return;
         };
         let Some(screen) = ctx.input(|i| i.viewport().monitor_size) else {
@@ -886,11 +938,16 @@ impl App {
         #[cfg(not(target_os = "macos"))]
         let visible: Option<Rect> = None;
         let visible = visible.unwrap_or(Rect::from_min_size(egui::Pos2::ZERO, screen * zoom));
-        let free = (visible.size() - size - vec2(2.0, 2.0) * OVERLAY_MARGIN).max(egui::Vec2::ZERO);
-        let mut pos = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
-        if let Some(status) = self.status_rect.filter(|_| cfg.pos == self.saved.overlay) {
+        let mut pos = overlay_origin(visible, size, (ax, ay), cfg.spot);
+        let both_at_anchor = cfg.spot.is_none() && self.saved.overlay_spot.is_none() && cfg.pos == self.saved.overlay;
+        if let Some(status) = self.status_rect.filter(|_| both_at_anchor) {
             pos.y = if ay < 1.0 { status.bottom() + 8.0 } else { status.top() - 8.0 - size.y };
         }
+        let mut moving = self.moving.as_mut().filter(|m| m.tile);
+        if let Some(at) = moving.as_ref().and_then(|m| m.at) {
+            pos = at;
+        }
+        let grabbable = moving.is_some();
         #[cfg(target_os = "macos")]
         let (first_pos, size_asked) = *self.tile_overlay_first.get_or_insert((pos, size));
         #[cfg(not(target_os = "macos"))]
@@ -904,13 +961,14 @@ impl App {
             .with_resizable(false)
             .with_maximize_button(false)
             .with_window_level(egui::WindowLevel::AlwaysOnTop)
-            .with_mouse_passthrough(true)
+            .with_mouse_passthrough(!grabbable)
             .with_active(false)
             .with_taskbar(false);
         let (shots, club) = state::with(|s| (s.session.clone(), s.gspro_club.clone()));
         let units = (self.saved.metric, self.saved.meters);
         let gspro = self.saved.gspro_results;
         let explorer = &mut self.explorer;
+        let mut dropped = None;
         // Drawn at its own size, whatever the main window's zoom (see `overlay`).
         ctx.options_mut(|o| o.zoom_factor = 1.0);
         ctx.show_viewport_immediate(tile_overlay_id(), builder, |ui, _class| {
@@ -921,8 +979,17 @@ impl App {
             }
             let rect = Rect::from_min_size(pos2(OVERLAY_BORDER, OVERLAY_BORDER), vec2(cfg.width, cfg.height()));
             explorer.overlay_tile(ui, rect, 0, &cfg, &shots, club.as_deref(), units, gspro);
+            if let Some(m) = moving.as_deref_mut() {
+                dropped = drag_overlay(ui, rect, m, pos, 1.0);
+            }
         });
         ctx.options_mut(|o| o.zoom_factor = zoom);
+        self.set_passthrough(ctx, 1, !grabbable);
+        if let Some(at) = dropped {
+            self.saved.tile_overlay.spot = Some(overlay_spot(visible, size, at));
+            self.edit.tile_overlay.spot = self.saved.tile_overlay.spot;
+            self.placed_by_hand();
+        }
     }
 
     /// Overlay position, size and contents with a preview; changes apply and are saved at once.
@@ -931,6 +998,7 @@ impl App {
             return self.tile_overlay_page(ui);
         }
         let mut pos = self.saved.overlay;
+        let mut spot = self.saved.overlay_spot;
         let mut style = self.saved.overlay_style.clone();
         let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 254.0), Sense::hover());
         let col_w = (area.width() - 10.0) / 2.0;
@@ -941,14 +1009,11 @@ impl App {
             ui.spacing_mut().item_spacing.y = 7.0;
             ui.horizontal(|ui| {
                 setting_label(ui, tr("Position"), 72.0);
-                overlay_picker(ui, &mut pos);
+                if overlay_picker(ui, &mut pos, spot.is_some()) {
+                    spot = None;
+                }
                 ui.add_space(12.0);
-                // Text block centred on the picker.
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
-                let p = ui.painter();
-                p.text(r.left_center() - vec2(0.0, 12.0), Align2::LEFT_CENTER, overlay_name(pos), FontId::proportional(14.0), WHITE);
-                p.text(r.left_center() + vec2(0.0, 7.0), Align2::LEFT_CENTER, tr("On top of GSPro, also in full screen."), FontId::proportional(12.0), MUTED);
-                p.text(r.left_center() + vec2(0.0, 23.0), Align2::LEFT_CENTER, tr("Choose the middle to turn it off."), FontId::proportional(12.0), MUTED);
+                place_text(ui, pos, spot.is_some(), tr("On top of GSPro, also in full screen."), &mut self.moving, false);
             });
             setting_row(ui, tr("Size"), |ui| {
                 segments(ui, &mut style.scale, &[(0.75, "75 %"), (1.0, "100 %"), (1.25, "125 %"), (1.5, "150 %")]);
@@ -982,9 +1047,11 @@ impl App {
         let preview = Rect::from_min_max(pos2(area.left(), area.bottom() + 10.0), pos2(area.right(), ui.max_rect().bottom()));
         self.overlay_preview(ui, preview, pos, &mut style);
 
-        if pos != self.saved.overlay || style != self.saved.overlay_style {
+        if pos != self.saved.overlay || spot != self.saved.overlay_spot || style != self.saved.overlay_style {
             self.saved.overlay = pos;
             self.edit.overlay = pos;
+            self.saved.overlay_spot = spot;
+            self.edit.overlay_spot = spot;
             self.saved.overlay_style = style.clone();
             self.edit.overlay_style = style;
             if let Err(e) = self.saved.save() {
@@ -1006,13 +1073,11 @@ impl App {
             ui.spacing_mut().item_spacing.y = 7.0;
             ui.horizontal(|ui| {
                 setting_label(ui, tr("Position"), 72.0);
-                overlay_picker(ui, &mut cfg.pos);
+                if overlay_picker(ui, &mut cfg.pos, cfg.spot.is_some()) {
+                    cfg.spot = None;
+                }
                 ui.add_space(12.0);
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
-                let p = ui.painter();
-                p.text(r.left_center() - vec2(0.0, 12.0), Align2::LEFT_CENTER, overlay_name(cfg.pos), FontId::proportional(14.0), WHITE);
-                p.text(r.left_center() + vec2(0.0, 7.0), Align2::LEFT_CENTER, tr("Under the status at its place."), FontId::proportional(12.0), MUTED);
-                p.text(r.left_center() + vec2(0.0, 23.0), Align2::LEFT_CENTER, tr("Choose the middle to turn it off."), FontId::proportional(12.0), MUTED);
+                place_text(ui, cfg.pos, cfg.spot.is_some(), tr("Under the status at its place."), &mut self.moving, true);
             });
             setting_row(ui, tr("Size"), |ui| {
                 let [s, m, l] = TileOverlay::WIDTHS;
@@ -1055,6 +1120,8 @@ impl App {
             p.text(area.center(), Align2::CENTER_CENTER, tr("Overlay off"), FontId::proportional(14.0), SOFT);
             return;
         };
+        // Placed by hand: there in the preview, too.
+        let [ax, ay] = cfg.spot.unwrap_or([ax, ay]);
         let (mut shots, club) = state::with(|s| (s.session.clone(), s.gspro_club.clone()));
         if shots.is_empty() {
             shots = self.sample_shots.get_or_init(engine::demo_session).clone();
@@ -1094,6 +1161,7 @@ impl App {
             p.text(area.center(), Align2::CENTER_CENTER, tr("Overlay off"), FontId::proportional(14.0), SOFT);
             return;
         };
+        let [ax, ay] = self.saved.overlay_spot.unwrap_or([ax, ay]);
         let ready = (R10Status::Ready, "", true);
         let pin = Some(pin_text(139.0, self.saved.meters));
         let mut content = OverlayContent::new(style, self.saved.metric, ready, Some("I7"), Some(82), Some(&self.preview_shot), pin);
@@ -1559,6 +1627,16 @@ mod mac {
         if off > 0.5 {
             window.setFrame_display(frame, true);
         }
+    }
+
+    /// The mouse on the main screen, in points from its top left corner.
+    pub fn mouse_location() -> Option<eframe::egui::Pos2> {
+        use objc2_app_kit::{NSEvent, NSScreen};
+        let mtm = MainThreadMarker::new()?;
+        let full = NSScreen::mainScreen(mtm)?.frame();
+        let at = NSEvent::mouseLocation();
+        // AppKit counts from the bottom left.
+        Some(eframe::egui::pos2((at.x - full.origin.x) as f32, (full.origin.y + full.size.height - at.y) as f32))
     }
 
     /// The main screen without the menu bar and the Dock, in points from its top left corner.
@@ -2748,7 +2826,84 @@ fn overlay_tabs(ui: &mut egui::Ui, card: Rect, tile: &mut bool) {
     }
 }
 
-fn overlay_picker(ui: &mut egui::Ui, value: &mut OverlayPos) {
+/// Where an overlay goes, next to its picker: the place, a hint, and *Move on screen* (or *Done*
+/// while it is being moved).
+fn place_text(ui: &mut egui::Ui, pos: OverlayPos, by_hand: bool, hint: &str, moving: &mut Option<Moving>, tile: bool) {
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
+    let name = if by_hand && pos != OverlayPos::Off { tr("Placed by hand") } else { overlay_name(pos) };
+    let p = ui.painter();
+    p.text(r.left_center() - vec2(0.0, 18.0), Align2::LEFT_CENTER, name, FontId::proportional(14.0), WHITE);
+    p.text(r.left_center() + vec2(0.0, 1.0), Align2::LEFT_CENTER, hint, FontId::proportional(12.0), MUTED);
+    let here = moving.as_ref().is_some_and(|m| m.tile == tile);
+    let (label, color) = if here { (tr("Done – drag it in GSPro"), ACCENT_HOVER) } else { (tr("Move on screen"), ICON) };
+    let galley = p.layout_no_wrap(label.to_string(), FontId::proportional(12.5), color);
+    let link = Rect::from_min_size(r.left_center() + vec2(0.0, 13.0), galley.size());
+    let on = pos != OverlayPos::Off;
+    let resp = ui.interact(link, ui.id().with(("move-overlay", tile)), if on { Sense::click() } else { Sense::hover() });
+    let color = if !on { MUTED } else if resp.hovered() { WHITE } else { color };
+    p.galley_with_override_text_color(link.min, galley, color);
+    if !on {
+        return;
+    }
+    let tip = if here { tr("Ends moving; the overlay stays where it is") } else { tr("Makes the overlay grabbable: drag it to its place in GSPro and let go") };
+    if resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        *moving = if here { None } else { Some(Moving { tile, ..Moving::default() }) };
+    }
+}
+
+/// Top left corner of an overlay of `size` (native points): placed by hand at `spot`, else at the
+/// anchor, `OVERLAY_MARGIN` from the edges of the visible screen and never off its left or top.
+fn overlay_origin(visible: Rect, size: egui::Vec2, (ax, ay): (f32, f32), spot: Option<[f32; 2]>) -> egui::Pos2 {
+    if let Some([fx, fy]) = spot {
+        let room = (visible.size() - size).max(egui::Vec2::ZERO);
+        return visible.min + vec2(room.x * fx.clamp(0.0, 1.0), room.y * fy.clamp(0.0, 1.0));
+    }
+    let free = (visible.size() - size - vec2(2.0, 2.0) * OVERLAY_MARGIN).max(egui::Vec2::ZERO);
+    visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay)
+}
+
+/// Where an overlay dropped at `at` is kept: fractions of the room the visible screen leaves, so
+/// it keeps its place on another screen size.
+fn overlay_spot(visible: Rect, size: egui::Vec2, at: egui::Pos2) -> [f32; 2] {
+    let room = visible.size() - size;
+    let frac = |off: f32, room: f32| if room > 0.0 { (off / room).clamp(0.0, 1.0) } else { 0.0 };
+    [frac(at.x - visible.left(), room.x), frac(at.y - visible.top(), room.y)]
+}
+
+/// An overlay being moved: grabbable all over, with a frame and a hint. `origin` is where it is
+/// (native points), `zoom` the points of its pass in native points. Returns where it was dropped.
+fn drag_overlay(ui: &egui::Ui, rect: Rect, moving: &mut Moving, origin: egui::Pos2, zoom: f32) -> Option<egui::Pos2> {
+    let resp = ui.interact(rect, egui::Id::new("move-overlay"), Sense::drag());
+    #[cfg(target_os = "macos")]
+    let mouse = mac::mouse_location();
+    #[cfg(not(target_os = "macos"))]
+    let mouse: Option<egui::Pos2> = None;
+    if resp.drag_started() {
+        moving.grab = Some((mouse.unwrap_or(egui::Pos2::ZERO), origin));
+        moving.dragged = egui::Vec2::ZERO;
+    }
+    if resp.dragged()
+        && let Some((m0, o0)) = moving.grab
+    {
+        // The window moves under the mouse, so the system's mouse position is the steady one.
+        moving.dragged += resp.drag_delta() * zoom;
+        let by = mouse.map_or(moving.dragged, |m| m - m0);
+        moving.at = Some(o0 + by);
+    }
+    ui.ctx().set_cursor_icon(if resp.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+    let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("move-overlay")));
+    fg.rect_stroke(rect, 8.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+    let galley = fg.layout_no_wrap(tr("Drag to its place").to_string(), FontId::proportional(12.0), WHITE);
+    let badge = Rect::from_center_size(pos2(rect.center().x, rect.top() + 14.0), galley.size() + vec2(14.0, 6.0));
+    fg.rect_filled(badge, 5.0, ACCENT);
+    fg.galley(badge.min + vec2(7.0, 3.0), galley, WHITE);
+    ui.ctx().request_repaint();
+    if resp.drag_stopped() { moving.at.or(Some(origin)) } else { None }
+}
+
+/// The nine places; returns whether one was clicked. Placed `by_hand`, none is marked.
+fn overlay_picker(ui: &mut egui::Ui, value: &mut OverlayPos, by_hand: bool) -> bool {
+    let mut clicked = false;
     let (screen, _) = ui.allocate_exact_size(vec2(128.0, 72.0), Sense::hover());
     ui.painter().rect(screen, 6.0, PAGE, Stroke::new(2.0, FIELD_LINE), StrokeKind::Inside);
     let inner = screen.shrink2(vec2(10.0, 7.0));
@@ -2758,7 +2913,7 @@ fn overlay_picker(ui: &mut egui::Ui, value: &mut OverlayPos) {
             let c = inner.min + vec2((col as f32 + 0.5) * cell.x, (row as f32 + 0.5) * cell.y);
             let hit = Rect::from_center_size(c, cell);
             let resp = ui.interact(hit, ui.id().with(("overlay_pos", row, col)), Sense::click());
-            let selected = *value == pos;
+            let selected = *value == pos && (!by_hand || pos == OverlayPos::Off);
             let p = ui.painter();
             if pos == OverlayPos::Off {
                 let color = if selected { WHITE } else if resp.hovered() { SOFT } else { MUTED };
@@ -2773,9 +2928,11 @@ fn overlay_picker(ui: &mut egui::Ui, value: &mut OverlayPos) {
             }
             if resp.on_hover_text(overlay_name(pos)).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *value = pos;
+                clicked = true;
             }
         }
     }
+    clicked
 }
 
 /// Battery glyph with percentage, right-aligned at `anchor` (vertical centre).
@@ -3175,6 +3332,8 @@ mod tests {
                 "tile-overlay-flight.png",
                 TileOverlay { pos: OverlayPos::BottomLeft, tile: Tile { camera: Camera::Above, ..tile(TileKind::Flight) }, club_only: true, ..TileOverlay::default() },
             ),
+            ("tile-overlay-moving.png", TileOverlay { pos: OverlayPos::Left, spot: Some([0.0, 0.45]), ..TileOverlay::default() }),
+            ("tile-overlay-status.png", TileOverlay::default()),
             ("tile-overlay-table.png", TileOverlay { pos: OverlayPos::Right, tile: Tile { averages: true, ..tile(TileKind::Table) }, width: 460.0, ..TileOverlay::default() }),
         ] {
             let settings = Settings { tile_overlay: cfg, ..Settings::default() };
@@ -3184,7 +3343,10 @@ mod tests {
                 App::new(settings, tx)
             });
             harness.state_mut().page = Page::Overlay;
-            harness.state_mut().overlay_tile_tab = true;
+            harness.state_mut().overlay_tile_tab = !name.contains("status");
+            if name.contains("moving") {
+                harness.state_mut().moving = Some(Moving { tile: true, ..Moving::default() });
+            }
             harness.state_mut().show_overlay = false;
             harness.state_mut().remember_size = false;
             for _ in 0..8 {
@@ -3207,6 +3369,22 @@ mod tests {
         });
         harness.step();
         save(&harness.render().unwrap(), "overlay-symbols.png");
+    }
+
+    #[test]
+    fn overlays_placed_by_hand_keep_their_place() {
+        let visible = Rect::from_min_size(pos2(0.0, 25.0), vec2(1512.0, 900.0));
+        let size = vec2(364.0, 274.0);
+        // Dropped somewhere: kept as fractions, back at the same spot.
+        let at = pos2(40.0, 330.0);
+        let spot = overlay_spot(visible, size, at);
+        assert!((overlay_origin(visible, size, (0.0, 0.0), Some(spot)) - at).length() < 0.01);
+        // Dropped half off the screen: kept on it.
+        let spot = overlay_spot(visible, size, pos2(-50.0, 2000.0));
+        assert_eq!(spot, [0.0, 1.0]);
+        assert_eq!(overlay_origin(visible, size, (0.5, 0.5), Some(spot)), pos2(0.0, 25.0 + 900.0 - 274.0));
+        // Without a spot, the anchor with the margin.
+        assert_eq!(overlay_origin(visible, size, (0.0, 0.0), None), pos2(OVERLAY_MARGIN, 25.0 + OVERLAY_MARGIN));
     }
 
     #[test]
