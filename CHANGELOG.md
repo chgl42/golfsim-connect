@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed,
   smash factor and spin, VLA and HLA, distance to the pin and battery – with symbols instead of words (a golf ball
   with speed lines, an iron, club face and ball, a ball with an arrow around it, a flag). On the Overlay page a click
-  on a tile in the preview picks what it shows (or empties it, or removes the column), *+ Column* adds one and
+  on a tile in the preview picks what it shows (or empties it, or removes the column), dragging it swaps it with another, *+ Column* adds one and
   *Reset* brings back the default. One line shows the same tiles in a row.
 
 ### Added

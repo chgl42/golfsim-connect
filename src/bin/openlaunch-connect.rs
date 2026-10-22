@@ -219,6 +219,8 @@ struct App {
     /// Session length when `all_shots` was loaded (new shots reload it).
     all_shots_session: usize,
     export_note: Option<String>,
+    /// Where the overlay preview's tiles were drawn (last frame).
+    overlay_tile_rects: std::cell::RefCell<Vec<(usize, usize, Rect)>>,
     /// Settings page: asking before the shots view is reset.
     confirm_reset: bool,
     /// Shots page: page shown, filter and selection.
@@ -257,6 +259,7 @@ impl App {
             all_shots: Vec::new(),
             all_shots_session: 0,
             export_note: None,
+            overlay_tile_rects: Default::default(),
             confirm_reset: false,
             explorer: explorer::ExplorerState::default(),
             preview_shot: {
@@ -849,7 +852,7 @@ impl App {
         });
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
-            ui.label(RichText::new(tr("Click a tile in the preview to choose what it shows.")).size(13.0).color(SOFT));
+            ui.label(RichText::new(tr("Click a tile in the preview to choose what it shows, drag it to move it.")).size(13.0).color(SOFT));
             ui.label(RichText::new(tr("The status always comes first; one line shows the tiles in a row.")).size(12.0).color(MUTED));
             ui.add_space(2.0);
             ui.horizontal(|ui| {
@@ -931,18 +934,40 @@ impl App {
         let clip = Rect::from_min_max(((area.min - origin) / scale).to_pos2(), ((area.max - origin) / scale).to_pos2());
         let tiles = overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(clip), Rect::from_min_size(egui::Pos2::ZERO, size), &content);
 
-        // A click on a tile picks what it shows (the status stays where it is).
+        // A click on a tile picks what it shows; dragging it onto another tile swaps the two (the
+        // status stays where it is).
         let to_page = |r: Rect| Rect::from_min_max(origin + r.min.to_vec2() * scale, origin + r.max.to_vec2() * scale);
-        for (k, row, r) in tiles {
-            if k == 0 && row == 0 {
-                continue;
-            }
-            let r = to_page(r).intersect(area);
-            let resp = ui.interact(r, ui.id().with(("overlay-tile", k, row)), Sense::click());
-            if resp.hovered() {
+        let tiles: Vec<(usize, usize, Rect)> =
+            tiles.into_iter().filter(|(k, row, _)| (*k, *row) != (0, 0)).map(|(k, row, r)| (k, row, to_page(r).intersect(area))).collect();
+        *self.overlay_tile_rects.borrow_mut() = tiles.clone();
+        let pointer = ui.ctx().pointer_interact_pos();
+        let mut swap: Option<((usize, usize), (usize, usize))> = None;
+        for &(k, row, r) in &tiles {
+            let resp = ui.interact(r, ui.id().with(("overlay-tile", k, row)), Sense::click_and_drag());
+            let target = pointer.and_then(|at| tiles.iter().find(|t| t.2.contains(at))).filter(|t| (t.0, t.1) != (k, row));
+            if resp.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("overlay-drag")));
+                fg.rect_filled(r, 4.0, Color32::from_black_alpha(90));
+                if let Some(t) = target {
+                    fg.rect_stroke(t.2.shrink(1.0), 4.0, Stroke::new(2.0, ACCENT), StrokeKind::Inside);
+                }
+                if let Some(at) = pointer {
+                    let name = style.layout.get(k).and_then(|c| c[row]).map_or(tr("Empty"), overlay_item_name);
+                    let galley = fg.layout_no_wrap(name.to_string(), FontId::proportional(12.0), WHITE);
+                    let label = Rect::from_min_size(at + vec2(12.0, 8.0), galley.size() + vec2(14.0, 6.0));
+                    fg.rect(label, 5.0, BUTTON, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+                    fg.galley(label.min + vec2(7.0, 3.0), galley, WHITE);
+                }
+            } else if resp.hovered() {
                 ui.painter().rect_stroke(r.shrink(1.0), 4.0, Stroke::new(1.0, ICON), StrokeKind::Inside);
             }
-            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tr("Choose what this tile shows"));
+            if resp.drag_stopped()
+                && let Some(t) = target
+            {
+                swap = Some(((k, row), (t.0, t.1)));
+            }
+            let resp = resp.on_hover_cursor(egui::CursorIcon::Grab).on_hover_text(tr("Click to choose what this tile shows, drag to move it"));
             egui::Popup::menu(&resp).show(|ui| {
                 let current = style.layout.get(k).and_then(|c| c[row]);
                 for item in OverlayItem::CHOICES {
@@ -958,6 +983,14 @@ impl App {
                     style.layout.remove(k);
                 }
             });
+        }
+        if let Some(((k1, r1), (k2, r2))) = swap
+            && k1 < style.layout.len()
+            && k2 < style.layout.len()
+        {
+            let a = style.layout[k1][r1];
+            style.layout[k1][r1] = style.layout[k2][r2];
+            style.layout[k2][r2] = a;
         }
     }
 
@@ -2687,6 +2720,38 @@ mod tests {
             harness.step();
         }
         save(&harness.render().unwrap(), "impact-shapes.png");
+    }
+
+    /// Dragging a tile in the overlay preview onto another swaps the two.
+    #[test]
+    fn overlay_tiles_are_dragged_into_place() {
+        use egui_kittest::Harness;
+
+        demo_state();
+        let settings = Settings { overlay: OverlayPos::TopRight, ..Settings::default() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(settings, tx)
+        });
+        harness.state_mut().page = Page::Overlay;
+        harness.state_mut().show_overlay = false;
+        harness.state_mut().remember_size = false;
+        for _ in 0..3 {
+            harness.step();
+        }
+        // Find two tiles by hovering over the preview: ball speed (column 1, top) and VLA (column 3, top).
+        let ids: Vec<(usize, usize, Rect)> = harness.state().overlay_tile_rects.borrow().clone();
+        let find = |k: usize, r: usize| ids.iter().find(|t| t.0 == k && t.1 == r).map(|t| t.2.center()).expect("tile");
+        let (from, to) = (find(1, 0), find(3, 0));
+        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        for event in [egui::Event::PointerMoved(from), press(from, true), egui::Event::PointerMoved(from + vec2(15.0, 0.0)), egui::Event::PointerMoved(to), press(to, false)] {
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.step();
+        let layout = &harness.state().saved.overlay_style.layout;
+        assert_eq!((layout[1][0], layout[3][0]), (Some(OverlayItem::Vla), Some(OverlayItem::BallSpeed)));
     }
 
     /// Layer transforms apply to every viewport: scaling the overlay must not shrink the main window.
