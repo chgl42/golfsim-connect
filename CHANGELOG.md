@@ -6,16 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Changed
-- **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash
-  factor and spin, VLA and HLA, distance to the pin and battery – followed by the impact graphics, with symbols
-  instead of words (a golf ball with speed lines, a driver, club face and ball, a ball with an arrow around it, a
-  stopwatch for the tempo, a flag). On the Overlay page a click on a tile in the preview picks what it shows (any
-  value, an impact graphic, which takes the column, or empty), lets a value fill its column in large figures
-  (*Double height*) or removes the column, dragging a tile swaps it with another or, dropped on the line between two
-  columns, puts it into a new column there, *+* after the last column adds one and *Reset* brings back the default.
-  One line shows the same tiles in a row.
-
 ### Added
 - **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
   the pin, from GSPro's results (in m or yd).
@@ -26,13 +16,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **3D flight tile, interactive:** drag to turn the camera, scroll to zoom, double-click to go back; switching between
   *Tee*, *Side view* and *Above* glides there. A new shot flies in real time with a tracer, bounces and rolls out, and ▶
   plays the selected (or latest) shot again.
-
-### Added
 - **Left/right in the tables:** the shots table shows where each ball landed left or right of the target line
   (*Side\**, e.g. *8 R*), the averages per club the mean side ± spread and the *Width\** of the dispersion
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
 ### Changed
+- **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash
+  factor and spin, VLA and HLA, distance to the pin and battery – followed by the impact graphics, with symbols
+  instead of words (a golf ball with speed lines, a driver, club face and ball, a ball with an arrow around it, a
+  stopwatch for the tempo, a flag). On the Overlay page a click on a tile in the preview picks what it shows (any
+  value, an impact graphic, which takes the column, or empty), lets a value fill its column in large figures
+  (*Double height*) or removes the column, dragging a tile swaps it with another or, dropped on the line between two
+  columns, puts it into a new column there, *+* after the last column adds one and *Reset* brings back the default.
+  One line shows the same tiles in a row.
 - **3D flight tile** looks like a driving range now: sky with haze at the horizon, mown fairway, target greens with
   flags and distance boards every 50 m (yd), height lines every 10 m. The flights cast shadows, fade in from the tee
   and get thinner further away; each landing is marked with a ring, followed by its bounces and roll. A selected
@@ -40,6 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   per club. *Above* looks diagonally from the top right at 45° (turned more to the side in wide tiles) zoomed onto
   the landing area over a range as wide as a real one, so it fills the tile; the tee view has height lines where the
   flights peak.
+
+### Fixed
+- The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
+  window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
 
 ## [1.1.0] – 2026-10-21
 

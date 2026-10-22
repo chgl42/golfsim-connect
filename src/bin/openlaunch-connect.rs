@@ -37,6 +37,8 @@ const BASE_SIZE: egui::Vec2 = vec2(1000.0, 470.0);
 const OVERLAY_SIZE: egui::Vec2 = vec2(400.0, 72.0);
 /// Distance of the overlay from the screen edges.
 const OVERLAY_MARGIN: f32 = 14.0;
+/// Transparent room around the overlay's panel inside its window.
+const OVERLAY_BORDER: f32 = 2.0;
 
 // GSPro in-game palette: deep navy chrome, slightly lighter stat tiles, blue accent.
 const PAGE: Color32 = Color32::from_rgb(0x0b, 0x12, 0x20);
@@ -219,6 +221,11 @@ struct App {
     /// Session length when `all_shots` was loaded (new shots reload it).
     all_shots_session: usize,
     export_note: Option<String>,
+    /// Where and how large the overlay window was first created (native points); later changes
+    /// go through AppKit.
+    overlay_first: Option<(egui::Pos2, egui::Vec2)>,
+    /// The overlay's size as measured in its own window (last frame).
+    overlay_base: std::cell::Cell<egui::Vec2>,
     /// Where the overlay preview's tiles were drawn (last frame).
     overlay_tile_rects: std::cell::RefCell<Vec<(usize, usize, Rect)>>,
     /// Settings page: asking before the shots view is reset.
@@ -259,6 +266,8 @@ impl App {
             all_shots: Vec::new(),
             all_shots_session: 0,
             export_note: None,
+            overlay_first: None,
+            overlay_base: std::cell::Cell::new(egui::Vec2::ZERO),
             overlay_tile_rects: Default::default(),
             confirm_reset: false,
             explorer: explorer::ExplorerState::default(),
@@ -781,19 +790,37 @@ impl App {
         };
         let style = &self.saved.overlay_style;
         let content = OverlayContent::live(style, self.saved.metric, self.saved.meters);
-        let base = content.size(ctx);
-        // Sizes are in points, which grow with the main window's zoom; divide it out so the
-        // overlay keeps its size on screen however large the main window is.
+        // Measured in the overlay's own window last frame, at least the size measured here.
+        let base = content.size(ctx).max(self.overlay_base.get());
+        // The overlay window's size and place go to the system in native points (without the
+        // zoom of egui's points, which the drawing below takes into account), within the part of
+        // the screen not covered by the menu bar and the Dock.
         let zoom = ctx.zoom_factor();
-        let scale = style.scale / zoom;
-        let (size, margin) = (base * scale, OVERLAY_MARGIN / zoom);
+        // A transparent border around the panel, so rounding the window to whole pixels never
+        // cuts its edge.
+        let size = (base + vec2(2.0, 2.0) * OVERLAY_BORDER) * style.scale;
+        #[cfg(target_os = "macos")]
+        let visible = mac::visible_frame();
+        #[cfg(not(target_os = "macos"))]
+        let visible: Option<Rect> = None;
+        let visible = visible.unwrap_or(Rect::from_min_size(egui::Pos2::ZERO, screen * zoom));
         // Never off the left or top edge, even when wider than the screen.
-        let free = (screen - size - vec2(2.0, 2.0) * margin).max(egui::Vec2::ZERO);
-        let pos = pos2(margin + free.x * ax, margin + free.y * ay);
+        let free = (visible.size() - size - vec2(2.0, 2.0) * OVERLAY_MARGIN).max(egui::Vec2::ZERO);
+        let pos = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
+        // On macOS the window is placed through AppKit (below): egui takes the size and place
+        // of this window in native points but reports them with the zoom, so the builder only
+        // gives the first ones and then stays the same.
+        #[cfg(target_os = "macos")]
+        let (pos, size_asked) = *self.overlay_first.get_or_insert((pos, size));
+        // Elsewhere through egui, in the overlay pass's points (zoomed by the overlay's size).
+        #[cfg(not(target_os = "macos"))]
+        let size_asked = size / style.scale;
+        #[cfg(not(target_os = "macos"))]
+        let pos = pos / style.scale;
         let builder = egui::ViewportBuilder::default()
             .with_title(OVERLAY_TITLE)
             .with_position(pos)
-            .with_inner_size(size)
+            .with_inner_size(size_asked)
             .with_decorations(false)
             .with_transparent(true)
             .with_resizable(false)
@@ -803,19 +830,29 @@ impl App {
             .with_active(false)
             .with_taskbar(false);
         let capture = &mut self.capture;
+        let overlay_base = &self.overlay_base;
+        let user_scale = style.scale;
+        #[cfg(target_os = "macos")]
+        let pos_native = visible.min + vec2(OVERLAY_MARGIN + free.x * ax, OVERLAY_MARGIN + free.y * ay);
+        // The overlay's pass takes the zoom from the options when it begins: the overlay's size
+        // there, the main window's back right after (no repaint is triggered either way).
+        ctx.options_mut(|o| o.zoom_factor = user_scale);
         ctx.show_viewport_immediate(overlay_id(), builder, |ui, _class| {
             #[cfg(target_os = "macos")]
             mac::float_over_fullscreen(OVERLAY_TITLE);
-            // Draw at the base size and scale the layer by size ÷ zoom (no input, so this is safe).
-            // Own layer: layer transforms apply to every viewport, and the main window draws on
-            // `ui.layer_id()` (the background layer) too.
-            let layer = overlay_layer();
-            ui.ctx().set_transform_layer(layer, egui::emath::TSTransform::from_scaling(scale));
-            // The clip rect is scaled with the layer, so it has to be the unscaled size.
-            let rect = Rect::from_min_size(egui::Pos2::ZERO, base);
-            overlay_ui(&ui.ctx().layer_painter(layer).with_clip_rect(rect), rect, &content);
+            // Measured here, in the overlay's own window (the next frame sizes the window by it).
+            let own = content.size(ui.ctx());
+            overlay_base.set(own);
+            #[cfg(target_os = "macos")]
+            mac::place_window(OVERLAY_TITLE, pos_native, size);
+
+            // This window's pass runs with the overlay's size as its zoom (set above), so the
+            // overlay is drawn at its base size: no scaling of shapes or layers needed.
+            let rect = Rect::from_min_size(pos2(OVERLAY_BORDER, OVERLAY_BORDER), own);
+            overlay_ui(&ui.ctx().layer_painter(overlay_layer()).with_clip_rect(rect.expand(OVERLAY_BORDER)), rect, &content);
             capture.save_from(ui.ctx());
         });
+        ctx.options_mut(|o| o.zoom_factor = zoom);
     }
 
     /// Overlay position, size and contents with a preview; changes apply and are saved at once.
@@ -1338,6 +1375,48 @@ mod mac {
 
     /// Aspect ratio the main window keeps while resizing (`None`: none, e.g. in full screen).
     static ASPECT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+    /// Put the content of the window titled `title` at `top_left` (points from the main screen's
+    /// top left corner) with `size` (points), if it isn't there already.
+    pub fn place_window(title: &str, top_left: eframe::egui::Pos2, size: eframe::egui::Vec2) {
+        use objc2_app_kit::NSScreen;
+        use objc2_foundation::{NSPoint, NSRect};
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some(screen) = NSScreen::mainScreen(mtm) else { return };
+        let full = screen.frame();
+        let title = NSString::from_str(title);
+        let windows = NSApplication::sharedApplication(mtm).windows();
+        let Some(window) = windows.iter().find(|w| w.title().isEqualToString(&title)) else { return };
+        // AppKit counts from the bottom left.
+        let content = NSRect::new(
+            NSPoint::new(full.origin.x + f64::from(top_left.x), full.origin.y + full.size.height - f64::from(top_left.y) - f64::from(size.y)),
+            NSSize::new(size.x.into(), size.y.into()),
+        );
+        let frame = window.frameRectForContentRect(content);
+        let now = window.frame();
+        let off = (now.origin.x - frame.origin.x).abs()
+            + (now.origin.y - frame.origin.y).abs()
+            + (now.size.width - frame.size.width).abs()
+            + (now.size.height - frame.size.height).abs();
+        if off > 0.5 {
+            window.setFrame_display(frame, true);
+        }
+    }
+
+    /// The main screen without the menu bar and the Dock, in points from its top left corner.
+    pub fn visible_frame() -> Option<eframe::egui::Rect> {
+        use objc2_app_kit::NSScreen;
+        let mtm = MainThreadMarker::new()?;
+        let screen = NSScreen::mainScreen(mtm)?;
+        let (full, visible) = (screen.frame(), screen.visibleFrame());
+        // AppKit counts from the bottom left.
+        let top = (full.origin.y + full.size.height) - (visible.origin.y + visible.size.height);
+        let left = visible.origin.x - full.origin.x;
+        Some(eframe::egui::Rect::from_min_size(
+            eframe::egui::pos2(left as f32, top as f32),
+            eframe::egui::vec2(visible.size.width as f32, visible.size.height as f32),
+        ))
+    }
 
     /// Largest content size the window titled `title` can have on its screen: the visible frame
     /// (without menu bar and Dock) minus the title bar, in points. `None` before the window exists.
@@ -1952,7 +2031,8 @@ impl OverlayContent {
     fn size(&self, ctx: &egui::Context) -> egui::Vec2 {
         let measure = |text: &str, font: FontId| ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font, WHITE).size().x);
         let (tiles, height) = self.tiles(&measure);
-        let width = tiles.last().map_or(TILE_PAD_L, |t| t.0 + t.1) + TILE_PAD_R;
+        // A little room to spare: text laid out at another scale may come out a bit wider.
+        let width = tiles.last().map_or(TILE_PAD_L, |t| t.0 + t.1) + TILE_PAD_R + 4.0;
         vec2(width.ceil(), height)
     }
 
@@ -3013,7 +3093,7 @@ mod tests {
         assert!(harness.state().overlay_tile_rects.borrow().iter().any(|t| t.0 == n - 1), "the empty column has places");
     }
 
-    /// Layer transforms apply to every viewport: scaling the overlay must not shrink the main window.
+    /// Scaling the overlay must not shrink the main window.
     #[test]
     fn overlay_scaling_leaves_the_main_window_alone() {
         use egui_kittest::Harness;
@@ -3035,8 +3115,9 @@ mod tests {
         }
         let ctx = &harness.ctx;
         assert!(ctx.zoom_factor() > 1.0);
+        // The overlay is sized by the zoom of its own pass; the main window keeps its zoom.
         assert_eq!(ctx.layer_transform_to_global(egui::LayerId::background()), None);
-        assert!(ctx.layer_transform_to_global(overlay_layer()).is_some(), "overlay drawn");
+        assert_eq!(ctx.layer_transform_to_global(overlay_layer()), None);
     }
 
     #[test]
