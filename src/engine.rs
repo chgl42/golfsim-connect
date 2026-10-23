@@ -11,7 +11,7 @@ use tenover::{Client, Event};
 use crate::gspro::{Cmd, Link};
 use crate::state::{self, R10Status};
 use crate::notify::{self, Alert};
-use crate::{log, mapping};
+use crate::{events, log, mapping};
 
 const BLE_RETRY: Duration = Duration::from_secs(5);
 /// Battery level (percent) at which the app warns; matches the red battery glyph.
@@ -333,6 +333,7 @@ fn run_session<T: tenover::Transport>(
             }
             if level <= LOW_BATTERY && last_battery.is_none_or(|prev| prev > LOW_BATTERY) {
                 notify::alert(Alert::BatteryLow, &format!("R10 battery low ({level} %)"));
+                events::publish(events::Event::BatteryLow { level });
             }
             last_battery = Some(level);
             state::with(|s| s.r10_battery = Some(level));
@@ -419,6 +420,7 @@ fn run_session<T: tenover::Transport>(
                     };
                     log::r10(&format!("⚠️  {what} [{:?}]", err.severity));
                     notify::alert(Alert::DeviceError, &what);
+                    events::publish(events::Event::DeviceError { what: what.clone() });
                     state::set_r10(R10Status::Connected, what);
                 }
                 Event::Shot(shot) => handle_shot(cfg, &shot, tx),

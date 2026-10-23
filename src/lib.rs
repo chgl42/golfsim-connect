@@ -4,6 +4,7 @@
 //! R10 ──BLE──> bridge ──TCP 127.0.0.1:921──> GSPro
 
 pub mod engine;
+pub mod events;
 pub mod flight;
 pub mod gspro;
 pub mod gspro_db;
@@ -14,6 +15,7 @@ pub mod log;
 pub mod mapping;
 pub mod misread;
 pub mod notify;
+pub mod recorder;
 pub mod settings;
 pub mod shape;
 pub mod state;

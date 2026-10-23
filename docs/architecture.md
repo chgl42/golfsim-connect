@@ -44,8 +44,10 @@ One crate with a library and two binaries.
 |---|---|---|
 | `engine` | Starts the bridge threads; the R10 loop (scan, connect, reconnect, events → status); demo and test shots | Mixes the R10 adapter with generic start-up and demo code |
 | `mapping` | R10 data → OpenConnect units (m/s → mph, spin axis inverted, back/side spin), swing tempo | Deep, pure |
-| `gspro` | OpenConnect client `Link`: one JSON per read, pacing, replies 200/201/5xx, heartbeats, reconnect, holding a shot while GSPro is away | Deep; also records shots (history, notifications) |
-| `gspro_db` | GSPro's own results from `GSPro.db` (`LastShot`), matched to our shots by ball speed and launch angle | Deep |
+| `gspro` | OpenConnect client `Link`: one JSON per read, pacing, replies 200/201/5xx, heartbeats, reconnect, holding a shot while GSPro is away | Deep; hands each shot to the recorder |
+| `gspro_db` | GSPro's own results from `GSPro.db` (`LastShot`), matched to our shots by ball speed and launch angle | Deep; hands each result to the recorder |
+| `recorder` | Records a shot and GSPro's result of a shot: state, session, `shots.jsonl`, notification, then the event | Small |
+| `events` | Bridge events: `subscribe()` → mpsc receiver, `publish()` to every subscriber ([ADR-007](adr/adr-007-bridge-events.md)) | Small, one enum and two functions |
 | `flight` | Estimated ball flight (drag/lift, 3D, roll-out) when GSPro's result is missing | Deep, pure |
 | `misread` | Plausibility check: marks a shot with a reading no club gives (left out of stats, still sent to GSPro) | Small, pure |
 | `shape` | Shot shape names (e.g. "Push-Draw") from start direction and spin axis | Deep, pure |
@@ -90,12 +92,20 @@ flowchart TB
   UI["GUI<br/>repaints every 250 ms"]
   S[("state<br/>(global mutex)")]
   H[("shots.jsonl")]
+  REC["recorder"]
+  EV{{"events<br/>(mpsc fan-out)"}}
+  SUB["subscribers<br/>(extensions)"]
   R -- "Cmd::Shot (mpsc)" --> G
   R -- "R10 status, battery" --> S
-  G -- "GSPro status, club, last shot, session" --> S
-  G -- "append" --> H
-  D -- "GSPro result" --> S
-  D -- "update" --> H
+  G -- "GSPro status, club" --> S
+  G -- "shot sent / given up" --> REC
+  D -- "matched result" --> REC
+  REC -- "last shot, session, result" --> S
+  REC -- "append / update" --> H
+  R -- "R10Status, BatteryLow, DeviceError" --> EV
+  G -- "GsproStatus" --> EV
+  REC -- "ShotRecorded, GsproResult" --> EV
+  EV --> SUB
   UI -- "reads" --> S
   UI -- "Cmd::Shot (test shot)" --> G
 ```
@@ -109,16 +119,20 @@ sequenceDiagram
   participant L as gspro::Link
   participant GS as GSPro
   participant DB as gspro_db
+  participant RC as recorder
   participant UI as GUI
   R10->>E: ball + club data (BLE notification)
   E->>E: mapping: units, spin axis, tempo
   E->>L: Cmd::Shot
   L->>GS: one JSON message (mph)
   GS-->>L: 200 (or nothing – not an error)
-  L->>L: record_shot: state, session, shots.jsonl
+  L->>RC: record_shot
+  RC->>RC: state, session, shots.jsonl, then publish ShotRecorded
   GS->>GS: simulates, writes LastShot
   DB->>DB: next poll finds the new row
-  DB->>DB: match by ball speed + VLA, attach result
+  DB->>DB: match by ball speed + VLA
+  DB->>RC: gspro_result
+  RC->>RC: state, shots.jsonl, then publish GsproResult
   UI->>UI: next repaint shows GSPro's carry / total / to pin
 ```
 
@@ -127,12 +141,18 @@ shots ignored, focus under CrossOver) are listed in [CLAUDE.md](../CLAUDE.md).
 
 ### Shared state
 
-There is no event or observer mechanism yet: the threads write into `state`, and the GUI polls it
-and compares what changed (for example the key of the last session shot).
+The threads write into `state`, the snapshot the GUI draws each frame. What happens is also
+published as an `events::Event` ([ADR-007](adr/adr-007-bridge-events.md)): `ShotRecorded`,
+`GsproResult`, `R10Status` and `GsproStatus` (on a change), `BatteryLow`, `DeviceError`. Every
+receiver from `events::subscribe()` gets every event, in the same order; an event is published
+after its state is written, and publishing never blocks. Nothing in the app subscribes yet: the
+GUI still compares the key of the last shot of the list a tile shows to animate a new shot, since
+that list isn't always the session (all time, the preview's sample shot).
 
 | Global | Written by | Read by |
 |---|---|---|
-| `state::STATE` (via `state::with`) | engine, gspro, gspro_db, update, log | GUI |
+| `state::STATE` (via `state::with`) | engine, gspro, recorder, gspro_db (reads), update, log | GUI |
+| `events` subscribers | `events::subscribe` | `events::publish` (engine, `state::set_r10`/`set_gspro`, recorder) |
 | `history::PERSIST` | `engine::start` (off in demo mode) | history writes |
 | `settings::SAVE` | tests (off) | `Settings::save` |
 | `gspro::DEBUG` | GUI, CLI | `Link` |
@@ -144,7 +164,7 @@ and compares what changed (for example the key of the last session shot).
 | What | Where | Written by | Notes |
 |---|---|---|---|
 | Settings | `~/Library/Application Support/OpenLaunch Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; old folder names migrated on start |
-| Shot history | `…/OpenLaunch Connect/shots.jsonl` | `gspro` (append), `gspro_db` (GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
+| Shot history | `…/OpenLaunch Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | App log | stderr + the last 400 lines in `state` | `log` | English |
 
@@ -175,8 +195,10 @@ can be added without editing the core in many places.
   unreadable file is kept as `settings.json.bad` ([ADR-006](adr/adr-006-settings-tolerate-unknown-values.md)).
   The GUI changes settings through one method, `App::change_settings`. Left: unknown keys inside
   nested objects and dropped entries are still lost on the next save.
-- **Events**: "shot recorded", "GSPro result arrived" and "R10 ready/problem" exist only as changes
-  inside `state`. Recording a shot happens inside the protocol code of `gspro`.
+- **Events**: shots, GSPro's results and status changes are published as events
+  ([ADR-007](adr/adr-007-bridge-events.md)), and recording moved from `gspro` into `recorder`.
+  Left: the GUI doesn't subscribe yet (it diffs the shots a tile shows), and events published
+  before a subscriber subscribed aren't replayed.
 - **Tile kinds**: a new kind touches about ten places in three files.
 - **Pages**: page state lives as fields of `App` (28 fields); a new page touches five places.
 - **UI building blocks and translations** are private to the app binary and to one `match`, so

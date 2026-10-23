@@ -29,6 +29,10 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `gspro.rs` – OpenConnect client (`Link`), heartbeats, reconnect, reply parsing (codes 200/201/5xx)
   - `mapping.rs` – R10 data → OpenConnect (m/s → mph, **spin axis inverted**, back/side spin from total + axis), `Tempo`
   - `state.rs` – shared status for the GUI (R10/GSPro status, device, battery, last shot, session shots, club/hand, log)
+  - `events.rs` – bridge events (`Event`: shot recorded, GSPro result, R10/GSPro status, battery low, device error):
+    `subscribe()` → std mpsc receiver, `publish()` fans out and never blocks (ADR-007)
+  - `recorder.rs` – records a shot the GSPro link handed over and GSPro's result of a shot (state, session,
+    `shots.jsonl`, notification), then publishes the event; `gspro.rs` and `gspro_db.rs` only call it
   - `history.rs` – shot history: `shots.jsonl` (append, not in demo mode), per-club stats, CSV export
     (OpenLaunch / Garmin Golf / Awesome Golf layouts), smash factor. Test shots (`Cmd::Shot { test: true }`) go to GSPro
     but not into the history.
