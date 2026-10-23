@@ -53,10 +53,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   per club. *Above* looks diagonally from the top right at 45° (turned more to the side in wide tiles) zoomed onto
   the landing area over a range as wide as a real one, so it fills the tile; the tee view has height lines where the
   flights peak.
-
 - **Shot shapes:** a shot counts as *push* or *pull* from 3° off the target line (was 2°, about 5 m at 150 m),
   and the overlay's top view bends the flight only when the shape is named with a curve (from 3° of spin axis), so
   graphic and name always agree.
+- **Overlay keeps its size:** a message (no R10, no GSPro, shot not delivered) now lies on a band over the values,
+  and the last shot's values stay dimmed underneath instead of disappearing; before the first shot each value
+  shows a dash. Every column is as wide as its widest value, so the overlay no longer changes width from shot to
+  shot. The status words are shorter: *No GSPro* and *Not ready*.
 
 ### Fixed
 - The overlays covered every window: they now sit right above GSPro – on top while GSPro is in front or the top window
