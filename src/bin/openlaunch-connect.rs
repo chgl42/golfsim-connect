@@ -19,6 +19,7 @@ use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
 use openlaunch_connect::num;
 use openlaunch_connect::log;
+use openlaunch_connect::misread::Misread;
 use openlaunch_connect::settings::{Arrangement, DEFAULT_ARRANGEMENT, OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
 use openlaunch_connect::shape::{Curve, Shape};
 use openlaunch_connect::state::{self, R10Status};
@@ -321,6 +322,7 @@ impl App {
                     at: Instant::now(),
                     delivered: true,
                     shot_number: 0,
+                    misread: None,
                 }
             },
             overlay_tab: None,
@@ -528,10 +530,10 @@ impl App {
                     FontId::proportional(12.0),
                     MUTED,
                 );
-                let (dot, what) = if s.delivered {
-                    (GREEN, tr("delivered to GSPro"))
-                } else {
-                    (AMBER, tr("NOT delivered to GSPro"))
+                let (dot, what) = match (s.delivered, s.misread) {
+                    (false, _) => (AMBER, tr("NOT delivered to GSPro").to_string()),
+                    (true, Some(m)) => (AMBER, tr("Misread? ({r})").replace("{r}", misread_name(m))),
+                    (true, None) => (GREEN, tr("delivered to GSPro").to_string()),
                 };
                 let y = last_r.bottom() - 18.0;
                 p.circle_filled(pos2(last_r.left() + 18.0, y), 4.0, dot);
@@ -2609,7 +2611,7 @@ impl OverlayContent {
         let shot = last.filter(|_| message.is_none());
         let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
         let value = |glyph, text: String| Some(Cell::Value { glyph, text, color: WHITE });
-        let cell = |item: OverlayItem| -> Option<Cell> {
+        let value_cell = |item: OverlayItem| -> Option<Cell> {
             match item {
                 OverlayItem::Status => Some(Cell::Status),
                 OverlayItem::Club => club.map(|c| Cell::Value { glyph: None, text: club_name(c), color: SOFT }),
@@ -2632,6 +2634,25 @@ impl OverlayContent {
                     }
                 }
             }
+        };
+        // The value that looks misread stands out.
+        let suspect = |item: OverlayItem| {
+            shot.and_then(|s| s.misread).is_some_and(|m| match m {
+                Misread::Spin => item == OverlayItem::Spin,
+                Misread::Launch => item == OverlayItem::Vla,
+                Misread::Direction => item == OverlayItem::Hla,
+                Misread::SpinAxis => item == OverlayItem::SpinAxis,
+                Misread::Smash => matches!(item, OverlayItem::Smash | OverlayItem::ClubSpeed),
+            })
+        };
+        let cell = |item: OverlayItem| -> Option<Cell> {
+            let mut cell = value_cell(item)?;
+            if suspect(item)
+                && let Cell::Value { color, .. } = &mut cell
+            {
+                *color = AMBER;
+            }
+            Some(cell)
         };
         // A graphic fills its column.
         let mut columns: Vec<[Option<Cell>; 2]> = style
@@ -3073,6 +3094,17 @@ fn draw_glyph(p: &egui::Painter, c: egui::Pos2, glyph: Glyph, color: Color32) {
 }
 
 /// A shot shape's name in the language shown ("Straight" is the only one golfers translate).
+/// The reading that looks misread, for the UI.
+fn misread_name(m: Misread) -> &'static str {
+    match m {
+        Misread::Spin => tr("spin"),
+        Misread::Launch => tr("launch angle"),
+        Misread::Direction => tr("start direction"),
+        Misread::SpinAxis => tr("spin axis"),
+        Misread::Smash => tr("smash factor"),
+    }
+}
+
 fn shape_name(shape: Shape) -> String {
     let name = shape.name();
     if name == "Straight" { tr("Straight").to_string() } else { name }
@@ -3488,6 +3520,7 @@ mod tests {
                 at: Instant::now().checked_sub(Duration::from_secs(4)).unwrap_or_else(Instant::now),
                 delivered: true,
                 shot_number: 56_728_296,
+                misread: None,
             });
             s.log.clear();
         });

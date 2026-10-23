@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   in the head is the arrangement in use – click it to switch, rename, save the overlays as a new arrangement (e.g.
   *Range* with dispersion and 3D flight, *Course* with only the status) or delete one. Every change is kept in the
   arrangement in use. With more than one, the Play page shows *Overlay: …* to switch quickly.
+- **Misreads are caught:** a shot with a reading no real shot gives – no spin measured, a launch angle above 60°,
+  a start direction or spin axis far off, a smash factor no club reaches – still goes to GSPro, but is left out of
+  the stats and exports right away (*excluded* on the shots page, *Count* takes it back). The overlay shows the
+  doubtful value in amber, the Play page says *Misread? (spin)*.
 - **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
   the pin, from GSPro's results (in m or yd).
 - **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle
