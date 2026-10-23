@@ -75,6 +75,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   press *Reset GSPro Connect* in GSPro's settings; the hint goes away as soon as GSPro answers again.
 - The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
   window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
+- Settings no longer reset to the defaults when they contain a value this version doesn't know (e.g. written by a
+  newer version): only that tile or overlay item is left out, everything else is kept, and settings this version
+  doesn't know at all are saved back unchanged. A settings file that can't be read at all is kept as
+  `settings.json.bad` next to it instead of being overwritten.
 
 ## [1.1.0] – 2026-10-21
 
