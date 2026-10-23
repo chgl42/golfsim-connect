@@ -70,6 +70,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   behind GSPro.
 - A shot hit while GSPro was reconnecting (e.g. after a restart of GSPro) was dropped; it now waits up to 10 s for
   GSPro and is sent as soon as it is back.
+- When GSPro Connect got stuck (e.g. still holding the connection of an earlier run), the app said *connected*
+  while no shot arrived. After two shots without any answer from GSPro it now shows *No GSPro* with the hint to
+  press *Reset GSPro Connect* in GSPro's settings; the hint goes away as soon as GSPro answers again.
 - The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
   window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
 

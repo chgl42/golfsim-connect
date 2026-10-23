@@ -20,6 +20,10 @@ use crate::mapping::{GsBall, GsClub, Tempo};
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(3);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+/// Shots in a row without any answer from GSPro: GSPro Connect is stuck (e.g. still holding the
+/// connection of an earlier run, so it never reads this one) and its *Reset GSPro Connect* helps.
+/// (GSPro doesn't always answer a shot or a heartbeat, so one silent shot means nothing.)
+const UNANSWERED_SHOTS: u32 = 2;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// GSPro parses one JSON message per TCP read and rejects concatenated
 /// messages ("501 Bad format"), so messages must never be sent back to back.
@@ -128,6 +132,12 @@ pub struct Link {
     warned_unreachable: bool,
     /// A shot was sent and GSPro has not confirmed it yet.
     awaiting_shot_ack: bool,
+    /// Shots sent since GSPro last answered anything (see [`UNANSWERED_SHOTS`]).
+    unanswered: u32,
+    /// GSPro Connect doesn't answer; "connected" again once it does or on a new connection.
+    silent: bool,
+    /// The status shown while connected, e.g. "Connected (127.0.0.1:921)".
+    connected_detail: String,
     /// A shot that came while GSPro wasn't connected, sent when it is back (within [`HOLD_SHOT`]).
     held: Option<Held>,
 }
@@ -155,6 +165,9 @@ impl Link {
             last_send: None,
             warned_unreachable: false,
             awaiting_shot_ack: false,
+            unanswered: 0,
+            silent: false,
+            connected_detail: String::new(),
             held: None,
         }
     }
@@ -245,6 +258,7 @@ impl Link {
         if delivered {
             if self.awaiting_shot_ack {
                 log::gspro("No direct reply from GSPro to the shot.");
+                self.count_unanswered();
             }
         } else {
             self.awaiting_shot_ack = false;
@@ -285,7 +299,11 @@ impl Link {
                     self.rx_buf.clear();
                     self.warned_unreachable = false;
                     log::gspro(&format!("✅ Connected to GSPro OpenConnect ({addr})"));
-                    state::set_gspro(true, format!("Connected ({addr})")); // "(…)" suffix: see i18n::tr_detail
+                    self.connected_detail = format!("Connected ({addr})"); // "(…)" suffix: see i18n::tr_detail
+                    // A new connection gets a new chance (GSPro doesn't answer heartbeats, only shots).
+                    self.silent = false;
+                    self.unanswered = 0;
+                    state::set_gspro(true, self.connected_detail.clone());
                     self.send_heartbeat();
                     return;
                 }
@@ -397,9 +415,29 @@ impl Link {
         responses.len()
     }
 
+    /// A shot went out: after [`UNANSWERED_SHOTS`] without a word from GSPro, say how to fix it.
+    fn count_unanswered(&mut self) {
+        self.unanswered += 1;
+        if self.unanswered < UNANSWERED_SHOTS {
+            return;
+        }
+        if !self.silent {
+            log::gspro("⚠️  GSPro Connect doesn't answer – press Reset GSPro Connect in GSPro's settings.");
+            notify::alert(Alert::GsproLost, "GSPro connection lost");
+            self.silent = true;
+        }
+        state::set_gspro(false, "GSPro Connect doesn't answer – press Reset GSPro Connect in GSPro's settings");
+    }
+
     fn handle_response(&mut self, resp: &Value) {
         if debug_on(self.debug) {
             log::gspro(&format!("IN  {resp}"));
+        }
+        self.unanswered = 0;
+        if self.silent {
+            self.silent = false;
+            log::gspro("GSPro Connect answers again.");
+            state::set_gspro(true, self.connected_detail.clone());
         }
         let code = resp.get("Code").and_then(Value::as_i64).unwrap_or(0);
         let msg = resp.get("Message").and_then(Value::as_str).unwrap_or("");
@@ -516,6 +554,19 @@ mod tests {
         link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: true });
         assert_eq!(state::with(|s| s.last_shot.as_ref().map(|s| s.delivered)), Some(false));
         assert!(!link.ready);
+    }
+
+    /// Shots that GSPro never answers: after two the app says how to fix it, an answer clears it.
+    #[test]
+    fn silent_gspro_connect_is_reported() {
+        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let mut link = Link::new("127.0.0.1:1".into(), false);
+        link.count_unanswered();
+        assert!(!link.silent, "one silent shot means nothing");
+        link.count_unanswered();
+        assert!(link.silent);
+        link.handle_response(&serde_json::json!({"Code": 200, "Message": "OK"}));
+        assert!(!link.silent, "an answer clears it");
     }
 
     /// A shot while GSPro is away waits for it and goes out once it is back.
