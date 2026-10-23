@@ -131,7 +131,7 @@ pub(super) struct TileView {
     zoom: f32,
     camera: Option<Camera>,
     shown: Option<Cam>,
-    from: Option<(Cam, std::time::Instant)>,
+    from: Option<(Cam, Instant)>,
 }
 
 #[cfg(test)]
@@ -291,7 +291,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     // A different preset glides there and starts from it unturned.
     if tv.camera.is_some_and(|c| c != camera) {
         if let Some(shown) = tv.shown {
-            tv.from = Some((shown, std::time::Instant::now()));
+            tv.from = Some((shown, Instant::now()));
         }
         (tv.yaw, tv.pitch, tv.zoom) = (0.0, 0.0, 1.0);
     }
@@ -552,7 +552,7 @@ fn draw_track(p: &egui::Painter, t: &Track, screen: &Screen, depth: &dyn Fn([f32
         }
         let pts: Vec<egui::Pos2> = air[from..=to].iter().filter_map(|q| to_screen(*q)).collect();
         let along = (from + to) as f32 / 2.0 / (n - 1) as f32;
-        let d = depth(air[(from + to) / 2]);
+        let d = depth(air[usize::midpoint(from, to)]);
         let alpha = (0.6 + 0.4 * along.powf(0.7)) * t.weight * d.clamp(0.8, 1.1);
         p.add(egui::Shape::line(pts, Stroke::new(base_w * d, color.gamma_multiply(alpha.min(1.0)))));
     }
@@ -598,7 +598,6 @@ fn draw_track(p: &egui::Painter, t: &Track, screen: &Screen, depth: &dyn Fn([f32
 
 /// Sky with haze at the horizon, rough and fairway with mowing stripes, target greens with flags,
 /// distance boards and the target line; from the side, height lines every 10 m.
-#[allow(clippy::too_many_arguments)]
 fn draw_range(
     p: &egui::Painter,
     rect: Rect,

@@ -6,8 +6,7 @@ fn stamp() -> String {
     // Local time of day (HH:MM:SS), without pulling in a date/time crate.
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let local = secs.wrapping_add_signed(local_offset_secs());
     let day = local % 86_400;
     format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
@@ -19,7 +18,7 @@ fn local_offset_secs() -> i64 {
     unsafe {
         let now = libc_time();
         let mut tm: Tm = std::mem::zeroed();
-        if localtime_r(&now, &mut tm).is_null() {
+        if localtime_r(&raw const now, &raw mut tm).is_null() {
             return 0;
         }
         tm.tm_gmtoff

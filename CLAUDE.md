@@ -112,6 +112,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   follow the log (the Bluetooth permission belongs to the app; a CLI without a GUI parent process may get
   "Permission denied").
 - Linux build/tests work (`cargo test --all-targets`); BlueZ needs `libdbus-1-dev`.
+- Lint like CI before committing: `cargo clippy --all-targets --locked -- -D warnings` (see *Code quality*).
 - Test the GSPro side without GSPro: `tools/mock_gspro.py [port]` expects exactly one JSON per `recv()`, answers 501
   otherwise and 200 + 201 for shots. Use `--gspro 127.0.0.1:<port>`.
 - README screenshots are rendered offscreen with egui_kittest (no window, no screen recording permission):
@@ -125,6 +126,22 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   a 65-shot range session with a full bag of fourteen clubs, `engine::demo_range()`, to try the explorer; on the MacBook:
   `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=settings|overlay|log|shots`
   opens another page; `OPENLAUNCH_SCREENSHOT[_OVERLAY]=<png>` saves the visible window and quits.
+
+## Code quality
+
+- **Clippy:** CI runs `cargo clippy --all-targets --locked -- -D warnings` before the tests – every warning fails
+  the build. `[lints]` in `Cargo.toml` turns on `clippy::pedantic`; its `"allow"` entries are a **ratchet**: the
+  lints that fired when it was set up, each with its count then. Don't add entries; to pay one down, delete the
+  line and fix what clippy reports (or `#[expect]` the spots where the code is right as it is).
+  `vendor/tenover` is its own package and not linted.
+- No bare `#[allow]`: where code is right despite a lint, use `#[expect(lint, reason = "…")]` with a real reason
+  (`allow_attributes[_without_reason]` warn; an `expect` that no longer fires is a warning too).
+  `clippy.toml` lets tests use `unwrap`/`expect`.
+- **No formatter:** the code is formatted by hand – never run `cargo fmt`/rustfmt; match the surrounding style.
+- **Definition of Done** for a PR: clippy clean; `cargo test --all-targets` green; new logic has tests; user-visible
+  changes in the CHANGELOG; new UI texts through `tr()` with a German translation; for UI changes the screenshots
+  rendered (`readme_screenshots`) and looked at; Bluetooth, GSPro and overlay paths tested on the MacBook with
+  the real setup; a decision that shapes the code gets an ADR in `docs/adr/`.
 
 ## Workflow
 

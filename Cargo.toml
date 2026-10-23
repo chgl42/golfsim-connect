@@ -45,3 +45,38 @@ rfd = "0.17.2"
 
 [dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot", "eframe"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_qualifications = "warn"
+
+# Pedantic is on; the allows below are a ratchet baseline: each lint that fired when this was set up,
+# with its count then. To pay one down: remove the line, fix what `cargo clippy --all-targets` reports
+# (or `#[expect(…, reason = "…")]` where the code is right as it is), and never add new entries.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "warn"
+allow_attributes = "warn"
+dbg_macro = "warn"
+doc_markdown = "allow"                          # 151
+cast_precision_loss = "allow"                   # 61
+cast_possible_truncation = "allow"              # 51
+many_single_char_names = "allow"                # 16
+cast_sign_loss = "allow"                        # 15
+struct_field_names = "allow"                    # 12
+match_same_arms = "allow"                       # 8
+too_many_lines = "allow"                        # 8
+missing_panics_doc = "allow"                    # 6
+struct_excessive_bools = "allow"                # 5
+format_push_string = "allow"                    # 3
+option_option = "allow"                         # 3
+single_match_else = "allow"                     # 3
+unchecked_time_subtraction = "allow"            # 3
+assert_is_empty = "allow"                       # 2
+items_after_statements = "allow"                # 2
+needless_pass_by_value = "allow"                # 2
+similar_names = "allow"                         # 2
+wildcard_imports = "allow"                      # 2
+bool_to_int_with_if = "allow"                   # 1
+case_sensitive_file_extension_comparisons = "allow" # 1
+missing_errors_doc = "allow"                    # 1
