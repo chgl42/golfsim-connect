@@ -32,8 +32,8 @@ all, and an older build dropped a tile whose kind it didn't know (ADR-006).
   `Camera`). Drawing helpers several kinds use (dots, spread, club groups) stay in `explorer.rs`.
 - **A registry function,** not an argument of `ui::run`: `explorer::register_tile_kind(&Kind)`
   before `ui::run`. The core's kinds come first, registered ones after them in the menus; an id
-  that is already there is left out. A function keeps `ui::run`'s signature free for the pages
-  (#74) and works the same as `i18n::register` (ADR-008).
+  that is already there is left out. A function keeps kinds out of `ui::run_with`, which takes the
+  pages ([ADR-010](adr-010-pages-own-their-state.md)), and works the same as `i18n::register` (ADR-008).
 - **Settings:** `Tile` is `{ kind: String, size, config }`, with `config` a JSON map flattened next
   to `kind` and `size`. The file format stays as it was – today's files load unchanged and
   earlier builds read the new ones – and each kind reads its own fields as its own type
@@ -56,8 +56,8 @@ all, and an older build dropped a tile whose kind it didn't know (ADR-006).
 
 ## Alternatives considered
 
-- Kinds passed into `ui::run(options)` – would collide with #74's pages and change `run`'s
-  signature for every caller.
+- Kinds passed into `ui::run_with` next to the pages – changes its signature for every caller,
+  for something that is registered once like translations.
 - A nested `"config": { … }` object per tile – cleaner on disk, but needs a migration and an
   earlier build would lose every tile's switches.
 - One `serde_json::Value` per kind (`"configs": { "table": {…} }`) – keeps switches per kind

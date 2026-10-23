@@ -1,6 +1,7 @@
 //! The desktop app around the R10 → GSPro bridge (egui/eframe), styled after GSPro's in-game
 //! interface: pages, overlay windows, the shots explorer. Behind the `gui` feature; the binary
-//! `openlaunch-connect` only calls [`run`].
+//! `openlaunch-connect` only calls [`run`]. Another crate builds its own app with
+//! [`run_with`] and its own [`Page`]s.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -33,8 +34,10 @@ pub mod kit;
 #[cfg(target_os = "macos")]
 mod mac;
 mod overlay;
+mod page;
 
 use kit::*;
+pub use page::{AppCtx, Page};
 use overlay::*;
 
 const APP_NAME: &str = "OpenLaunch Connect";
@@ -56,6 +59,15 @@ const OVERLAY_BORDER: f32 = 2.0;
 /// # Errors
 /// Returns eframe's error if the window can't be created.
 pub fn run() -> eframe::Result {
+    run_with(Vec::new())
+}
+
+/// Like [`run`], with more pages: `pages` (e.g. of another crate) come in the navigation after
+/// the core pages, before *Settings*, in the order given.
+///
+/// # Errors
+/// Returns eframe's error if the window can't be created.
+pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     Settings::migrate_data_dir();
     let settings = Settings::load();
     i18n::set(settings.language);
@@ -94,7 +106,7 @@ pub fn run() -> eframe::Result {
         options,
         Box::new(move |cc| {
             setup_style(&cc.egui_ctx);
-            Ok(Box::new(App::new(settings, tx)))
+            Ok(Box::new(App::with_pages(settings, tx, pages)))
         }),
     )
 }
@@ -117,21 +129,14 @@ fn start_gspro(path: &std::path::Path, addr: &str) {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
-    Play,
-    Shots,
-    Log,
-    Overlay,
-    Settings,
-}
-
 struct App {
     tx: Sender<Cmd>,
     saved: Settings,
+    /// The Settings page's copy, which every change through `AppCtx::change_settings` reaches too.
     edit: Settings,
-    note: Option<String>,
-    page: Page,
+    /// The pages in the order of the navigation (`page::pages`), and the one shown.
+    pages: Vec<Box<dyn Page>>,
+    page: usize,
     capture: Capture,
     /// Open the overlay window (off for offscreen screenshots, where it would be embedded).
     show_overlay: bool,
@@ -144,13 +149,6 @@ struct App {
     aspect_locked: Option<bool>,
     /// Interface size whose minimum window size was last applied (`None` until then).
     applied_scale: Option<Option<f32>>,
-    /// Shots page: show all recorded shots instead of this session.
-    all_time: bool,
-    /// Cached contents of the history file (loaded when "All time" is chosen).
-    all_shots: Vec<ShotRecord>,
-    /// Session length when `all_shots` was loaded (new shots reload it).
-    all_shots_session: usize,
-    export_note: Option<String>,
     /// Where and how large the overlay window was first created (native points); later changes
     /// go through AppKit.
     overlay_first: Option<(egui::Pos2, egui::Vec2)>,
@@ -162,18 +160,8 @@ struct App {
     all_covered: bool,
     /// The overlay's size as measured in its own window (last frame).
     overlay_base: std::cell::Cell<egui::Vec2>,
-    /// Where the overlay preview's tiles were drawn (last frame).
-    overlay_tile_rects: std::cell::RefCell<Vec<(usize, usize, Rect)>>,
-    /// Settings page: asking before the shots view is reset.
-    confirm_reset: bool,
-    /// Shots page: page shown, filter and selection.
+    /// Shots page: page shown, filter and selection; the tile overlays' cameras and animation.
     explorer: explorer::ExplorerState,
-    /// Sample shot shown in the overlay preview.
-    preview_shot: state::LastShot,
-    /// Overlay page: the tile overlay edited (else the status overlay).
-    overlay_tab: Option<usize>,
-    /// Sample shots for the tile overlay's preview while the session has none.
-    sample_shots: std::cell::OnceCell<Vec<ShotRecord>>,
     /// Where the status overlay is on the screen this frame (native points), if shown.
     status_rect: Option<Rect>,
     /// Like `overlay_first`, for the tile overlays.
@@ -182,8 +170,6 @@ struct App {
     moving: Option<Moving>,
     /// Whether clicks were last set to go through the status (`None`) and the tile overlays.
     passthrough: HashMap<Option<usize>, bool>,
-    /// Asking before arrangement `n` is deleted.
-    confirm_delete_arrangement: Option<usize>,
 }
 
 /// An overlay being moved by hand: it takes the mouse until it is dropped.
@@ -200,7 +186,14 @@ struct Moving {
 }
 
 impl App {
-    fn new(mut settings: Settings, tx: Sender<Cmd>) -> Self {
+    /// The app with the core pages.
+    #[cfg(test)]
+    fn new(settings: Settings, tx: Sender<Cmd>) -> Self {
+        Self::with_pages(settings, tx, Vec::new())
+    }
+
+    /// The app with the core pages and `extra` (see [`run_with`]).
+    fn with_pages(mut settings: Settings, tx: Sender<Cmd>, extra: Vec<Box<dyn Page>>) -> Self {
         // The overlays as they are become the first arrangement.
         if settings.arrangements.is_empty() {
             settings.keep_arrangement();
@@ -209,19 +202,14 @@ impl App {
         if edit.launcher_path.is_none() {
             edit.launcher_path = launcher::find_gspro_launchers().into_iter().next();
         }
-        // OPENLAUNCH_PAGE=settings|log opens another page first (used for README screenshots).
-        let page = match std::env::var("OPENLAUNCH_PAGE").as_deref() {
-            Ok("settings") => Page::Settings,
-            Ok("log") => Page::Log,
-            Ok("shots") => Page::Shots,
-            Ok("overlay") => Page::Overlay,
-            _ => Page::Play,
-        };
+        let pages = page::pages(extra);
+        // OPENLAUNCH_PAGE=<id> opens another page first (e.g. settings, log).
+        let page = page::start_page(&pages, std::env::var("OPENLAUNCH_PAGE").ok().as_deref());
         Self {
             tx,
             saved: settings,
             edit,
-            note: None,
+            pages,
             page,
             capture: Capture::from_env(),
             show_overlay: true,
@@ -229,37 +217,33 @@ impl App {
             size_changed: None,
             aspect_locked: None,
             applied_scale: None,
-            all_time: false,
-            all_shots: Vec::new(),
-            all_shots_session: 0,
-            export_note: None,
             overlay_first: None,
             screen_size: None,
             all_covered: false,
             overlay_base: std::cell::Cell::new(egui::Vec2::ZERO),
-            overlay_tile_rects: std::cell::RefCell::default(),
-            confirm_reset: false,
             explorer: explorer::ExplorerState::default(),
-            preview_shot: {
-                let (ball, club) = engine::test_shot();
-                state::LastShot {
-                    ball,
-                    club: Some(club),
-                    tempo: Some(crate::mapping::Tempo { backswing: 0.81, downswing: 0.27 }),
-                    at: Instant::now(),
-                    delivered: true,
-                    shot_number: 0,
-                    misread: None,
-                }
-            },
-            overlay_tab: None,
-            sample_shots: std::cell::OnceCell::new(),
             status_rect: None,
             tile_overlay_first: HashMap::new(),
             moving: None,
             passthrough: HashMap::new(),
-            confirm_delete_arrangement: None,
         }
+    }
+
+    /// What the pages share, for the app's own use (the overlay windows, the window size).
+    fn ctx(&mut self) -> AppCtx<'_> {
+        AppCtx::new(&mut self.saved, &mut self.edit, &self.tx, &mut self.explorer, &mut self.moving)
+    }
+
+    /// Shows the page `id` (tests; `OPENLAUNCH_PAGE` in the app).
+    #[cfg(test)]
+    fn show_page(&mut self, id: &str) {
+        self.page = self.pages.iter().position(|p| p.id() == id).expect("no such page");
+    }
+
+    /// The page of type `P`, to look at or set up its state (tests).
+    #[cfg(test)]
+    fn page_mut<P: Page>(&mut self) -> &mut P {
+        self.pages.iter_mut().find_map(|p| (p.as_mut() as &mut dyn std::any::Any).downcast_mut::<P>()).expect("no such page")
     }
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
@@ -278,15 +262,15 @@ impl App {
         let caps_y = pill.center().y - galley.size().y / 2.0 + 22.0 * CAPS_OFFSET;
         p.galley(pos2(pill.left() + 9.0, caps_y), galley, WHITE);
 
-        // Navigation, right-aligned.
+        // Navigation, right-aligned: the last page rightmost.
         let mut x = rect.right() - 18.0;
-        for (page, label) in
-            [(Page::Settings, tr("SETTINGS")), (Page::Overlay, tr("OVERLAY")), (Page::Log, tr("LOG")), (Page::Shots, tr("SHOTS")), (Page::Play, tr("PLAY"))]
-        {
+        for page in (0..self.pages.len()).rev() {
+            let label = self.pages[page].label();
             let galley = ui.painter().layout_no_wrap(label.into(), cond(19.0), WHITE);
             let w = galley.size().x;
             let hit = Rect::from_min_max(pos2(x - w - 6.0, rect.top()), pos2(x + 6.0, rect.bottom()));
             let resp = ui.interact(hit, ui.id().with(label), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
             let active = self.page == page;
             let color = if active || resp.hovered() { WHITE } else { MUTED };
             let p = ui.painter();
@@ -318,8 +302,21 @@ impl App {
             }
         }
     }
+}
 
-    fn play(&mut self, ui: &mut egui::Ui) {
+/// *Play*: the last shot's numbers, the test shot and starting GSPro, the status.
+struct PlayPage;
+
+impl Page for PlayPage {
+    fn id(&self) -> &'static str {
+        "play"
+    }
+
+    fn label(&self) -> &'static str {
+        tr("PLAY")
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
         let (last, club, handed, r10, r10_detail, gs_ok, gs_detail, shots, battery) = state::with(|s| {
             (
                 s.last_shot.clone(),
@@ -335,14 +332,14 @@ impl App {
         });
         let b = last.as_ref().map(|s| s.ball);
         let c = last.as_ref().and_then(|s| s.club);
-        let metric = self.saved.metric;
+        let metric = app.settings().metric;
         let speed = |mph: f64| if metric { mph * MPH_TO_KMH } else { mph };
         let unit = if metric { "km/h" } else { "mph" };
 
         let head = section(ui, tr("BALL"));
         // With more than one arrangement of the overlays: which one, to switch.
-        if self.saved.arrangements.len() > 1 {
-            let text = format!("{}: {}", tr("Overlay"), self.arrangement_name(self.saved.arrangement));
+        if app.settings().arrangements.len() > 1 {
+            let text = format!("{}: {}", tr("Overlay"), app.arrangement_name(app.settings().arrangement));
             let galley = ui.painter().layout_no_wrap(text, FontId::proportional(13.0), SOFT);
             let r = Rect::from_min_size(pos2(ui.max_rect().right() - galley.size().x - 16.0, head.rect.center().y - galley.size().y / 2.0 - 2.0), galley.size() + vec2(16.0, 0.0));
             let resp = ui.interact(r, ui.id().with("play-arrangement"), Sense::click());
@@ -351,7 +348,8 @@ impl App {
             let c = pos2(r.right() - 5.0, r.center().y);
             ui.painter().add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)], color, Stroke::NONE));
             let resp = resp.on_hover_text(tr("Arrangement of the overlays")).on_hover_cursor(egui::CursorIcon::PointingHand);
-            self.arrangement_menu(&resp, false);
+            // Only choosing here: nothing to delete.
+            let _ = app.arrangement_menu(&resp, false);
         }
         tile_row(
             ui,
@@ -412,7 +410,7 @@ impl App {
         let b2 = Rect::from_min_size(pos2(b1.left(), b1.bottom() + 3.0), vec2(200.0, half));
         if button(ui, b1, tr("TEST SHOT IN 3 S"), Icon::Clock, false, gs_ok, tr("Connect to GSPro first")) {
             log::info("Test shot in 3 s – switch to the GSPro window now …");
-            let tx = self.tx.clone();
+            let tx = app.commands().clone();
             thread::spawn(move || {
                 thread::sleep(Duration::from_secs(3));
                 let (ball, club) = engine::test_shot();
@@ -423,12 +421,12 @@ impl App {
                 let _ = tx.send(Cmd::Shot { ball, club: Some(club), tempo: None, test: true });
             });
         }
-        let launcher = self.saved.launcher_path.clone().or_else(|| self.edit.launcher_path.clone());
+        let launcher = app.settings().launcher_path.clone().or_else(|| app.edit.launcher_path.clone());
         let why = if gs_ok { tr("GSPro is already connected") } else { tr("No GSPro launcher selected (Settings)") };
         if button(ui, b2, tr("START GSPRO"), Icon::Play, false, launcher.is_some() && !gs_ok, why)
             && let Some(path) = launcher
         {
-            let addr = self.saved.gspro_addr.clone();
+            let addr = app.settings().gspro_addr.clone();
             thread::spawn(move || start_gspro(&path, &addr));
         }
 
@@ -521,8 +519,28 @@ impl App {
         let st_resp = ui.interact(st, ui.id().with("status"), Sense::hover());
         st_resp.on_hover_text(format!("R10: {}\nGSPro: {}", tr_detail(&r10_detail), tr_detail(&gs_detail)));
     }
+}
 
-    fn settings(&mut self, ui: &mut egui::Ui) {
+/// *Settings*: edited in a copy (`AppCtx::edit`) and saved with SAVE; the interface size and the
+/// reset of the shots view apply at once.
+#[derive(Default)]
+struct SettingsPage {
+    /// The outcome of the last save or search, shown next to SAVE.
+    note: Option<String>,
+    /// Asking before the shots view is reset.
+    confirm_reset: bool,
+}
+
+impl Page for SettingsPage {
+    fn id(&self) -> &'static str {
+        "settings"
+    }
+
+    fn label(&self) -> &'static str {
+        tr("SETTINGS")
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
         // 2 × 2 cards; cards side by side share their row's height.
         let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 184.0 + 10.0 + 140.0), Sense::hover());
         let col_w = (area.width() - 10.0) / 2.0;
@@ -533,7 +551,7 @@ impl App {
 
         card(ui, cell(0.0, 0.0, 184.0), tr("GSPRO"), Icon::Monitor, |ui| {
             setting_row(ui, tr("Launcher"), |ui| {
-                let text = self.edit.launcher_path.as_ref().map_or_else(
+                let text = app.edit.launcher_path.as_ref().map_or_else(
                     || tr("– not selected –").to_string(),
                     |p| short_path(p.as_path()),
                 );
@@ -545,11 +563,11 @@ impl App {
                             .add_filter("Applications", &["app"])
                             .pick_file()
                     {
-                        self.edit.launcher_path = Some(p);
+                        app.edit.launcher_path = Some(p);
                     }
                     if secondary_button(ui, tr("Find"), true).clicked() {
                         match launcher::find_gspro_launchers().into_iter().next() {
-                            Some(p) => self.edit.launcher_path = Some(p),
+                            Some(p) => app.edit.launcher_path = Some(p),
                             None => {
                                 self.note = Some(tr("No GSPro launcher found under ~/Applications/CrossOver.").into());
                             }
@@ -560,7 +578,7 @@ impl App {
             });
             setting_row(ui, tr("Address"), |ui| {
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.edit.gspro_addr)
+                    egui::TextEdit::singleline(&mut app.edit.gspro_addr)
                         .desired_width(130.0)
                         .vertical_align(egui::Align::Center)
                         // Height from the margin: 34 px like the other controls.
@@ -569,7 +587,7 @@ impl App {
                 ui.label(RichText::new(tr("Applies after restart")).size(12.0).color(MUTED));
             });
             setting_row(ui, tr("Autostart"), |ui| {
-                toggle(ui, &mut self.edit.auto_start_gspro, tr("Open GSPro on start"));
+                toggle(ui, &mut app.edit.auto_start_gspro, tr("Open GSPro on start"));
             });
         });
 
@@ -577,34 +595,34 @@ impl App {
             setting_row(ui, tr("Language"), |ui| {
                 egui::ComboBox::from_id_salt("language")
                     .width(128.0)
-                    .selected_text(self.edit.language.label())
+                    .selected_text(app.edit.language.label())
                     .show_ui(ui, |ui| {
                         for l in Language::ALL {
-                            ui.selectable_value(&mut self.edit.language, l, l.label());
+                            ui.selectable_value(&mut app.edit.language, l, l.label());
                         }
                     });
             });
             setting_row(ui, tr("Units"), |ui| {
-                segments(ui, &mut self.edit.metric, &[(true, "km/h"), (false, "mph")]);
+                segments(ui, &mut app.edit.metric, &[(true, "km/h"), (false, "mph")]);
                 ui.add_space(4.0);
-                segments(ui, &mut self.edit.meters, &[(true, "m"), (false, "yd")]);
+                segments(ui, &mut app.edit.meters, &[(true, "m"), (false, "yd")]);
             });
             setting_row(ui, tr("Interface"), |ui| {
                 let options = [(None, tr("Auto")), (Some(1.0), "100 %"), (Some(1.25), "125 %"), (Some(1.5), "150 %")];
-                let mut scale = self.saved.ui_scale;
+                let mut scale = app.settings().ui_scale;
                 // Sizes whose smallest window doesn't fit on the screen can't be chosen.
                 let room = screen_room(ui.ctx());
                 let fits = |s: Option<f32>| room.is_none_or(|r| min_size(s).x <= r.x + 0.5 && min_size(s).y <= r.y + 0.5);
                 if segments_where(ui, &mut scale, &options, fits, tr("Too large for this screen")) {
                     // Applies and saves at once, like the overlay's settings.
-                    let _ = self.change_settings(|s| s.ui_scale = scale);
+                    let _ = app.change_settings(|s| s.ui_scale = scale);
                 }
             });
         });
 
         card(ui, cell(0.0, 194.0, 140.0), "R10", Icon::Signal, |ui| {
             setting_row(ui, tr("Ball distance"), |ui| {
-                stepper(ui, &mut self.edit.tee_distance, 1.5..=4.0, 0.05, "m")
+                stepper(ui, &mut app.edit.tee_distance, 1.5..=4.0, 0.05, "m")
                     .on_hover_text(tr("Distance from the R10 to the ball; default 2.10 m"));
                 ui.label(RichText::new(tr("Applies after restart")).size(12.0).color(MUTED));
             });
@@ -633,12 +651,12 @@ impl App {
         let check = state::with(|s| s.update_check.clone());
         card(ui, updates_card, tr("NOTIFICATIONS & UPDATES"), Icon::Bell, |ui| {
             setting_row(ui, tr("Notifications"), |ui| {
-                if toggle(ui, &mut self.edit.notifications, tr("Notify about problems"))
+                if toggle(ui, &mut app.edit.notifications, tr("Notify about problems"))
                     .on_hover_text(tr("Low R10 battery, R10 errors (e.g. tilted), lost connections, shots not delivered"))
                     .changed()
                 {
                     // Takes effect immediately; saved with the other settings.
-                    crate::notify::ENABLED.store(self.edit.notifications, std::sync::atomic::Ordering::Relaxed);
+                    crate::notify::ENABLED.store(app.edit.notifications, std::sync::atomic::Ordering::Relaxed);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if secondary_button(ui, tr("Test"), true)
@@ -650,7 +668,7 @@ impl App {
                 });
             });
             setting_row(ui, tr("Updates"), |ui| {
-                toggle(ui, &mut self.edit.check_updates, tr("Check on start"))
+                toggle(ui, &mut app.edit.check_updates, tr("Check on start"))
                     .on_hover_text(tr("Asks GitHub for the latest release when the app starts"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if secondary_button(ui, tr("Update"), check != Some(update::Check::Running))
@@ -689,15 +707,15 @@ impl App {
         // Footer: status note and the primary save button, right-aligned.
         ui.add_space(12.0);
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
-        let dirty = self.edit != self.saved;
+        let dirty = *app.edit != *app.settings();
         let save_r = Rect::from_min_max(pos2(bar.right() - 160.0, bar.top()), bar.max);
         if button(ui, save_r, tr("SAVE"), Icon::None, true, dirty, tr("No changes")) {
-            let restart = self.edit.gspro_addr != self.saved.gspro_addr
-                || (self.edit.tee_distance - self.saved.tee_distance).abs() > f32::EPSILON;
-            let edit = self.edit.clone();
-            match self.change_settings(|s| s.clone_from(&edit)) {
+            let restart = app.edit.gspro_addr != app.settings().gspro_addr
+                || (app.edit.tee_distance - app.settings().tee_distance).abs() > f32::EPSILON;
+            let edit = app.edit.clone();
+            match app.change_settings(|s| s.clone_from(&edit)) {
                 Ok(()) => {
-                    i18n::set(self.saved.language);
+                    i18n::set(app.settings().language);
                     self.note = Some(if restart {
                         tr("Saved. Address and distance apply after the next start.").into()
                     } else {
@@ -711,7 +729,7 @@ impl App {
         let label = tr("RESET SHOTS VIEW");
         let w = ui.painter().layout_no_wrap(label.to_string(), cond(19.0), WHITE).size().x + 40.0;
         let reset_r = Rect::from_min_size(bar.min, vec2(w, bar.height()));
-        let is_default = self.saved.explorer == crate::settings::Explorer::default();
+        let is_default = app.settings().explorer == crate::settings::Explorer::default();
         if button(ui, reset_r, label, Icon::None, false, !is_default, tr("The shots view is as it came")) {
             self.confirm_reset = true;
         }
@@ -720,7 +738,7 @@ impl App {
             if let Some(reset) = confirm(ui.ctx(), "reset-shot-pages", tr("Reset the shots view?"), text, tr("RESET")) {
                 self.confirm_reset = false;
                 if reset {
-                    self.note = Some(match self.change_settings(|s| s.explorer = crate::settings::Explorer::default()) {
+                    self.note = Some(match app.change_settings(|s| s.explorer = crate::settings::Explorer::default()) {
                         Ok(()) => tr("Shots view reset.").into(),
                         Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
                     });
@@ -738,17 +756,21 @@ impl App {
             );
         }
     }
+}
 
-    /// The one way settings change outside the Settings page's SAVE: `change` is applied to the
-    /// settings in use and to the Settings page's copy (so its unsaved edits stay, and stay
-    /// visible as such), then the settings are saved. A failure is logged.
-    fn change_settings(&mut self, change: impl Fn(&mut Settings)) -> Result<(), String> {
-        change(&mut self.saved);
-        change(&mut self.edit);
-        self.saved.save().inspect_err(|e| log::info(&format!("Could not save the settings: {e}")))
+/// *Log*: the app log, with copying it and the switch for GSPro's messages.
+struct LogPage;
+
+impl Page for LogPage {
+    fn id(&self) -> &'static str {
+        "log"
     }
 
-    fn log(&mut self, ui: &mut egui::Ui) {
+    fn label(&self) -> &'static str {
+        tr("LOG")
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
         let lines: Vec<String> = state::with(|s| s.log.iter().cloned().collect());
         ui.horizontal(|ui| {
             // Row as tall as the switch, so the heading centres on it.
@@ -759,10 +781,10 @@ impl App {
             caps_text(ui.painter(), r.left_center(), egui::Align::Min, tr("LOG"), 15.0, MUTED);
             ui.add_space(12.0);
             // Troubleshooting switch next to the log it fills; saved right away.
-            let mut debug = self.saved.debug;
+            let mut debug = app.settings().debug;
             if toggle(ui, &mut debug, tr("Log GSPro messages")).changed() {
                 crate::gspro::DEBUG.store(debug, std::sync::atomic::Ordering::Relaxed);
-                let _ = self.change_settings(|s| s.debug = debug);
+                let _ = app.change_settings(|s| s.debug = debug);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(120.0, 26.0), Sense::hover());
@@ -809,13 +831,8 @@ impl eframe::App for App {
             self.top_bar(ui);
             egui::Frame::new().inner_margin(Margin { left: 18, right: 18, top: 14, bottom: 14 }).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
-                match self.page {
-                    Page::Play => self.play(ui),
-                    Page::Shots => self.shots(ui),
-                    Page::Settings => self.settings(ui),
-                    Page::Overlay => self.overlay_page(ui),
-                    Page::Log => self.log(ui),
-                }
+                let mut app = AppCtx::new(&mut self.saved, &mut self.edit, &self.tx, &mut self.explorer, &mut self.moving);
+                self.pages[self.page].ui(ui, &mut app);
             });
         });
         self.capture.tick(ui.ctx(), self.saved.overlay != OverlayPos::Off);
@@ -949,7 +966,7 @@ impl App {
         let since = *self.size_changed.get_or_insert_with(Instant::now);
         if since.elapsed() >= Duration::from_secs(1) {
             self.size_changed = None;
-            let _ = self.change_settings(|s| s.window_size = Some(size));
+            let _ = self.ctx().change_settings(|s| s.window_size = Some(size));
         }
     }
 }
@@ -1244,13 +1261,9 @@ mod tests {
         };
         i18n::set(language);
         let _state = demo_state();
-        for (page, name) in [
-            (Page::Play, "screenshot-play.png"),
-            (Page::Shots, "screenshot-shots.png"),
-            (Page::Settings, "screenshot-settings.png"),
-            (Page::Overlay, "screenshot-overlay-settings.png"),
-            (Page::Log, "screenshot-log.png"),
-        ] {
+        // Every core page (the Shots page again with a range session below).
+        for page in page::pages(Vec::new()).iter().map(|p| p.id()) {
+            let name = if page == "overlay" { "screenshot-overlay-settings.png".to_string() } else { format!("screenshot-{page}.png") };
             let home = std::env::var("HOME").unwrap_or_default();
             let settings = Settings {
                 overlay: OverlayPos::TopRight,
@@ -1267,14 +1280,14 @@ mod tests {
                     setup_style(&cc.egui_ctx);
                     App::new(settings, tx)
                 });
-            harness.state_mut().page = page;
+            harness.state_mut().show_page(page);
             harness.state_mut().show_overlay = false; // rendered separately below
             harness.state_mut().remember_size = false;
             // Grids size their rows from the previous frame.
             for _ in 0..6 {
                 harness.step();
             }
-            save(&harness.render().unwrap(), name);
+            save(&harness.render().unwrap(), &name);
         }
 
         // The shots explorer with a range session (seven of the fourteen clubs): its default pages,
@@ -1318,7 +1331,7 @@ mod tests {
                     App::new(settings, tx)
                 });
             let app = harness.state_mut();
-            app.page = Page::Shots;
+            app.show_page("shots");
             app.show_overlay = false;
             app.remember_size = false;
             app.explorer.set_for_screenshot(page, configure, hidden.clone(), first.clone());
@@ -1373,7 +1386,7 @@ mod tests {
 
         i18n::set(Language::English);
         let _state = demo_state();
-        for (page, name) in [(Page::Play, "zoomed-play.png"), (Page::Shots, "zoomed-shots.png")] {
+        for (page, name) in [("play", "zoomed-play.png"), ("shots", "zoomed-shots.png")] {
             let settings = Settings { overlay: OverlayPos::Off, language: Language::English, ..Settings::default() };
             let (tx, _rx) = std::sync::mpsc::channel();
             let mut harness = Harness::builder()
@@ -1384,7 +1397,7 @@ mod tests {
                     setup_style(&cc.egui_ctx);
                     App::new(settings, tx)
                 });
-            harness.state_mut().page = page;
+            harness.state_mut().show_page(page);
             harness.state_mut().remember_size = false;
             for _ in 0..8 {
                 harness.step();
@@ -1403,13 +1416,7 @@ mod tests {
 
         i18n::set(Language::English);
         let _state = demo_state();
-        for (page, name) in [
-            (Page::Play, "large-play.png"),
-            (Page::Shots, "large-shots.png"),
-            (Page::Settings, "large-settings.png"),
-            (Page::Overlay, "large-overlay.png"),
-            (Page::Log, "large-log.png"),
-        ] {
+        for page in page::pages(Vec::new()).iter().map(|p| p.id()) {
             let settings = Settings { overlay: OverlayPos::Off, ui_scale: Some(1.0), ..Settings::default() };
             let (tx, _rx) = std::sync::mpsc::channel();
             let mut harness = Harness::builder()
@@ -1420,13 +1427,13 @@ mod tests {
                     setup_style(&cc.egui_ctx);
                     App::new(settings, tx)
                 });
-            harness.state_mut().page = page;
+            harness.state_mut().show_page(page);
             harness.state_mut().remember_size = false;
             for _ in 0..8 {
                 harness.step();
             }
             assert_eq!(harness.ctx.zoom_factor(), 1.0);
-            save(&harness.render().unwrap(), name);
+            save(&harness.render().unwrap(), &format!("large-{page}.png"));
         }
     }
 
@@ -1441,9 +1448,9 @@ mod tests {
         assert_eq!(app.edit, app.saved);
         // An unsaved edit on the Settings page, then changes applied at once elsewhere.
         app.edit.metric = false;
-        app.change_settings(|s| s.window_size = Some([1100.0, 517.0])).unwrap();
-        app.change_overlays(|s| s.tile_overlays.push(TileOverlay::default()));
-        app.use_arrangement(|s| {
+        app.ctx().change_settings(|s| s.window_size = Some([1100.0, 517.0])).unwrap();
+        app.ctx().change_overlays(|s| s.tile_overlays.push(TileOverlay::default()));
+        app.ctx().use_arrangement(|s| {
             s.arrangements.push(Arrangement { name: "Range".into(), ..Arrangement::default() });
             1
         });
@@ -1453,7 +1460,7 @@ mod tests {
         assert_eq!(app.saved.arrangements[0].tiles.len(), 1, "kept in the arrangement it was added to");
         // The page's SAVE takes the edit.
         let edit = app.edit.clone();
-        app.change_settings(|s| s.clone_from(&edit)).unwrap();
+        app.ctx().change_settings(|s| s.clone_from(&edit)).unwrap();
         assert_eq!(app.edit, app.saved);
         assert!(!app.saved.metric);
     }
