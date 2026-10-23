@@ -62,8 +62,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Release notes: this version's section of CHANGELOG.md (falls back to GitHub's generated notes).
+          # A tag with a suffix (v1.2.0-rc.1) is a release candidate: published as a pre-release, which the
+          # app's update check (releases/latest) doesn't offer, with the [Unreleased] notes until the
+          # version has its own section.
           VERSION="${GITHUB_REF_NAME#v}"
-          awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && (/^## \[/ || /^\[[^]]*\]: /) {exit} on' CHANGELOG.md > notes.md
+          BASE="${VERSION%%-*}"
+          section() { awk -v v="$1" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && (/^## \[/ || /^\[[^]]*\]: /) {exit} on' CHANGELOG.md; }
+          section "$BASE" > notes.md
+          PRE=()
+          if [ "$VERSION" != "$BASE" ]; then
+            PRE=(--prerelease)
+            [ -s notes.md ] || section "Unreleased" > notes.md
+          fi
           if [ -s notes.md ]; then NOTES=(--notes-file notes.md); else NOTES=(--generate-notes); fi
           gh release create "${GITHUB_REF_NAME}" "target/$ZIP" target/THIRD_PARTY_LICENSES.html \
-            --title "OpenLaunch Connect ${GITHUB_REF_NAME}" "${NOTES[@]}"
+            --title "OpenLaunch Connect ${GITHUB_REF_NAME}" "${NOTES[@]}" "${PRE[@]}"
