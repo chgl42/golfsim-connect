@@ -122,6 +122,15 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   Capturing a real window with `screencapture` often fails: wgpu doesn't render occluded windows ("Skipping frame due to occlusion").
 - Tests that drive the app (kittest) must not write the real settings: `settings::SAVE` off (`demo_state()` does it;
   set it yourself in tests that don't call it).
+- Unit tests never touch the real data folder: `Settings::load_in`/`save_in` take the home folder (use
+  `test_util::TempDir`); in lib tests the shot history is only written to the thread's `history::TEST_FILE`
+  (`test_util::TestHistory`), else not at all. Tests that record shots or read `state`'s session/last shot hold
+  `test_util::state_lock()`. Fixtures (OpenConnect replies, a `LastShot` row, old settings) are in
+  `tests/fixtures/`, read with `crate::fixture!("name")`. Known bugs are pinned as `#[ignore = "bug #n: …"]` tests
+  that assert the wanted behaviour – un-ignore them with the fix.
+- Coverage (local, report only): `cargo install cargo-llvm-cov`, then `cargo llvm-cov --lib --summary-only`
+  (with Homebrew's Rust instead of rustup: `LLVM_COV=/opt/homebrew/opt/llvm/bin/llvm-cov
+  LLVM_PROFDATA=/opt/homebrew/opt/llvm/bin/llvm-profdata` in front).
 - `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot; `OPENLAUNCH_DEMO=range`:
   a 65-shot range session with a full bag of fourteen clubs, `engine::demo_range()`, to try the explorer; on the MacBook:
   `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=settings|overlay|log|shots`
@@ -141,7 +150,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - **Definition of Done** for a PR: clippy clean; `cargo test --all-targets` green; new logic has tests; user-visible
   changes in the CHANGELOG; new UI texts through `tr()` with a German translation; for UI changes the screenshots
   rendered (`readme_screenshots`) and looked at; Bluetooth, GSPro and overlay paths tested on the MacBook with
-  the real setup; a decision that shapes the code gets an ADR in `docs/adr/`.
+  the real setup (checklist: `docs/testing.md`); a decision that shapes the code gets an ADR in `docs/adr/`.
 
 ## Workflow
 

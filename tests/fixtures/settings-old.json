@@ -1,0 +1,23 @@
+{
+  "gspro_addr": "127.0.0.1:9210",
+  "tee_distance": 2.0,
+  "launcher_path": "/Users/golfer/Applications/CrossOver/GSPro/GSPro.app",
+  "auto_start_gspro": true,
+  "device": "Approach R10",
+  "metric": false,
+  "meters": false,
+  "debug": true,
+  "overlay": "bottom_left",
+  "overlay_spot": null,
+  "overlay_style": {
+    "scale": 1.25,
+    "one_line": true,
+    "club": true,
+    "battery": false,
+    "smash": true,
+    "to_pin": true
+  },
+  "check_updates": false,
+  "window_size": [1200.0, 564.0],
+  "export_format": "garmin_golf"
+}

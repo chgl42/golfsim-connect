@@ -5,13 +5,12 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
 use crate::flight::{self, Flight};
 use crate::mapping::{GsBall, GsClub, Tempo};
-use crate::settings::Settings;
 
 /// Write shots to disk (off in demo mode, so screenshots don't pollute the history).
 pub static PERSIST: AtomicBool = AtomicBool::new(true);
@@ -79,8 +78,30 @@ pub fn smash(ball: &GsBall, club: Option<&GsClub>) -> Option<f64> {
     club.filter(|c| c.speed > 0.0).map(|c| ball.speed / c.speed)
 }
 
+#[cfg(not(test))]
 fn path() -> Option<PathBuf> {
-    Some(Settings::data_dir()?.join("shots.jsonl"))
+    Some(crate::settings::Settings::data_dir()?.join("shots.jsonl"))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Unit tests: the history file of this test thread; without one nothing is read or written.
+    pub(crate) static TEST_FILE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn path() -> Option<PathBuf> {
+    TEST_FILE.with_borrow(Clone::clone)
+}
+
+/// Whether shots are written to disk ([`PERSIST`]; in unit tests: whether the thread has a `TEST_FILE`,
+/// so tests running in parallel can't turn it on or off for each other).
+fn persist() -> bool {
+    #[cfg(test)]
+    let on = TEST_FILE.with_borrow(Option::is_some);
+    #[cfg(not(test))]
+    let on = PERSIST.load(std::sync::atomic::Ordering::Relaxed);
+    on
 }
 
 /// Append one shot to `shots.jsonl`.
@@ -88,7 +109,7 @@ fn path() -> Option<PathBuf> {
 /// # Errors
 /// Returns a message if the file cannot be written.
 pub fn append(rec: &ShotRecord) -> Result<(), String> {
-    if !PERSIST.load(Ordering::Relaxed) {
+    if !persist() {
         return Ok(());
     }
     let path = path().ok_or("HOME not set")?;
@@ -141,7 +162,7 @@ pub fn set_gspro(time: &str, shot_number: u32, result: crate::gspro_db::GsproRes
 
 /// Change one recorded shot in the history file.
 fn update(time: &str, shot_number: u32, change: impl Fn(&mut ShotRecord)) -> Result<(), String> {
-    if !PERSIST.load(Ordering::Relaxed) {
+    if !persist() {
         return Ok(());
     }
     let path = path().ok_or("HOME not set")?;
@@ -714,5 +735,78 @@ mod tests {
         let r = rec(Some("DR"), 150.0, Some(100.0));
         let json = serde_json::to_string(&r).unwrap();
         assert_eq!(serde_json::from_str::<ShotRecord>(&json).unwrap(), r);
+    }
+
+    fn numbered(n: u32, speed: f64) -> ShotRecord {
+        ShotRecord { shot_number: n, ..rec(Some("I7"), speed, Some(80.0)) }
+    }
+
+    fn result(carry: f64) -> crate::gspro_db::GsproResult {
+        crate::gspro_db::GsproResult { carry, total: carry + 5.0, side: -2.0, apex: 25.0, descent: 45.0, to_pin: Some(80.0) }
+    }
+
+    #[test]
+    fn history_round_trips_through_the_file() {
+        let h = crate::test_util::TestHistory::new("history-round-trip");
+        assert!(load_all().is_empty(), "no file yet");
+        let shots = [numbered(1, 110.0), numbered(2, 120.0), numbered(3, 130.0)];
+        for s in &shots {
+            append(s).unwrap();
+        }
+        assert_eq!(h.text().lines().count(), 3, "one line per shot");
+        assert_eq!(load_all(), shots);
+    }
+
+    /// `set_gspro` and `set_excluded` change the shot with that time and number, and only that one.
+    #[test]
+    fn updates_change_the_right_shot() {
+        let _h = crate::test_util::TestHistory::new("history-update");
+        let mut other_time = numbered(2, 125.0);
+        other_time.time = "2026-10-19T18:31:00+02:00".into();
+        let shots = [numbered(1, 110.0), numbered(2, 120.0), other_time, numbered(3, 130.0)];
+        for s in &shots {
+            append(s).unwrap();
+        }
+        set_gspro(&shots[1].time, 2, result(150.0)).unwrap();
+        set_excluded(&shots[3].time, 3, true).unwrap();
+        let mut want = shots.clone();
+        want[1].gspro = Some(result(150.0));
+        want[3].excluded = true;
+        assert_eq!(load_all(), want);
+        // And back again; a shot that isn't there changes nothing.
+        set_excluded(&shots[3].time, 3, false).unwrap();
+        set_gspro(&shots[0].time, 99, result(1.0)).unwrap();
+        want[3].excluded = false;
+        assert_eq!(load_all(), want);
+    }
+
+    /// Today: an unreadable line in the middle of `shots.jsonl` is skipped by `load_all` (the shots
+    /// around it load) and kept as it is when another shot is updated.
+    #[test]
+    fn a_broken_line_is_skipped_and_kept() {
+        let h = crate::test_util::TestHistory::new("history-broken");
+        let (first, last) = (numbered(1, 110.0), numbered(2, 120.0));
+        let broken = r#"{"time":"2026-10-19T18:30:06+02:00","shot_number":7,"ball":{"#;
+        let text = format!("{}\n{broken}\nnot json at all\n{}\n", serde_json::to_string(&first).unwrap(), serde_json::to_string(&last).unwrap());
+        std::fs::write(&h.file, &text).unwrap();
+        assert_eq!(load_all(), [first.clone(), last.clone()]);
+        set_excluded(&last.time, 2, true).unwrap();
+        let lines: Vec<String> = h.text().lines().map(Into::into).collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!((lines[1].as_str(), lines[2].as_str()), (broken, "not json at all"), "unreadable lines are kept");
+        assert!(load_all()[1].excluded);
+    }
+
+    /// A last line cut off (crash, full disk): the next shot starts on a new line, so only the cut
+    /// one is lost.
+    #[test]
+    fn a_shot_after_a_cut_off_line_stays_readable() {
+        let h = crate::test_util::TestHistory::new("history-cut-off");
+        let first = numbered(1, 110.0);
+        std::fs::write(&h.file, format!("{}\n{{\"time\":\"2026-", serde_json::to_string(&first).unwrap())).unwrap();
+        let next = numbered(2, 120.0);
+        append(&next).unwrap();
+        assert_eq!(h.text().lines().count(), 3);
+        assert_eq!(load_all(), [first, next]);
     }
 }

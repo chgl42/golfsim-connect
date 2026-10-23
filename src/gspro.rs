@@ -544,6 +544,7 @@ mod tests {
     /// leaves the launch monitor's readiness as it was.
     #[test]
     fn test_shot_keeps_the_readiness() {
+        let _state = crate::test_util::state_lock();
         notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let mut link = Link::new(listener.local_addr().unwrap().to_string(), false);
@@ -572,6 +573,7 @@ mod tests {
     /// A shot while GSPro is away waits for it and goes out once it is back.
     #[test]
     fn held_shot_is_sent_after_the_reconnect() {
+        let _state = crate::test_util::state_lock();
         notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
         let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
@@ -604,6 +606,7 @@ mod tests {
     /// A held shot is given up when GSPro doesn't come back in time.
     #[test]
     fn held_shot_is_dropped_after_a_while() {
+        let _state = crate::test_util::state_lock();
         notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
         let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
@@ -637,5 +640,177 @@ mod tests {
         assert_eq!(v["ShotDataOptions"]["IsHeartBeat"], true);
         assert_eq!(v["ShotDataOptions"]["LaunchMonitorIsReady"], true);
         assert!(v.get("BallData").is_none());
+    }
+
+    /// `record_shot`: the shot becomes the last one and, unless it is a test shot, joins the session
+    /// and the history, with the club GSPro has chosen; GSPro's result of the shot before is gone.
+    #[test]
+    fn recorded_shots_go_to_the_session_and_the_history() {
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("record-shot");
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let earlier = crate::gspro_db::GsproResult { carry: 1.0, total: 2.0, side: 0.0, apex: 1.0, descent: 1.0, to_pin: None };
+        let (sent, session) = state::with(|s| {
+            s.gspro_club = Some("PW".into());
+            s.gspro_result = Some(earlier);
+            (s.shots_sent, s.session.len())
+        });
+        let (ball, club) = crate::engine::test_shot();
+        let tempo = Some(Tempo { backswing: 0.8, downswing: 0.27 });
+        record_shot(ball, Some(club), tempo, true, 4711, false);
+        let (last, now_sent, rec, result) = state::with(|s| {
+            (s.last_shot.clone().unwrap(), s.shots_sent, s.session.last().cloned().unwrap(), s.gspro_result)
+        });
+        assert_eq!((last.ball, last.club, last.tempo, last.delivered, last.shot_number), (ball, Some(club), tempo, true, 4711));
+        assert_eq!(last.misread, None);
+        assert_eq!(now_sent, sent + 1);
+        assert_eq!(result, None, "the earlier shot's result no longer applies");
+        assert_eq!((rec.ball, rec.club, rec.tempo, rec.shot_number), (ball, Some(club), tempo, 4711));
+        assert_eq!((rec.club_code.as_deref(), rec.delivered, rec.excluded), (Some("PW"), true, false));
+        assert_eq!(history::load_all(), std::slice::from_ref(&rec));
+
+        // A test shot: the last shot, but neither in the session nor in the history.
+        let (test_ball, _) = crate::engine::test_shot();
+        record_shot(test_ball, None, None, true, 4712, true);
+        let (last, n, now_sent) = state::with(|s| (s.last_shot.clone().unwrap(), s.session.len(), s.shots_sent));
+        assert_eq!((last.ball, last.shot_number), (test_ball, 4712));
+        assert_eq!((n, now_sent), (session + 1, sent + 2), "counted as sent, not kept");
+        assert_eq!(history::load_all().len(), 1);
+
+        // Not delivered: kept, not counted as sent. A misread is kept but excluded.
+        let misread = GsBall { total_spin: 100.0, ..ball };
+        record_shot(misread, Some(club), None, false, 0, false);
+        let (last, rec, now_sent) = state::with(|s| (s.last_shot.clone().unwrap(), s.session.last().cloned().unwrap(), s.shots_sent));
+        assert!(!last.delivered && last.misread.is_some());
+        assert!(!rec.delivered && rec.excluded && rec.misread.is_some());
+        assert_eq!(now_sent, sent + 2);
+        assert_eq!(history::load_all().len(), 2);
+    }
+
+    /// What a fake GSPro got: every TCP read, and whether it was exactly one JSON message.
+    struct Received {
+        reads: Vec<String>,
+        merged: usize,
+    }
+
+    /// A fake GSPro on a free local port, answering like `tools/mock_gspro.py`: it reads one
+    /// message at a time (a little late, so messages sent back to back would arrive in one read),
+    /// replies 501 to anything that isn't exactly one JSON value, 200 to heartbeats and 200 + 201
+    /// (player info) to shots. Returns its address and the thread, which ends when the client closes.
+    fn fake_gspro() -> (String, std::thread::JoinHandle<Received>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            conn.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let mut got = Received { reads: Vec::new(), merged: 0 };
+            let mut buf = [0u8; 8192];
+            loop {
+                std::thread::sleep(Duration::from_millis(50));
+                let n = match conn.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let reply = match serde_json::from_str::<Value>(&text) {
+                    Err(_) => {
+                        got.merged += 1;
+                        vec![r#"{"Code":501,"Message":"Bad format","Player":null}"#]
+                    }
+                    Ok(msg) if msg["ShotDataOptions"]["ContainsBallData"] == true => {
+                        vec![crate::fixture!("openconnect-200.json"), crate::fixture!("openconnect-201.json")]
+                    }
+                    Ok(_) => vec![r#"{"Code":200,"Message":"Heartbeat","Player":null}"#],
+                };
+                got.reads.push(text);
+                for (i, r) in reply.iter().enumerate() {
+                    if i > 0 {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    if conn.write_all(r.as_bytes()).is_err() {
+                        break;
+                    }
+                }
+            }
+            got
+        });
+        (addr, server)
+    }
+
+    /// Against a fake GSPro: the heartbeats, then the shots, each message in a TCP read of its
+    /// own; the 201 after a shot sets GSPro's club and handedness.
+    #[test]
+    fn link_talks_to_gspro_one_message_at_a_time() {
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("link");
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        state::with(|s| (s.gspro_club, s.gspro_handed) = (None, None));
+        let (addr, server) = fake_gspro();
+        let mut link = Link::new(addr, false);
+        link.ensure_connected();
+        assert!(link.is_connected());
+        assert!(state::with(|s| s.gspro_connected));
+        link.handle(Cmd::Ready(true));
+        let shots = [crate::engine::test_shot(), crate::engine::test_shot()];
+        for (ball, club) in shots {
+            link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: false });
+        }
+        // The 201 comes a moment after the 200 the shot waited for (and the second shot's 200
+        // after the reply it took, see `a_late_201_is_not_taken_as_the_next_reply`).
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (state::with(|s| s.gspro_handed.is_none()) || link.unanswered > 0) && Instant::now() < deadline {
+            link.read_responses();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(state::with(|s| (s.gspro_club.clone(), s.gspro_handed.clone())), (Some("I7".into()), Some("LH".into())));
+        assert_eq!(state::with(|s| s.last_shot.as_ref().map(|l| (l.ball, l.delivered))), Some((shots[1].0, true)));
+        assert!(!link.silent && link.unanswered == 0, "GSPro answered");
+        drop(link);
+
+        let got = server.join().unwrap();
+        assert_eq!(got.merged, 0, "messages arrived one per read: {:?}", got.reads);
+        let msgs: Vec<Value> = got.reads.iter().map(|r| serde_json::from_str(r).unwrap()).collect();
+        assert_eq!(msgs.len(), 4, "{:?}", got.reads);
+        let heartbeat = |m: &Value| m["ShotDataOptions"]["IsHeartBeat"] == true;
+        assert!(heartbeat(&msgs[0]) && msgs[0]["ShotDataOptions"]["LaunchMonitorIsReady"] == false, "on connect: not ready yet");
+        assert!(heartbeat(&msgs[1]) && msgs[1]["ShotDataOptions"]["LaunchMonitorIsReady"] == true, "then ready");
+        for (m, (ball, _)) in msgs[2..].iter().zip(shots) {
+            assert!(!heartbeat(m) && m["ShotDataOptions"]["ContainsClubData"] == true);
+            assert_eq!(m["BallData"]["Speed"], ball.speed);
+        }
+        let numbers: Vec<u64> = msgs[2..].iter().map(|m| m["ShotNumber"].as_u64().unwrap()).collect();
+        assert!(numbers[0] > 0 && numbers[1] == numbers[0] + 1, "new shot numbers: {numbers:?}");
+    }
+
+    /// Today the 201 that follows a shot's 200, arriving while the next shot waits out
+    /// [`MIN_SEND_GAP`], is read as that shot's reply: `wait_for_reply` stops at it, the shot is
+    /// logged as "No direct reply" and counted as unanswered (the real 200 comes later). Wanted:
+    /// only a 200 (or an error) ends the wait for a shot.
+    #[test]
+    #[ignore = "found in #68: a late 201 is taken as the next shot's reply"]
+    fn a_late_201_is_not_taken_as_the_next_reply() {
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("link-late-201");
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let (addr, server) = fake_gspro();
+        let mut link = Link::new(addr, false);
+        link.ensure_connected();
+        link.handle(Cmd::Ready(true));
+        for (ball, club) in [crate::engine::test_shot(), crate::engine::test_shot()] {
+            link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: false });
+        }
+        let unanswered = link.unanswered;
+        drop(link);
+        server.join().unwrap();
+        assert_eq!(unanswered, 0, "both shots got their 200");
+    }
+
+    #[test]
+    fn replies_from_the_fixtures_parse() {
+        let mut buf = format!("{}{}", crate::fixture!("openconnect-200.json"), crate::fixture!("openconnect-201.json")).into_bytes();
+        let replies = drain_json_values(&mut buf);
+        assert_eq!(replies.len(), 2);
+        assert_eq!((replies[0]["Code"].as_i64(), replies[1]["Code"].as_i64()), (Some(200), Some(201)));
+        assert_eq!(replies[1]["Player"]["Club"], "I7");
     }
 }
