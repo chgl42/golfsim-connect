@@ -310,7 +310,7 @@ impl App {
             screen_size: None,
             all_covered: false,
             overlay_base: std::cell::Cell::new(egui::Vec2::ZERO),
-            overlay_tile_rects: Default::default(),
+            overlay_tile_rects: std::cell::RefCell::default(),
             confirm_reset: false,
             explorer: explorer::ExplorerState::default(),
             preview_shot: {
@@ -964,8 +964,8 @@ impl App {
         e.overlay = s.overlay;
         e.overlay_spot = s.overlay_spot;
         e.overlay_style = s.overlay_style.clone();
-        e.tile_overlays = s.tile_overlays.clone();
-        e.arrangements = s.arrangements.clone();
+        e.tile_overlays.clone_from(&s.tile_overlays);
+        e.arrangements.clone_from(&s.arrangements);
         e.arrangement = s.arrangement;
         if let Err(e) = s.save() {
             log::info(&format!("Saving the overlay settings failed: {e}"));
@@ -1379,7 +1379,7 @@ impl App {
         let to_page = |r: Rect| Rect::from_min_max(origin + r.min.to_vec2() * scale, origin + r.max.to_vec2() * scale);
         let tiles: Vec<(usize, usize, Rect)> =
             tiles.into_iter().filter(|(k, row, _)| (*k, *row) != (0, 0)).map(|(k, row, r)| (k, row, to_page(r).intersect(area))).collect();
-        *self.overlay_tile_rects.borrow_mut() = tiles.clone();
+        self.overlay_tile_rects.borrow_mut().clone_from(&tiles);
         let pointer = ui.ctx().pointer_interact_pos();
         let mut swap: Option<((usize, usize), (usize, usize))> = None;
         let mut insert: Option<((usize, usize), usize)> = None;
@@ -1469,7 +1469,7 @@ impl App {
         if let Some(right) = tiles.iter().map(|t| t.2.right()).reduce(f32::max) {
             let top = tiles.iter().map(|t| t.2.top()).fold(f32::MAX, f32::min);
             let bottom = tiles.iter().map(|t| t.2.bottom()).fold(f32::MIN, f32::max);
-            let r = Rect::from_center_size(pos2(right, (top + bottom) / 2.0), vec2(20.0, 20.0));
+            let r = Rect::from_center_size(pos2(right, f32::midpoint(top, bottom)), vec2(20.0, 20.0));
             let add = ui.interact(r, ui.id().with("overlay-add-column"), Sense::click());
             let fg = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, ui.id().with("overlay-add")));
             fg.circle(r.center(), 9.5, if add.hovered() { ACCENT } else { BUTTON }, Stroke::new(1.0, if add.hovered() { ACCENT_HOVER } else { BUTTON_LINE }));
@@ -1789,7 +1789,7 @@ impl Capture {
             let target = if id == egui::ViewportId::ROOT { self.main.take() } else { self.overlay.take() };
             let Some(path) = target else { continue };
             let [w, h] = image.size;
-            let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+            let rgba: Vec<u8> = image.pixels.iter().flat_map(Color32::to_srgba_unmultiplied).collect();
             let result = image::RgbaImage::from_raw(w as u32, h as u32, rgba)
                 .ok_or_else(|| "bad image size".to_string())
                 .and_then(|img| img.save(&path).map_err(|e| e.to_string()));
@@ -2484,7 +2484,7 @@ fn button(ui: &mut egui::Ui, rect: Rect, label: &str, icon: Icon, primary: bool,
     let text = dim(WHITE);
     let text_w = p.layout_no_wrap(label.to_string(), cond(19.0), text).size().x;
     let icon_w = if icon == Icon::None { 0.0 } else { 26.0 };
-    let x0 = r.center().x - (icon_w + text_w) / 2.0;
+    let x0 = r.center().x - f32::midpoint(icon_w, text_w);
     if icon != Icon::None {
         draw_icon(p, pos2(x0 + 8.0, r.center().y), icon, dim(if primary { WHITE } else { ICON }));
     }
@@ -4018,7 +4018,7 @@ mod tests {
         let ids: Vec<(usize, usize, Rect)> = harness.state().overlay_tile_rects.borrow().clone();
         let find = |k: usize, r: usize| ids.iter().find(|t| t.0 == k && t.1 == r).map(|t| t.2.center()).expect("tile");
         let (from, to) = (find(1, 0), find(3, 0));
-        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         for event in [egui::Event::PointerMoved(from), press(from, true), egui::Event::PointerMoved(from + vec2(15.0, 0.0)), egui::Event::PointerMoved(to), press(to, false)] {
             harness.input_mut().events.push(event);
             harness.step();
@@ -4043,7 +4043,7 @@ mod tests {
         let rects = harness.state().overlay_tile_rects.borrow().clone();
         let right = rects.iter().map(|t| t.2.right()).fold(f32::MIN, f32::max);
         let (top, bottom) = rects.iter().fold((f32::MAX, f32::MIN), |(a, b), t| (a.min(t.2.top()), b.max(t.2.bottom())));
-        let plus = pos2(right, (top + bottom) / 2.0);
+        let plus = pos2(right, f32::midpoint(top, bottom));
         for event in [egui::Event::PointerMoved(plus), press(plus, true), press(plus, false)] {
             harness.input_mut().events.push(event);
             harness.step();

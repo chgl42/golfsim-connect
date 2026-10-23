@@ -10,6 +10,11 @@ on:
 permissions:
   contents: write
 
+# A newer push to a branch or PR cancels the build still running for it; tag builds (releases) always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 env:
   ZIP: OpenLaunch-Connect-macos-arm64.zip
 
@@ -20,12 +25,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
 
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-about
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
         run: cargo test --all-targets

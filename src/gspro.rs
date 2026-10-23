@@ -544,7 +544,7 @@ mod tests {
     /// leaves the launch monitor's readiness as it was.
     #[test]
     fn test_shot_keeps_the_readiness() {
-        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let mut link = Link::new(listener.local_addr().unwrap().to_string(), false);
         link.ensure_connected();
@@ -559,7 +559,7 @@ mod tests {
     /// Shots that GSPro never answers: after two the app says how to fix it, an answer clears it.
     #[test]
     fn silent_gspro_connect_is_reported() {
-        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
         let mut link = Link::new("127.0.0.1:1".into(), false);
         link.count_unanswered();
         assert!(!link.silent, "one silent shot means nothing");
@@ -572,8 +572,8 @@ mod tests {
     /// A shot while GSPro is away waits for it and goes out once it is back.
     #[test]
     fn held_shot_is_sent_after_the_reconnect() {
-        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-        crate::history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
         let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
         let mut link = Link::new(addr.to_string(), false);
         let (ball, club) = crate::engine::test_shot();
@@ -604,8 +604,8 @@ mod tests {
     /// A held shot is given up when GSPro doesn't come back in time.
     #[test]
     fn held_shot_is_dropped_after_a_while() {
-        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-        crate::history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
+        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
         let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
         let mut link = Link::new(addr.to_string(), false);
         let (ball, club) = crate::engine::test_shot();
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(vals.len(), 2);
         assert_eq!(vals[1]["Player"]["Club"], "DR");
         assert_eq!(buf, br#"{"Code":2"#);
-        buf.extend_from_slice(br#"00}"#);
+        buf.extend_from_slice(br"00}");
         assert_eq!(drain_json_values(&mut buf).len(), 1);
         assert!(buf.is_empty());
     }

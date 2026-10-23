@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn metric_row_matches_its_shot() {
-        let r = result_for(SAMPLE, 191.029129 / MPH_TO_KMH, 16.8).expect("matches");
+        let r = result_for(SAMPLE, 191.029_129 / MPH_TO_KMH, 16.8).expect("matches");
         assert!((r.carry - 150.04).abs() < 0.01 && (r.total - 152.77).abs() < 0.01);
         assert!((r.apex - 28.69).abs() < 0.01 && (r.side - 5.01).abs() < 0.01 && (r.descent - 47.4).abs() < 0.01);
         assert_eq!(r.to_pin.map(f64::round), Some(239.0));

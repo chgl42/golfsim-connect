@@ -84,7 +84,7 @@ pub fn tr_detail(text: &str) -> String {
     text.to_string()
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines, reason = "one flat match arm per UI text; splitting the table would only scatter it")]
 fn de(en: &str) -> Option<&'static str> {
     Some(match en {
         // Navigation and sections

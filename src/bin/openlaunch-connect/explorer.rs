@@ -571,7 +571,7 @@ impl App {
                 tile_ui(ui, rect, i, tile, ex.arrange, page_tiles.len(), &ctx, focus, &mut edits, &mut clicked);
                 rects.push(rect);
             }
-            ex.tile_rects = rects.clone();
+            ex.tile_rects.clone_from(&rects);
             if ex.arrange {
                 drag_tiles(ui, &rects, &page_tiles, &mut edits);
                 if let Some(&(c, r, _, _)) = spots.last() {
@@ -711,7 +711,7 @@ impl ExplorerState {
 
     /// The tile overlay's tile in `rect` (its window, or the preview `slot` 1): the session's shots,
     /// or those with the club chosen in GSPro. Nothing to click; a new shot flies in the 3D tile.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "the overlay window and the preview pass their own slot, config, shots, club and units; a struct would only rename them")]
     pub(super) fn overlay_tile(
         &mut self,
         ui: &mut egui::Ui,
@@ -922,7 +922,7 @@ struct TileCtx<'a> {
     display: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a tile's place, shared context and output slots (edits, clicked) are passed through as is")]
 fn tile_ui(
     ui: &mut egui::Ui,
     rect: Rect,
@@ -1024,7 +1024,7 @@ fn tile_ui(
 }
 
 /// What a tile shows, drawn into `body`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "a tile's place, shared context and output slots (edits, clicked) are passed through as is")]
 fn tile_body(
     ui: &mut egui::Ui,
     body: Rect,
@@ -1667,7 +1667,7 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
         if s.excluded {
             let label = ui.label(RichText::new(tr("excluded")).size(12.0).color(AMBER));
             if let Some(m) = s.misread {
-                label.on_hover_text(tr("Left out on its own: possible misread ({r}). Count takes it back.").replace("{r}", super::misread_name(m)));
+                label.on_hover_text(tr("Left out on its own: possible misread ({r}). Count takes it back.").replace("{r}", misread_name(m)));
             }
         }
         if f.from_gspro {
@@ -2003,10 +2003,10 @@ mod tests {
         let (from, to) = (pos2(250.0, 300.0), pos2(650.0, 300.0));
         let events = [
             egui::Event::PointerMoved(from),
-            egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+            egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
             egui::Event::PointerMoved(from + vec2(20.0, 0.0)),
             egui::Event::PointerMoved(to),
-            egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+            egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
         ];
         for event in events {
             harness.input_mut().events.push(event);
@@ -2041,8 +2041,8 @@ mod tests {
         let at = pos2(tile.right() - 30.0, tile.top() + 28.0 + 4.0 + 16.0);
         for event in [
             egui::Event::PointerMoved(at),
-            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
         ] {
             harness.input_mut().events.push(event);
             harness.step();
@@ -2072,12 +2072,12 @@ mod tests {
         }
         let tile = harness.state().explorer.tile_rects[0];
         let from = tile.center();
-        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
         for event in [egui::Event::PointerMoved(from), press(from, true), egui::Event::PointerMoved(from + vec2(60.0, 20.0)), press(from + vec2(60.0, 20.0), false)] {
             harness.input_mut().events.push(event);
             harness.step();
         }
-        let orbit = |h: &Harness<'_, App>| h.state().explorer.views.borrow().get(&(1, 0)).map(|v| v.orbit_state());
+        let orbit = |h: &Harness<'_, App>| h.state().explorer.views.borrow().get(&(1, 0)).map(flight3d::TileView::orbit_state);
         let (yaw, pitch, _) = orbit(&harness).expect("view kept");
         assert!(yaw < 0.0 && pitch > 0.0, "turned: {yaw} {pitch}");
         // Both clicks within one frame: kittest's clock doesn't move between steps.
