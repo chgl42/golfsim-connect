@@ -28,13 +28,16 @@ the pin) is read from its own SQLite database in the CrossOver bottle
 
 ## Building blocks
 
-One crate with a library and two binaries.
+One crate with a library and two binaries. The GUI is part of the library, behind the cargo
+feature `gui` (on by default), so another crate can build its own app binary from it
+([ADR-008](adr/adr-008-ui-in-the-library.md)); the CLI builds without it.
 
 | Part | Path | Role |
 |---|---|---|
 | Library | `src/lib.rs` | Everything both binaries share: device, GSPro link, data, settings, texts |
-| App | `src/bin/openlaunch-connect.rs` (+ `openlaunch-connect/`) | The egui/eframe GUI: pages, overlays, shots explorer, macOS window handling |
-| CLI | `src/main.rs` | `openlaunch`: the bridge without a GUI (test shots, debug output) |
+| App | `src/ui/` (module `ui`, feature `gui`) | The egui/eframe GUI: pages, overlays, shots explorer, macOS window handling |
+| App binary | `src/bin/openlaunch-connect/main.rs` | `openlaunch-connect`: calls `ui::run()` |
+| CLI | `src/main.rs` | `openlaunch`: the bridge without a GUI (test shots, debug output); `--no-default-features` leaves egui out |
 | R10 protocol | `vendor/tenover/` | Vendored [10over](https://github.com/divotmaker/10over) with local patches ([ADR-003](adr/adr-003-vendor-tenover-with-local-patches.md)) |
 | Packaging | `make-app.sh`, `packaging/` | App bundle, icon, ad-hoc signing, licenses |
 
@@ -54,7 +57,8 @@ One crate with a library and two binaries.
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
-| `i18n` | `tr()` lookup, German table, language switch | Closed table |
+| `i18n` | `tr()` lookup, German table, language switch; tables added by other crates (`register`) | One `match`, plus registered tables |
+| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `kit`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
@@ -62,20 +66,31 @@ One crate with a library and two binaries.
 
 ### App
 
+The module `ui` (`src/ui/`):
+
+| File | What |
+|---|---|
+| `mod.rs` | `run()`, `App` with the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
+| `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
+| `overlay.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements |
+| `explorer.rs`, `explorer/flight3d.rs` | The *Shots* page (shots explorer) and its 3D flight tile |
+| `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
+
 - `App` holds the pages (*Play*, *Shots*, *Overlay*, *Settings*, *Log*) and all of their state.
-  Pages are methods on `App`.
-- **Shots explorer** (`openlaunch-connect/explorer.rs`): pages of tiles on a grid. Tile kinds
-  (table, details, averages, dispersion, 3D flight in `flight3d.rs`) are an enum in `settings`.
-- **Overlays**: the status overlay and tile overlays are extra egui viewports that stay with GSPro:
+  Pages are methods on `App`, spread over the files above.
+- **Shots explorer** (`ui/explorer.rs`): pages of tiles on a grid. Tile kinds
+  (table, details, averages, dispersion, 3D flight in `explorer/flight3d.rs`) are an enum in `settings`.
+- **Overlays** (`ui/overlay.rs`): the status overlay and tile overlays are extra egui viewports that stay with GSPro:
   above it while it is in front, ordered right above its window otherwise, on its screen, hidden without it. On macOS their
-  frames, window levels and stacking above GSPro are set through AppKit (`mac` module), because
+  frames, window levels and stacking above GSPro are set through AppKit (`ui/mac.rs`), because
   egui reports a second window's size in zoomed points and doesn't apply layer transforms there
   ([ADR-005](adr/adr-005-overlay-windows-placed-through-appkit.md)).
   `OverlayContent` builds what both the overlay window and the preview on the *Overlay* page draw.
 - **Zoom**: the layout base size is 1000×470. With interface size *Auto* larger windows zoom the
   whole UI; the overlay windows run with their own zoom.
-- **Look**: controls are drawn with the painter (`button`, `card`, `toggle`, …) in GSPro's
-  in-game style. Text in DIN Condensed is centred with `caps_text`.
+- **Look**: controls are drawn with the painter (`button`, `card`, `toggle`, `confirm`, …) in GSPro's
+  in-game style, in the public module `ui::kit`, so pages from another crate look the same.
+  Text in DIN Condensed is centred with `caps_text`.
 
 ## Runtime
 
@@ -156,7 +171,8 @@ that list isn't always the session (all time, the preview's sample shot).
 | `history::PERSIST` | `engine::start` (off in demo mode) | history writes |
 | `settings::SAVE` | tests (off) | `Settings::save` |
 | `gspro::DEBUG` | GUI, CLI | `Link` |
-| `i18n` language | GUI, tests | `tr` |
+| `i18n` language | GUI, tests (per thread in unit tests) | `tr` |
+| `i18n` registered tables | `i18n::register` (other crates) | `tr`, `tr_detail`, `untranslated` |
 | `notify::ENABLED` | GUI | `notify::alert` |
 
 ## Data
@@ -173,7 +189,7 @@ that list isn't always the session (all time, the preview's sample shot).
 - **Bluetooth**: btleplug on CoreBluetooth. The permission belongs to the app bundle
   (`NSBluetoothAlwaysUsageDescription`). The R10 doesn't appear in the macOS Bluetooth settings.
 - **Windows of the app**: AppKit through `objc2` for overlay frames, window levels, ordering
-  above GSPro's window and full-screen spaces (`mac` module in the app).
+  above GSPro's window and full-screen spaces (`ui/mac.rs`).
 - **GSPro under CrossOver**: GSPro's processes are Wine processes named `GSPro.exe` /
   `GSPconnect.exe`; its files live in the bottle's `drive_c`.
 
@@ -181,7 +197,8 @@ that list isn't always the session (all time, the preview's sample shot).
 
 - `cargo test --all-targets` runs in CI on a macOS runner, then `make-app.sh` builds the bundle.
 - Unit tests cover the pure modules (`mapping`, `flight`, `shape`, stats and CSV in `history`,
-  matching in `gspro_db`, settings serialization). GUI tests use egui_kittest.
+  matching in `gspro_db`, settings serialization). GUI tests use egui_kittest; they are lib tests
+  and run beside the others (they hold `test_util::state_lock()` where they use the shared state).
 - README screenshots are rendered offscreen (`readme_screenshots`), not compared to a reference.
 - Bluetooth, GSPro and overlay behaviour are tested by hand with a real R10 and GSPro.
 
@@ -201,10 +218,12 @@ can be added without editing the core in many places.
   before a subscriber subscribed aren't replayed.
 - **Tile kinds**: a new kind touches about ten places in three files.
 - **Pages**: page state lives as fields of `App` (28 fields); a new page touches five places.
-- **UI building blocks and translations** are private to the app binary and to one `match`, so
-  code outside the crate can't use them.
+- **UI in the library**: the UI is the module `ui` behind the feature `gui`, its building blocks
+  are public (`ui::kit`), and other crates add translations with `i18n::register`
+  ([ADR-008](adr/adr-008-ui-in-the-library.md)). Left: `ui::run()` takes no extra pages or tile
+  kinds yet – that comes with the two points above.
 - **Launch monitors**: R10 code and generic code are mixed in `engine` and `mapping`; names like
   `R10Status` are used for generic status. Left until a second device is added (issue #1).
 
 Planned order: settings, events, moving the UI into the library together with its building blocks
-and translations, then tile kinds and pages.
+and translations (all done), then tile kinds and pages (#73/#74).

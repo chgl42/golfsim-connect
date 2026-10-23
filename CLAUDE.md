@@ -18,7 +18,8 @@ Overview with diagrams (threads, a shot end to end, data, where change is hard):
 Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same PR, from `docs/adr/template.md`).
 
 
-- `src/lib.rs` – library used by both binaries
+- `src/lib.rs` – library used by both binaries; the UI (`ui`) is behind the cargo feature `gui` (default), so the
+  CLI builds without egui (`cargo build --bin openlaunch --no-default-features`)
   - `engine.rs` – R10 thread (BLE, reconnect, events → status) and start of the GSPro thread; `test_shot()`, `demo_session()`
   - `flight.rs` – estimated ball flight from the launch data (`fly()`: drag/lift from the spin factor, 3D,
     no wind; rough roll-out) → carry, total, apex, lateral, descent, path. GSPro doesn't send its results back.
@@ -40,7 +41,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
     "OpenR10 Connect" folder on start; reads old GSProR10Connect/R10 Bridge settings as a fallback)
   - `i18n.rs` – UI translation DE/EN, gettext style: `tr("English text")`, German table in `de()`;
     `tr_detail()` translates status texts with a " (…)" suffix. New UI texts always go through `tr()` – otherwise the
-    test `every_ui_text_has_a_german_translation` fails. The log stays English. Language: Settings (System/English/Deutsch).
+    test `every_ui_text_has_a_german_translation` (scans every file under `src/ui/`) fails. Other crates add their
+    German texts with `i18n::register(table)` and check them with `i18n::untranslated(&[sources])`. The log stays English. Language: Settings (System/English/Deutsch).
   - `notify.rs` – macOS notifications (mac-notification-sys, NSUserNotification – works ad-hoc signed):
     `notify::alert(Alert::…, "English text")`, at most once per kind and minute, `ENABLED` from the settings (CLI: off).
     Not testable from a sandboxed shell (no LaunchServices start, "NSNotificationCenter connection invalid") – use the
@@ -49,21 +51,26 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
     pill in the top bar; opt-out `check_updates`, skipped in demo mode.
   - `launcher.rs` – find/open the GSPro launcher in `~/Applications/CrossOver/…`
   - `log.rs` – timestamped log to stderr + `state`
-- `src/bin/openlaunch-connect.rs` – **the app** (egui/eframe), styled after GSPro's in-game look
+  - `ui/` – **the app** (ADR-008), see below
+- `src/bin/openlaunch-connect/main.rs` – the app's binary: only `openlaunch_connect::ui::run()`
+- `src/ui/mod.rs` – **the app** (egui/eframe), styled after GSPro's in-game look
   (navy, tiles, condensed figures, status panel with READY, battery glyph). Layout base size 1000×470 (`BASE_SIZE`);
   with the interface size *Auto* (`ui_scale: None`) larger windows zoom the whole UI uniformly (`apply_window_zoom`,
   `fit_zoom`, aspect ratio locked); a fixed interface size (1.0–1.5) sets the zoom and leaves the window free, with a
   minimum of the base size at that zoom (`min_size`), and pages get the extra room. The overlay window ignores that zoom: its
   pass runs with the overlay's size as zoom (`options.zoom_factor` set around `show_viewport_immediate`), and on macOS
-  its frame is set through AppKit (`mac::place_window`, native points, within the visible frame) – egui takes a second
-  window's size in native points but reports it in zoomed ones, and a layer transform isn't applied in it. The *Overlay* page sets the overlay's position, size, lines, opacity and
+  its frame is set through AppKit (`ui/mac.rs`, `mac::place_window`, native points, within the visible frame) – egui takes a second
+  window's size in native points but reports it in zoomed ones, and a layer transform isn't applied in it.
+  Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
   `OverlayContent` builds what both the overlay window and the preview draw. The *Shots* page is the explorer
-  (`src/bin/openlaunch-connect/explorer.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
+  (`src/ui/explorer.rs`, the 3D flight tile in `explorer/flight3d.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
   near-square cells (`grid`, `place`), shared filter and selection (`ExplorerState`, not saved). Window size is saved in the settings (`window_size`).
   Text in DIN Condensed (`cond()`) inside boxes/buttons always via `caps_text()`: the capitals sit ~¼ of the font size
   above the middle of the text box; `caps_text` centres the capitals on `pos.y` (measured).
-  Controls (buttons, toggles, segments, stepper, cards) are drawn with the painter – see `button()`, `card()`, `toggle()`.
+  Controls (buttons, toggles, segments, stepper, cards, the confirm dialog) are drawn with the painter, in the public
+  module `ui::kit` (`src/ui/kit.rs`) with the palette – see `button()`, `card()`, `toggle()`, `confirm()`. Only `ui::run`,
+  `ui::kit` and the re-exported `ui::egui`/`ui::eframe` are public; everything else stays `pub(super)`/private.
 - `src/main.rs` – CLI `openlaunch` (`t` + Enter = test shot, `--test-shot`, `--debug`)
 - `vendor/tenover/` – R10 protocol library [divotmaker/10over](https://github.com/divotmaker/10over)
   (MIT/Apache, alpha) with **local patches**, documented in `vendor/tenover/PATCHES.md`: bundled protoc, battery level
@@ -120,12 +127,14 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - Test the GSPro side without GSPro: `tools/mock_gspro.py [port]` expects exactly one JSON per `recv()`, answers 501
   otherwise and 200 + 201 for shots. Use `--gspro 127.0.0.1:<port>`.
 - README screenshots are rendered offscreen with egui_kittest (no window, no screen recording permission):
-  `cargo test --bin openlaunch-connect readme_screenshots -- --ignored` writes `docs/images/screenshot-*.png`
+  `cargo test --lib readme_screenshots -- --ignored` writes `docs/images/screenshot-*.png`
   (1000×470 @2x, demo status from `demo_state()`), then `python3 tools/banner.py .` for the banner.
   `OPENLAUNCH_SCREENSHOT_LANG=de OPENLAUNCH_SCREENSHOT_DIR=<dir>` renders the German UI (check that texts fit).
   Capturing a real window with `screencapture` often fails: wgpu doesn't render occluded windows ("Skipping frame due to occlusion").
-- Tests that drive the app (kittest) must not write the real settings: `settings::SAVE` off (`demo_state()` does it;
-  set it yourself in tests that don't call it).
+- The UI tests (kittest) are lib tests now and run beside the others: they must not write the real settings
+  (`settings::SAVE` off; `demo_state()` does it, set it yourself in tests that don't call it), and those that set up
+  or look at the shared state hold `test_util::state_lock()` (`demo_state()` returns it: `let _state = demo_state();`).
+  In unit tests the language (`i18n::set`) is per thread.
 - Unit tests never touch the real data folder: `Settings::load_in`/`save_in` take the home folder (use
   `test_util::TempDir`); in lib tests the shot history is only written to the thread's `history::TEST_FILE`
   (`test_util::TestHistory`), else not at all. Tests that record shots or read `state`'s session/last shot hold
@@ -146,7 +155,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   the build. `[lints]` in `Cargo.toml` turns on `clippy::pedantic`; its `"allow"` entries are a **ratchet**: the
   lints that fired when it was set up, each with its count then. Don't add entries; to pay one down, delete the
   line and fix what clippy reports (or `#[expect]` the spots where the code is right as it is).
-  `vendor/tenover` is its own package and not linted.
+  `vendor/tenover` is its own package and not linted. CI also lints the library and the CLI without the GUI:
+  `cargo clippy --lib --bin openlaunch --no-default-features --locked -- -D warnings`.
 - No bare `#[allow]`: where code is right despite a lint, use `#[expect(lint, reason = "…")]` with a real reason
   (`allow_attributes[_without_reason]` warn; an `expect` that no longer fires is a warning too).
   `clippy.toml` lets tests use `unwrap`/`expect`.

@@ -16,3 +16,4 @@ no longer holds is marked *Superseded by ADR-NNN* or *Deprecated*, not deleted.
 | [ADR-005](adr-005-overlay-windows-placed-through-appkit.md) | Place overlay windows through AppKit | Accepted |
 | [ADR-006](adr-006-settings-tolerate-unknown-values.md) | Settings tolerate values they don't know | Accepted |
 | [ADR-007](adr-007-bridge-events.md) | Bridge events through an mpsc fan-out | Accepted |
+| [ADR-008](adr-008-ui-in-the-library.md) | UI in the library | Accepted |
