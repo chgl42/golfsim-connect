@@ -2,6 +2,7 @@
 //! returns the German text when German is active and falls back to English for
 //! anything not in the table. The log stays English on purpose (support/debugging).
 
+#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -41,16 +42,31 @@ impl Language {
     }
 }
 
+#[cfg(not(test))]
 static GERMAN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+thread_local! {
+    /// Unit tests: the language of this test thread, so tests that switch it (the UI tests, too)
+    /// can't change it for the tests running beside them.
+    static GERMAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Switch the UI language.
 pub fn set(language: Language) {
+    #[cfg(not(test))]
     GERMAN.store(language.is_german(), Ordering::Relaxed);
+    #[cfg(test)]
+    GERMAN.set(language.is_german());
 }
 
 #[must_use]
 pub fn german() -> bool {
-    GERMAN.load(Ordering::Relaxed)
+    #[cfg(not(test))]
+    let on = GERMAN.load(Ordering::Relaxed);
+    #[cfg(test)]
+    let on = GERMAN.get();
+    on
 }
 
 /// Translate a fixed UI text.
@@ -426,7 +442,7 @@ mod tests {
 
     #[test]
     fn every_ui_text_has_a_german_translation() {
-        let gui = [include_str!("bin/openlaunch-connect.rs"), include_str!("bin/openlaunch-connect/explorer.rs")]
+        let gui = [include_str!("ui/mod.rs"), include_str!("ui/explorer.rs")]
             .concat()
             .replace("\\n", "\n");
         let mut missing: Vec<&str> =
@@ -459,7 +475,7 @@ mod tests {
 
     #[test]
     fn details_keep_their_suffix() {
-        GERMAN.store(true, Ordering::Relaxed);
+        set(Language::German);
         assert_eq!(tr_detail("Connected (127.0.0.1:921)"), "Verbunden (127.0.0.1:921)");
         assert_eq!(
             tr_detail("R10 is tilted – please level it (Roll 1.0°, Pitch 4.2°)"),
@@ -468,7 +484,7 @@ mod tests {
         assert_eq!(tr_detail("Radar saturated (too close to wall/net?)"), "Radar übersteuert (zu nah an Wand/Netz?)");
         assert_eq!(tr_detail("Something new"), "Something new");
         assert_eq!(tr("Not in the table"), "Not in the table");
-        GERMAN.store(false, Ordering::Relaxed);
+        set(Language::English);
         assert_eq!(tr("SETTINGS"), "SETTINGS");
     }
 }

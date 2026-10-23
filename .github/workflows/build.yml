@@ -37,6 +37,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      - name: Clippy without the GUI (the CLI builds without egui)
+        run: cargo clippy --lib --bin openlaunch --no-default-features --locked -- -D warnings
+
       - name: Tests
         run: cargo test --all-targets
 

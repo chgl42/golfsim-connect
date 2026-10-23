@@ -1,5 +1,6 @@
-//! OpenLaunch Connect — desktop app around the R10 → GSPro bridge,
-//! styled after GSPro's in-game interface.
+//! The desktop app around the R10 → GSPro bridge (egui/eframe), styled after GSPro's in-game
+//! interface: pages, overlay windows, the shots explorer. Behind the `gui` feature; the binary
+//! `openlaunch-connect` only calls [`run`].
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,25 +9,25 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The egui and eframe this UI is built with, for code that adds to it.
+pub use eframe::{self, egui};
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, FontFamily, FontId, Margin, Rect, RichText, Sense, Stroke, StrokeKind,
+    Align2, Color32, CornerRadius, FontFamily, FontId, Margin, Rect, RichText, Sense, Stroke, StrokeKind,
     pos2, vec2,
 };
-use openlaunch_connect::engine;
-use openlaunch_connect::gspro::Cmd;
-use openlaunch_connect::history::{self, ExportFormat, ShotRecord};
-use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
-use openlaunch_connect::launcher;
-use openlaunch_connect::num;
-use openlaunch_connect::log;
-use openlaunch_connect::misread::Misread;
-use openlaunch_connect::settings::{Arrangement, DEFAULT_ARRANGEMENT, OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
-use openlaunch_connect::shape::{Curve, Shape};
-use openlaunch_connect::state::{self, R10Status};
-use openlaunch_connect::update;
+use crate::engine;
+use crate::gspro::Cmd;
+use crate::history::{self, ExportFormat, ShotRecord};
+use crate::i18n::{self, Language, tr, tr_detail};
+use crate::launcher;
+use crate::num;
+use crate::log;
+use crate::misread::Misread;
+use crate::settings::{Arrangement, DEFAULT_ARRANGEMENT, OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
+use crate::shape::{Curve, Shape};
+use crate::state::{self, R10Status};
+use crate::update;
 
-// Next to this file (the crate root of this binary is src/bin/).
-#[path = "openlaunch-connect/explorer.rs"]
 mod explorer;
 
 const APP_NAME: &str = "OpenLaunch Connect";
@@ -79,14 +80,18 @@ fn caps_text(p: &egui::Painter, pos: egui::Pos2, h: egui::Align, text: impl ToSt
     p.text(pos + vec2(0.0, size * CAPS_OFFSET), Align2([h, egui::Align::Center]), text, cond(size), color)
 }
 
-fn main() -> eframe::Result {
+/// Starts the bridge and runs the app until its window is closed.
+///
+/// # Errors
+/// Returns eframe's error if the window can't be created.
+pub fn run() -> eframe::Result {
     Settings::migrate_data_dir();
     let settings = Settings::load();
     i18n::set(settings.language);
-    openlaunch_connect::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
+    crate::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
     log::info(&format!("{APP_NAME} {} started", env!("CARGO_PKG_VERSION")));
     let tx = engine::start(settings.to_config());
-    openlaunch_connect::gspro::DEBUG.store(settings.debug, std::sync::atomic::Ordering::Relaxed);
+    crate::gspro::DEBUG.store(settings.debug, std::sync::atomic::Ordering::Relaxed);
 
     if settings.check_updates && std::env::var_os("OPENLAUNCH_DEMO").is_none() {
         update::check_in_background();
@@ -318,7 +323,7 @@ impl App {
                 state::LastShot {
                     ball,
                     club: Some(club),
-                    tempo: Some(openlaunch_connect::mapping::Tempo { backswing: 0.81, downswing: 0.27 }),
+                    tempo: Some(crate::mapping::Tempo { backswing: 0.81, downswing: 0.27 }),
                     at: Instant::now(),
                     delivered: true,
                     shot_number: 0,
@@ -711,7 +716,7 @@ impl App {
                     .changed()
                 {
                     // Takes effect immediately; saved with the other settings.
-                    openlaunch_connect::notify::ENABLED.store(self.edit.notifications, std::sync::atomic::Ordering::Relaxed);
+                    crate::notify::ENABLED.store(self.edit.notifications, std::sync::atomic::Ordering::Relaxed);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
@@ -719,7 +724,7 @@ impl App {
                         .on_hover_text(tr("Sends a notification now. If none appears, allow notifications for OpenLaunch Connect in System Settings → Notifications."))
                         .clicked()
                     {
-                        openlaunch_connect::notify::send_now("Notifications are working.");
+                        crate::notify::send_now("Notifications are working.");
                     }
                 });
             });
@@ -786,7 +791,7 @@ impl App {
         let label = tr("RESET SHOTS VIEW");
         let w = ui.painter().layout_no_wrap(label.to_string(), cond(19.0), WHITE).size().x + 40.0;
         let reset_r = Rect::from_min_size(bar.min, vec2(w, bar.height()));
-        let is_default = self.saved.explorer == openlaunch_connect::settings::Explorer::default();
+        let is_default = self.saved.explorer == crate::settings::Explorer::default();
         if button(ui, reset_r, label, Icon::None, false, !is_default, tr("The shots view is as it came")) {
             self.confirm_reset = true;
         }
@@ -816,7 +821,7 @@ impl App {
                     }
                 });
             if reset {
-                self.note = Some(match self.change_settings(|s| s.explorer = openlaunch_connect::settings::Explorer::default()) {
+                self.note = Some(match self.change_settings(|s| s.explorer = crate::settings::Explorer::default()) {
                     Ok(()) => tr("Shots view reset.").into(),
                     Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
                 });
@@ -1501,7 +1506,7 @@ impl App {
             // Troubleshooting switch next to the log it fills; saved right away.
             let mut debug = self.saved.debug;
             if toggle(ui, &mut debug, tr("Log GSPro messages")).changed() {
-                openlaunch_connect::gspro::DEBUG.store(debug, std::sync::atomic::Ordering::Relaxed);
+                crate::gspro::DEBUG.store(debug, std::sync::atomic::Ordering::Relaxed);
                 let _ = self.change_settings(|s| s.debug = debug);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3492,7 +3497,7 @@ fn export_csv(shots: &[ShotRecord], format: ExportFormat) -> String {
     #[cfg(target_os = "macos")]
     let target = rfd::FileDialog::new().set_title(tr("Export shots as CSV")).set_file_name(&name).save_file();
     #[cfg(not(target_os = "macos"))]
-    let target = openlaunch_connect::settings::Settings::data_dir().map(|d| d.join(&name));
+    let target = crate::settings::Settings::data_dir().map(|d| d.join(&name));
     let Some(path) = target else {
         return String::new();
     };
@@ -3516,10 +3521,12 @@ fn short_path(p: &std::path::Path) -> String {
 mod tests {
     use super::*;
 
-    /// Status as during a real session, for the README screenshots.
-    pub(super) fn demo_state() {
+    /// Status as during a real session, for the README screenshots. Hold the returned lock while
+    /// the test runs: the lib's tests beside it record shots into the same state.
+    pub(super) fn demo_state() -> std::sync::MutexGuard<'static, ()> {
+        let lock = crate::test_util::state_lock();
         // Screenshot tests drive the app; they must not touch the real settings file.
-        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let (ball, club) = engine::test_shot();
         state::set_r10(R10Status::Ready, "Ready – hit away");
         state::set_gspro(true, "Connected (127.0.0.1:921)");
@@ -3530,7 +3537,7 @@ mod tests {
             s.gspro_handed = Some("RH".into());
             s.shots_sent = 9;
             s.session = engine::demo_session();
-            s.gspro_result = Some(openlaunch_connect::gspro_db::GsproResult {
+            s.gspro_result = Some(crate::gspro_db::GsproResult {
                 carry: 150.0,
                 total: 156.0,
                 side: 4.0,
@@ -3541,7 +3548,7 @@ mod tests {
             s.last_shot = Some(state::LastShot {
                 ball,
                 club: Some(club),
-                tempo: Some(openlaunch_connect::mapping::Tempo { backswing: 0.81, downswing: 0.27 }),
+                tempo: Some(crate::mapping::Tempo { backswing: 0.81, downswing: 0.27 }),
                 at: Instant::now().checked_sub(Duration::from_secs(4)).unwrap_or_else(Instant::now),
                 delivered: true,
                 shot_number: 56_728_296,
@@ -3566,6 +3573,7 @@ mod tests {
         ] {
             state::push_log(line.into());
         }
+        lock
     }
 
     /// `OPENLAUNCH_SCREENSHOT_DIR` overrides the target (default `docs/images`).
@@ -3578,7 +3586,7 @@ mod tests {
     }
 
     /// Regenerates the README screenshots offscreen (no window, no screen recording permission):
-    /// `cargo test --bin openlaunch-connect readme_screenshots -- --ignored`
+    /// `cargo test --lib readme_screenshots -- --ignored`
     /// (`OPENLAUNCH_SCREENSHOT_LANG=de` renders the German UI, e.g. to check that texts fit).
     #[test]
     #[ignore = "writes docs/images; run on demand"]
@@ -3591,7 +3599,7 @@ mod tests {
             Language::English
         };
         i18n::set(language);
-        demo_state();
+        let _state = demo_state();
         for (page, name) in [
             (Page::Play, "screenshot-play.png"),
             (Page::Shots, "screenshot-shots.png"),
@@ -3632,7 +3640,7 @@ mod tests {
         let hidden: std::collections::BTreeSet<Option<String>> =
             ["W5", "H3", "H4", "I6", "I8", "GW", "LW"].into_iter().map(|c| Some(c.to_string())).collect();
         let analysis = {
-            use openlaunch_connect::settings::{ExplorerPage, Metric, Tile, TileKind, TileSize};
+            use crate::settings::{ExplorerPage, Metric, Tile, TileKind, TileSize};
             let scatter = |x, y| Tile { kind: TileKind::Scatter, size: TileSize::W2H2, x, y, ..Tile::default() };
             ExplorerPage {
                 name: "Analysis".into(),
@@ -3654,7 +3662,7 @@ mod tests {
             settings.explorer.pages.push(analysis.clone());
             if configure {
                 // Room on the page for the empty tile that adds tiles.
-                settings.explorer.pages[2].tiles[0].size = openlaunch_connect::settings::TileSize::W3H2;
+                settings.explorer.pages[2].tiles[0].size = crate::settings::TileSize::W3H2;
             }
             let (tx, _rx) = std::sync::mpsc::channel();
             let mut harness = Harness::builder()
@@ -3713,14 +3721,14 @@ mod tests {
     }
 
     /// Renders the play and shots pages in a 1.5× window (wider than 1000:470) to check the zoom:
-    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --bin openlaunch-connect zoomed_window -- --ignored`
+    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --lib zoomed_window -- --ignored`
     #[test]
     #[ignore = "writes screenshots; run on demand"]
     fn zoomed_window() {
         use egui_kittest::Harness;
 
         i18n::set(Language::English);
-        demo_state();
+        let _state = demo_state();
         for (page, name) in [(Page::Play, "zoomed-play.png"), (Page::Shots, "zoomed-shots.png")] {
             let settings = Settings { overlay: OverlayPos::Off, language: Language::English, ..Settings::default() };
             let (tx, _rx) = std::sync::mpsc::channel();
@@ -3743,14 +3751,14 @@ mod tests {
     }
 
     /// Renders every page in a 1600×900 window at a fixed interface size of 100 %, where the pages
-    /// get the extra room: `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --bin openlaunch-connect large_window -- --ignored`
+    /// get the extra room: `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --lib large_window -- --ignored`
     #[test]
     #[ignore = "writes screenshots; run on demand"]
     fn large_window() {
         use egui_kittest::Harness;
 
         i18n::set(Language::English);
-        demo_state();
+        let _state = demo_state();
         for (page, name) in [
             (Page::Play, "large-play.png"),
             (Page::Shots, "large-shots.png"),
@@ -3779,7 +3787,7 @@ mod tests {
     }
 
     /// Renders the top-view impact graphic for a few shot shapes side by side:
-    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --bin openlaunch-connect impact_shapes -- --ignored`
+    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --lib impact_shapes -- --ignored`
     #[test]
     #[ignore = "writes screenshots; run on demand"]
     fn impact_shapes() {
@@ -3816,11 +3824,11 @@ mod tests {
     #[ignore = "writes screenshots; run on demand"]
     fn tile_overlay_states() {
         use egui_kittest::Harness;
-        use openlaunch_connect::settings::{Camera, Tile, TileKind};
+        use crate::settings::{Camera, Tile, TileKind};
 
         let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") { Language::German } else { Language::English };
         i18n::set(language);
-        demo_state();
+        let _state = demo_state();
         state::with(|s| s.session = engine::demo_range());
         let tile = |kind| Tile { kind, ..Tile::default() };
         for (name, cfg) in [
@@ -3879,7 +3887,7 @@ mod tests {
     #[ignore = "writes screenshots; run on demand"]
     fn overlay_states() {
         use egui_kittest::Harness;
-        demo_state();
+        let _state = demo_state();
         let (ball, club) = engine::test_shot();
         let shot = state::LastShot { ball, club: Some(club), tempo: None, at: Instant::now(), delivered: true, shot_number: 1, misread: None };
         let one_line = OverlayStyle { one_line: true, ..OverlayStyle::default() };
@@ -3994,7 +4002,7 @@ mod tests {
     /// copy, without saving or losing what is edited there.
     #[test]
     fn changes_outside_the_settings_page_keep_its_unsaved_edits() {
-        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let settings = Settings { launcher_path: Some(PathBuf::from("/GSPro.app")), ..Settings::default() };
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut app = App::new(settings, tx);
@@ -4023,7 +4031,7 @@ mod tests {
     fn overlay_tiles_are_dragged_into_place() {
         use egui_kittest::Harness;
 
-        demo_state();
+        let _state = demo_state();
         let settings = Settings { overlay: OverlayPos::TopRight, ..Settings::default() };
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
@@ -4081,6 +4089,7 @@ mod tests {
     fn overlay_scaling_leaves_the_main_window_alone() {
         use egui_kittest::Harness;
 
+        let _state = crate::test_util::state_lock();
         let settings = Settings { overlay: OverlayPos::TopRight, ..Settings::default() };
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder()

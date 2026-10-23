@@ -14,16 +14,33 @@ path = "src/main.rs"
 
 [[bin]]
 name = "openlaunch-connect"
-path = "src/bin/openlaunch-connect.rs"
+path = "src/bin/openlaunch-connect/main.rs"
+required-features = ["gui"]
+
+[features]
+default = ["gui"]
+# The desktop app (`openlaunch_connect::ui`: egui/eframe, AppKit windows). The CLI builds without
+# it: `cargo build --bin openlaunch --no-default-features`.
+gui = [
+    "dep:eframe",
+    "dep:image",
+    "dep:rfd",
+    "dep:objc2",
+    "dep:block2",
+    "dep:objc2-app-kit",
+    "dep:objc2-foundation",
+    "dep:objc2-core-graphics",
+    "dep:objc2-core-foundation",
+]
 
 [dependencies]
 tenover = { path = "vendor/tenover" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
-eframe = "0.35.0"
+eframe = { version = "0.35.0", optional = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }
 sys-locale = "0.3.2"
 ureq = "3"
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -35,13 +52,13 @@ strip = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"
-objc2 = "0.6"
-block2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder", "NSScreen", "NSEvent", "NSWorkspace", "NSRunningApplication", "libc", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "NSDictionary", "NSValue", "NSTimer", "NSDate", "block2"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindow"] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray"] }
-rfd = "0.17.2"
+objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, optional = true, features = ["std", "NSApplication", "NSWindow", "NSResponder", "NSScreen", "NSEvent", "NSWorkspace", "NSRunningApplication", "libc", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, optional = true, features = ["std", "NSString", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "NSDictionary", "NSValue", "NSTimer", "NSDate", "block2"] }
+objc2-core-graphics = { version = "0.3", default-features = false, optional = true, features = ["std", "CGWindow"] }
+objc2-core-foundation = { version = "0.3", default-features = false, optional = true, features = ["std", "CFArray"] }
+rfd = { version = "0.17.2", optional = true }
 
 [dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot", "eframe"] }
