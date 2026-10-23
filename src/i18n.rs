@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn every_ui_text_has_a_german_translation() {
-        let gui = [include_str!("ui/mod.rs"), include_str!("ui/explorer.rs")]
+        let gui = [include_str!("ui/mod.rs"), include_str!("ui/kit.rs"), include_str!("ui/overlay.rs"), include_str!("ui/explorer.rs")]
             .concat()
             .replace("\\n", "\n");
         let mut missing: Vec<&str> =

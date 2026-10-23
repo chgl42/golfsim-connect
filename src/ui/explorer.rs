@@ -373,34 +373,16 @@ impl App {
         }
         if let Some(i) = self.explorer.confirm_remove {
             let name = self.saved.explorer.pages.get(i).map(|p| page_name(p, i)).unwrap_or_default();
-            let mut remove = false;
-            let modal = egui::Modal::new(egui::Id::new("remove-page"))
-                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
-                .show(bar_ui.ctx(), |ui| {
-                    ui.set_width(360.0);
-                    ui.label(RichText::new(tr("Remove the page “{name}”?").replace("{name}", &name)).size(16.0).color(WHITE));
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(tr("Its tiles go with it. Your shots are kept.")).size(13.0).color(SOFT));
-                    ui.add_space(16.0);
-                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
-                    let ok_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
-                    let cancel_r = Rect::from_min_max(pos2(ok_r.left() - 140.0, row.top()), pos2(ok_r.left() - 10.0, row.bottom()));
-                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
-                        ui.close();
-                    }
-                    if button(ui, ok_r, tr("REMOVE"), Icon::None, true, true, "") {
-                        remove = true;
-                        ui.close();
-                    }
-                });
-            let pages = &mut self.saved.explorer.pages;
-            if remove && i < pages.len() && pages.len() > 1 {
-                pages.remove(i);
-                self.explorer.page = self.explorer.page.min(pages.len() - 1);
-                layout_changed = true;
-            }
-            if modal.should_close() {
+            let title = tr("Remove the page “{name}”?").replace("{name}", &name);
+            let text = tr("Its tiles go with it. Your shots are kept.");
+            if let Some(remove) = confirm(bar_ui.ctx(), "remove-page", &title, text, tr("REMOVE")) {
                 self.explorer.confirm_remove = None;
+                let pages = &mut self.saved.explorer.pages;
+                if remove && i < pages.len() && pages.len() > 1 {
+                    pages.remove(i);
+                    self.explorer.page = self.explorer.page.min(pages.len() - 1);
+                    layout_changed = true;
+                }
             }
         }
         if self.explorer.arrange && link(&mut bar_ui, "+", ICON).on_hover_text(tr("Add a page")).clicked() {
@@ -650,29 +632,26 @@ impl App {
         }
         if self.explorer.export_dialog {
             let mut picked = None;
-            let modal = egui::Modal::new(egui::Id::new("export-csv"))
-                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
-                .show(ui.ctx(), |ui| {
-                    ui.set_width(380.0);
-                    let title = tr("Export {n} shots as CSV").replace("{n}", &export.len().to_string());
-                    ui.label(RichText::new(title).size(16.0).color(WHITE));
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(tr("The shots shown, with the filter. Choose the layout:")).size(13.0).color(SOFT));
-                    ui.add_space(10.0);
-                    for f in ExportFormat::ALL {
-                        if format_choice(ui, f) {
-                            picked = Some(f);
-                            ui.close();
-                        }
-                        ui.add_space(6.0);
-                    }
-                    ui.add_space(8.0);
-                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
-                    let cancel_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
-                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+            let modal = dialog(ui.ctx(), "export-csv", 380.0, |ui| {
+                let title = tr("Export {n} shots as CSV").replace("{n}", &export.len().to_string());
+                ui.label(RichText::new(title).size(16.0).color(WHITE));
+                ui.add_space(4.0);
+                ui.label(RichText::new(tr("The shots shown, with the filter. Choose the layout:")).size(13.0).color(SOFT));
+                ui.add_space(10.0);
+                for f in ExportFormat::ALL {
+                    if format_choice(ui, f) {
+                        picked = Some(f);
                         ui.close();
                     }
-                });
+                    ui.add_space(6.0);
+                }
+                ui.add_space(8.0);
+                let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                let cancel_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
+                if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+                    ui.close();
+                }
+            });
             if modal.should_close() {
                 self.explorer.export_dialog = false;
             }
