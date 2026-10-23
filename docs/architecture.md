@@ -36,7 +36,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 |---|---|---|
 | Library | `src/lib.rs` | Everything both binaries share: device, GSPro link, data, settings, texts |
 | App | `src/ui/` (module `ui`, feature `gui`) | The egui/eframe GUI: pages, overlays, shots explorer, macOS window handling |
-| App binary | `src/bin/openlaunch-connect/main.rs` | `openlaunch-connect`: calls `ui::run()` |
+| App binary | `src/bin/openlaunch-connect/main.rs` | `openlaunch-connect`: calls `ui::run()` (another crate calls `ui::run_with` with its pages) |
 | CLI | `src/main.rs` | `openlaunch`: the bridge without a GUI (test shots, debug output); `--no-default-features` leaves egui out |
 | R10 protocol | `vendor/tenover/` | Vendored [10over](https://github.com/divotmaker/10over) with local patches ([ADR-003](adr/adr-003-vendor-tenover-with-local-patches.md)) |
 | Packaging | `make-app.sh`, `packaging/` | App bundle, icon, ad-hoc signing, licenses |
@@ -58,7 +58,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
 | `i18n` | `tr()` lookup, German table, language switch; tables added by other crates (`register`) | One `match`, plus registered tables |
-| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `kit`, re-exported `egui`/`eframe`; the rest `pub(super)` |
+| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `run_with`, `Page`, `AppCtx`, `kit`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
@@ -70,14 +70,19 @@ The module `ui` (`src/ui/`):
 
 | File | What |
 |---|---|
-| `mod.rs` | `run()`, `App` with the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
+| `mod.rs` | `run()`/`run_with()`, `App`, the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
+| `page.rs` | The `Page` trait, `AppCtx` (what pages share), the list of pages |
 | `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
 | `overlay.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements |
 | `explorer.rs`, `explorer/flight3d.rs` | The *Shots* page (shots explorer) and its 3D flight tile |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
 
-- `App` holds the pages (*Play*, *Shots*, *Overlay*, *Settings*, *Log*) and all of their state.
-  Pages are methods on `App`, spread over the files above.
+- **Pages** implement the trait `Page` (`id`, `label`, `ui`) and keep their own state
+  ([ADR-010](adr/adr-010-pages-own-their-state.md)). `App` holds the list of pages – *Play*,
+  *Shots*, *Log*, *Overlay*, the pages given to `run_with`, *Settings* – and the window, zoom,
+  overlays and capture. A page reaches what pages share through `AppCtx`: the settings and
+  `change_settings`, the command sender, and for the core pages the Settings page's copy, the
+  explorer state and the overlay being moved.
 - **Shots explorer** (`ui/explorer.rs`): pages of tiles on a grid. Tile kinds
   (table, details, averages, dispersion, 3D flight in `explorer/flight3d.rs`) are an enum in `settings`.
 - **Overlays** (`ui/overlay.rs`): the status overlay and tile overlays are extra egui viewports that stay with GSPro:
@@ -210,20 +215,23 @@ can be added without editing the core in many places.
 - **Settings**: still one flat struct, but it reads what a newer or extended build wrote: an
   unknown value drops only its entry, unknown top-level keys are written back unchanged, and an
   unreadable file is kept as `settings.json.bad` ([ADR-006](adr/adr-006-settings-tolerate-unknown-values.md)).
-  The GUI changes settings through one method, `App::change_settings`. Left: unknown keys inside
+  The GUI changes settings through one method, `AppCtx::change_settings`. Left: unknown keys inside
   nested objects and dropped entries are still lost on the next save.
 - **Events**: shots, GSPro's results and status changes are published as events
   ([ADR-007](adr/adr-007-bridge-events.md)), and recording moved from `gspro` into `recorder`.
   Left: the GUI doesn't subscribe yet (it diffs the shots a tile shows), and events published
   before a subscriber subscribed aren't replayed.
 - **Tile kinds**: a new kind touches about ten places in three files.
-- **Pages**: page state lives as fields of `App` (28 fields); a new page touches five places.
+- **Pages**: each page is a type implementing `Page` with its own state; the navigation,
+  `OPENLAUNCH_PAGE` and the README screenshots go through one list, and another crate adds pages
+  with `ui::run_with` ([ADR-010](adr/adr-010-pages-own-their-state.md)). Left: an extension's
+  page sees only the settings and the command sender; no premium marker yet.
 - **UI in the library**: the UI is the module `ui` behind the feature `gui`, its building blocks
   are public (`ui::kit`), and other crates add translations with `i18n::register`
-  ([ADR-008](adr/adr-008-ui-in-the-library.md)). Left: `ui::run()` takes no extra pages or tile
-  kinds yet – that comes with the two points above.
+  ([ADR-008](adr/adr-008-ui-in-the-library.md)). Left: no extra tile kinds yet (#73); extra
+  pages go through `ui::run_with`.
 - **Launch monitors**: R10 code and generic code are mixed in `engine` and `mapping`; names like
   `R10Status` are used for generic status. Left until a second device is added (issue #1).
 
 Planned order: settings, events, moving the UI into the library together with its building blocks
-and translations (all done), then tile kinds and pages (#73/#74).
+and translations (all done), then pages (done) and tile kinds (#73).
