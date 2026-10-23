@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -81,30 +82,19 @@ impl Default for Explorer {
     /// tee, the side and above, and the data (table and details of a shot). The names are shown
     /// translated (see `DEFAULT_PAGE_NAMES`).
     fn default() -> Self {
-        let tile = |kind, size, camera| Tile { kind, size, camera, ..Tile::default() };
+        let flight = |size, camera: &str| Tile::new("flight", size).with(&serde_json::json!({ "camera": camera }));
         let page = |name: &str, tiles| ExplorerPage { name: name.into(), tiles };
         Self {
             pages: vec![
                 page(
                     DEFAULT_PAGE_NAMES[0],
-                    vec![
-                        tile(TileKind::Table, TileSize::W3H2, Camera::Tee),
-                        tile(TileKind::Dispersion, TileSize::W2H2, Camera::Tee),
-                        tile(TileKind::Flight, TileSize::W1H2, Camera::Above),
-                    ],
+                    vec![Tile::new("table", TileSize::W3H2), Tile::new("dispersion", TileSize::W2H2), flight(TileSize::W1H2, "above")],
                 ),
                 page(
                     DEFAULT_PAGE_NAMES[1],
-                    vec![
-                        tile(TileKind::Flight, TileSize::W2H2, Camera::Tee),
-                        tile(TileKind::Flight, TileSize::W3H2, Camera::Side),
-                        tile(TileKind::Flight, TileSize::W1H2, Camera::Above),
-                    ],
+                    vec![flight(TileSize::W2H2, "tee"), flight(TileSize::W3H2, "side"), flight(TileSize::W1H2, "above")],
                 ),
-                page(
-                    DEFAULT_PAGE_NAMES[2],
-                    vec![tile(TileKind::Table, TileSize::W4H2, Camera::Tee), tile(TileKind::Details, TileSize::W2H2, Camera::Tee)],
-                ),
+                page(DEFAULT_PAGE_NAMES[2], vec![Tile::new("table", TileSize::W4H2), Tile::new("details", TileSize::W2H2)]),
             ],
         }
     }
@@ -122,114 +112,64 @@ pub struct ExplorerPage {
     pub tiles: Vec<Tile>,
 }
 
-/// One tile: what it shows and how many cells it covers.
+/// One tile: its kind, how many cells it covers and the kind's own settings. The kinds are in
+/// the UI (`ui::explorer::TileKind`); here a tile is data, so a kind this build doesn't have is
+/// kept as it is.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Tile {
-    pub kind: TileKind,
+    /// Id of the tile's kind, e.g. `"table"`, `"dispersion"` or `"flight"`.
+    pub kind: String,
     pub size: TileSize,
-    /// Table: averages per club instead of single shots.
-    pub averages: bool,
-    /// Dispersion: where the ball comes to rest instead of where it lands.
-    pub total: bool,
-    /// Scatter: values on the horizontal and vertical axis.
-    pub x: Metric,
-    pub y: Metric,
-    /// 3D flight: where the camera looks from.
-    pub camera: Camera,
-}
-
-/// Camera of a 3D flight tile.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Camera {
-    /// Behind the tee, looking down the range.
-    #[default]
-    Tee,
-    /// From the side: height over distance.
-    Side,
-    /// From above and behind, at an angle.
-    Above,
-}
-
-impl Camera {
-    pub const ALL: [Self; 3] = [Self::Tee, Self::Side, Self::Above];
+    /// The kind's settings, next to `kind` and `size` in the file (e.g. `"averages": true`). Kept
+    /// as they are, with those of the kinds the tile was before and of kinds this build doesn't
+    /// have; read and changed with [`Tile::config`] and [`Tile::change_config`].
+    #[serde(flatten)]
+    pub config: Map<String, Value>,
 }
 
 impl Default for Tile {
     fn default() -> Self {
-        Self {
-            kind: TileKind::Table,
-            size: TileSize::W2H2,
-            averages: false,
-            total: false,
-            x: Metric::Hla,
-            y: Metric::SpinAxis,
-            camera: Camera::Tee,
-        }
+        Self::new("table", TileSize::W2H2)
     }
 }
 
-/// A value of a shot that a scatter tile can plot.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Metric {
-    BallSpeed,
-    ClubSpeed,
-    Smash,
-    Vla,
-    Hla,
-    Spin,
-    SpinAxis,
-    AngleOfAttack,
-    Path,
-    FaceToTarget,
-    FaceToPath,
-    Carry,
-    Total,
-    Side,
-    Apex,
-    Tempo,
-}
+impl Tile {
+    /// A tile of the kind `kind` with its kind's default settings.
+    #[must_use]
+    pub fn new(kind: &str, size: TileSize) -> Self {
+        Self { kind: kind.into(), size, config: Map::new() }
+    }
 
-impl Metric {
-    pub const ALL: [Self; 16] = [
-        Self::BallSpeed,
-        Self::ClubSpeed,
-        Self::Smash,
-        Self::Vla,
-        Self::Hla,
-        Self::Spin,
-        Self::SpinAxis,
-        Self::AngleOfAttack,
-        Self::Path,
-        Self::FaceToTarget,
-        Self::FaceToPath,
-        Self::Carry,
-        Self::Total,
-        Self::Side,
-        Self::Apex,
-        Self::Tempo,
-    ];
-}
+    /// The kind's settings as its own type `T` (e.g. a struct with `#[serde(default)]`): what the
+    /// tile doesn't have is `T`'s default, and settings it can't read are all of `T`'s defaults.
+    #[must_use]
+    pub fn config<T: DeserializeOwned + Default>(&self) -> T {
+        serde_json::from_value(Value::Object(self.config.clone())).unwrap_or_default()
+    }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TileKind {
-    #[default]
-    Table,
-    /// All values of the chosen (or latest) shot.
-    Details,
-    /// Landing points from above, with mean and spread per club.
-    Dispersion,
-    /// Two values against each other.
-    Scatter,
-    /// The estimated flights in 3D.
-    Flight,
-}
+    /// Changes the kind's settings, read as `T` (see [`Tile::config`]), with `change`; writes them
+    /// back only if they changed, keeping the tile's other settings.
+    pub fn change_config<T: DeserializeOwned + Serialize + Default + PartialEq>(&mut self, change: impl FnOnce(&mut T)) {
+        let mut config: T = self.config();
+        change(&mut config);
+        if config != self.config() {
+            self.set_config(&config);
+        }
+    }
 
-impl TileKind {
-    pub const ALL: [Self; 5] = [Self::Table, Self::Details, Self::Dispersion, Self::Scatter, Self::Flight];
+    /// The tile with the fields of `config` (anything that serializes to an object) as settings.
+    #[must_use]
+    pub fn with(mut self, config: &impl Serialize) -> Self {
+        self.set_config(config);
+        self
+    }
+
+    fn set_config(&mut self, config: &impl Serialize) {
+        if let Ok(Value::Object(fields)) = serde_json::to_value(config) {
+            self.config.extend(fields);
+        }
+    }
 }
 
 /// Tile sizes in cells (width × height), like widgets on a phone, or the whole page.
@@ -435,7 +375,7 @@ impl Default for TileOverlay {
         Self {
             pos: OverlayPos::Left,
             spot: None,
-            tile: Tile { kind: TileKind::Dispersion, ..Tile::default() },
+            tile: Tile::new("dispersion", TileSize::W2H2),
             width: 360.0,
             opacity: 0.85,
             club_only: false,
@@ -718,7 +658,7 @@ mod tests {
     fn explorer_layout_round_trips() {
         let mut s = Settings::default();
         s.explorer.pages[0].name = "Range".into();
-        s.explorer.pages[0].tiles.push(Tile { kind: TileKind::Details, size: TileSize::W1H2, ..Tile::default() });
+        s.explorer.pages[0].tiles.push(Tile::new("details", TileSize::W1H2));
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains(r#""size":"w1_h2""#) || json.contains(r#""size":"w1h2""#), "{json}");
         assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), s);
@@ -817,7 +757,8 @@ mod tests {
     }
 
     /// One value this version doesn't know (a tile kind or overlay item of a newer version, or a
-    /// typo) drops only what holds it; the rest survives (bug #70: all fell back to the defaults).
+    /// typo) costs at most what holds it; the rest survives (bug #70: all fell back to the defaults).
+    /// A tile of an unknown kind is kept (ADR-009).
     #[test]
     fn one_unknown_value_keeps_the_other_settings() {
         let mut s = Settings { metric: false, gspro_addr: "127.0.0.1:9210".into(), ..Settings::default() };
@@ -837,28 +778,29 @@ mod tests {
             assert!(!Settings::dir_in(home.path(), DATA_DIR).join("settings.json.bad").exists(), "no copy needed");
             loaded.push(l);
         }
-        // Only the tile with the unknown kind is gone, only the unknown item's place is empty.
-        assert_eq!(loaded[0].explorer.pages[0].tiles, s.explorer.pages[0].tiles[1..]);
+        // The tile with the unknown kind is kept, only the unknown item's place is empty.
+        assert_eq!(loaded[0].explorer.pages[0].tiles[0].kind, "gapping");
+        assert_eq!(loaded[0].explorer.pages[0].tiles[1..], s.explorer.pages[0].tiles[1..]);
         assert_eq!(loaded[0].overlay_style, s.overlay_style);
         assert_eq!(loaded[1].overlay_style.layout[1], [None, Some(OverlayItem::ClubSpeed)]);
         assert_eq!(loaded[1].explorer, s.explorer);
     }
 
-    /// An unknown tile kind takes only its tile with it, in the explorer and in the tile overlays
+    /// An unknown tile size takes only its tile with it, in the explorer and in the tile overlays
     /// (of the arrangements, too); an unknown overlay position or language is the default.
     #[test]
     fn unknown_values_drop_only_their_entry() {
         let mut s = Settings { tile_overlays: vec![TileOverlay::default(), TileOverlay::default()], ..Settings::default() };
         s.keep_arrangement();
         let mut v = serde_json::to_value(&s).unwrap();
-        v["explorer"]["pages"][0]["tiles"][1]["kind"] = "gapping".into();
-        v["tile_overlays"][0]["tile"]["kind"] = "gapping".into();
+        v["explorer"]["pages"][0]["tiles"][1]["size"] = "w9_h9".into();
+        v["tile_overlays"][0]["tile"]["size"] = "w9_h9".into();
         v["arrangements"][0]["tiles"][1]["pos"] = "center".into();
         v["overlay"] = "center".into();
         v["language"] = "klingon".into();
         let loaded: Settings = serde_json::from_value(v).unwrap();
-        let kinds: Vec<TileKind> = loaded.explorer.pages[0].tiles.iter().map(|t| t.kind).collect();
-        assert_eq!(kinds, [TileKind::Table, TileKind::Flight]);
+        let kinds: Vec<&str> = loaded.explorer.pages[0].tiles.iter().map(|t| t.kind.as_str()).collect();
+        assert_eq!(kinds, ["table", "flight"]);
         assert_eq!(loaded.explorer.pages[1..], s.explorer.pages[1..]);
         assert_eq!((loaded.tile_overlays.len(), loaded.arrangements[0].tiles.len()), (1, 1));
         assert_eq!((loaded.overlay, loaded.language), (OverlayPos::default(), Language::default()));
@@ -900,6 +842,85 @@ mod tests {
         let again: Settings = serde_json::from_str(&json).unwrap();
         assert!(again.extra.is_empty());
         assert_eq!(serde_json::to_string_pretty(&again).unwrap(), json);
+    }
+
+    /// Tiles as the builds before tile kinds were modules wrote them (every kind's switches in
+    /// every tile) load unchanged: each kind reads its own, and the file it saves is the same.
+    #[test]
+    fn tiles_of_the_earlier_format_load() {
+        #[derive(Default, PartialEq, Debug, Deserialize)]
+        #[serde(default)]
+        struct Flight {
+            camera: String,
+            averages: bool,
+        }
+        let home = crate::test_util::TempDir::new("settings-tiles");
+        write_in(home.path(), DATA_DIR, crate::fixture!("settings-tiles.json"));
+        let s = Settings::load_in(home.path());
+        let pages = &s.explorer.pages;
+        let kinds: Vec<Vec<&str>> = pages.iter().map(|p| p.tiles.iter().map(|t| t.kind.as_str()).collect()).collect();
+        assert_eq!(kinds, [vec!["table", "dispersion", "flight"], vec!["scatter", "details"]]);
+        let sizes: Vec<TileSize> = pages.iter().flat_map(|p| p.tiles.iter().map(|t| t.size)).collect();
+        assert_eq!(sizes, [TileSize::W3H2, TileSize::W2H2, TileSize::W1H2, TileSize::W2H2, TileSize::Page]);
+        assert_eq!(pages[0].tiles[0].config["averages"], Value::Bool(true));
+        assert_eq!(pages[0].tiles[1].config["total"], Value::Bool(true));
+        assert_eq!(pages[0].tiles[2].config::<Flight>(), Flight { camera: "above".into(), averages: true });
+        assert_eq!((&pages[1].tiles[0].config["x"], &pages[1].tiles[0].config["y"]), (&"ball_speed".into(), &"carry".into()));
+        assert_eq!(s.tile_overlays[0].tile.config::<Flight>(), Flight { camera: "side".into(), averages: false });
+        assert_eq!((s.tile_overlays[0].club_only, s.tile_overlays[0].width), (true, 460.0));
+        assert!(s.extra.is_empty(), "{:?}", s.extra);
+        // Saved and read again: the same tiles, every switch where the earlier builds look for it.
+        s.save_in(home.path()).unwrap();
+        let file = Settings::dir_in(home.path(), DATA_DIR).join("settings.json");
+        let saved: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        let fixture: Value = serde_json::from_str(crate::fixture!("settings-tiles.json")).unwrap();
+        assert_eq!(saved["explorer"], fixture["explorer"]);
+        assert_eq!(saved["tile_overlays"][0]["tile"], fixture["tile_overlays"][0]["tile"]);
+        assert_eq!(Settings::load_in(home.path()), s);
+    }
+
+    /// A tile of a kind this build doesn't have (an extension's, or a newer build's) is kept with all
+    /// of its settings when the settings are saved.
+    #[test]
+    fn tiles_of_an_unknown_kind_survive_a_save() {
+        let gapping = r#"{"kind":"gapping","size":"w2_h1","clubs":["DR","I7"],"bins":{"width":5}}"#;
+        let json = format!(r#"{{"explorer":{{"pages":[{{"name":"Bag","tiles":[{gapping}]}}]}},"tile_overlays":[{{"tile":{gapping}}}]}}"#);
+        let home = crate::test_util::TempDir::new("settings-unknown-kind");
+        write_in(home.path(), DATA_DIR, &json);
+        let s = Settings::load_in(home.path());
+        let tile = &s.explorer.pages[0].tiles[0];
+        assert_eq!((tile.kind.as_str(), tile.size), ("gapping", TileSize::W2H1));
+        assert_eq!(s.tile_overlays[0].tile, *tile);
+        s.save_in(home.path()).unwrap();
+        let file = Settings::dir_in(home.path(), DATA_DIR).join("settings.json");
+        let saved: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        let expected: Value = serde_json::from_str(gapping).unwrap();
+        assert_eq!(saved["explorer"]["pages"][0]["tiles"][0], expected);
+        assert_eq!(saved["tile_overlays"][0]["tile"], expected);
+    }
+
+    /// A kind's settings: read as its own type with defaults for what is missing or unreadable,
+    /// changed without losing the settings of other kinds.
+    #[test]
+    fn tile_settings_are_read_and_changed_by_their_kind() {
+        #[derive(Default, PartialEq, Debug, Serialize, Deserialize)]
+        #[serde(default)]
+        struct Chart {
+            total: bool,
+            bins: u32,
+        }
+        let mut tile = Tile::new("chart", TileSize::W1H1).with(&serde_json::json!({ "averages": true, "bins": 3 }));
+        assert_eq!(tile.config::<Chart>(), Chart { total: false, bins: 3 });
+        tile.change_config(|c: &mut Chart| c.total = true);
+        assert_eq!(Value::Object(tile.config.clone()), serde_json::json!({ "averages": true, "bins": 3, "total": true }));
+        // Nothing changed: nothing written (a missing default stays missing).
+        let mut plain = Tile::new("chart", TileSize::W1H1);
+        plain.change_config(|c: &mut Chart| c.bins = 0);
+        assert!(plain.config.is_empty());
+        // Unreadable: all defaults; the value itself is kept.
+        let odd = Tile::new("chart", TileSize::W1H1).with(&serde_json::json!({ "bins": "many" }));
+        assert_eq!(odd.config::<Chart>(), Chart::default());
+        assert_eq!(odd.config["bins"], "many");
     }
 
     /// A settings file that can't be read at all (cut off) is kept as settings.json.bad, replacing

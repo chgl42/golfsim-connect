@@ -55,10 +55,10 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `misread` | Plausibility check: marks a shot with a reading no club gives (left out of stats, still sent to GSPro) | Small, pure |
 | `shape` | Shot shape names (e.g. "Push-Draw") from start direction and spin axis | Deep, pure |
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
-| `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct |
+| `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct; a tile is its kind's id, size and settings as JSON |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
 | `i18n` | `tr()` lookup, German table, language switch; tables added by other crates (`register`) | One `match`, plus registered tables |
-| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `kit`, re-exported `egui`/`eframe`; the rest `pub(super)` |
+| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `kit`, the tile kind interface in `explorer`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
@@ -73,13 +73,19 @@ The module `ui` (`src/ui/`):
 | `mod.rs` | `run()`, `App` with the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
 | `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
 | `overlay.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements |
-| `explorer.rs`, `explorer/flight3d.rs` | The *Shots* page (shots explorer) and its 3D flight tile |
+| `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
 
 - `App` holds the pages (*Play*, *Shots*, *Overlay*, *Settings*, *Log*) and all of their state.
   Pages are methods on `App`, spread over the files above.
-- **Shots explorer** (`ui/explorer.rs`): pages of tiles on a grid. Tile kinds
-  (table, details, averages, dispersion, 3D flight in `explorer/flight3d.rs`) are an enum in `settings`.
+- **Shots explorer** (`ui/explorer.rs`): pages of tiles on a grid, a shared filter and selection.
+  What a tile shows is up to its kind, behind the public trait `explorer::TileKind` (id, name,
+  options, header, body; [ADR-009](adr/adr-009-tile-kinds-as-modules.md)). The core's kinds are
+  modules of `ui/explorer/` (table with shots or averages, details, dispersion, correlation, 3D
+  flight); another crate adds kinds with `explorer::register_tile_kind`. A kind draws from a
+  `TileCtx` (shots, flights, units, selection) and keeps session state there (`state`, `shared`).
+  In the settings a tile is its kind's id, its size and the kind's settings next to them; a tile
+  of a kind the build doesn't have is kept and says what it needs.
 - **Overlays** (`ui/overlay.rs`): the status overlay and tile overlays are extra egui viewports that stay with GSPro:
   above it while it is in front, ordered right above its window otherwise, on its screen, hidden without it. On macOS their
   frames, window levels and stacking above GSPro are set through AppKit (`ui/mac.rs`), because
@@ -216,14 +222,18 @@ can be added without editing the core in many places.
   ([ADR-007](adr/adr-007-bridge-events.md)), and recording moved from `gspro` into `recorder`.
   Left: the GUI doesn't subscribe yet (it diffs the shots a tile shows), and events published
   before a subscriber subscribed aren't replayed.
-- **Tile kinds**: a new kind touches about ten places in three files.
+- **Tile kinds**: each kind is a module behind the trait `explorer::TileKind`; a new one is a
+  module and an entry in `CORE_KINDS` (or `register_tile_kind` from another crate) plus its German
+  texts; tiles of unknown kinds survive a save ([ADR-009](adr/adr-009-tile-kinds-as-modules.md)).
+  Left: kinds share one namespace of keys in a tile.
 - **Pages**: page state lives as fields of `App` (28 fields); a new page touches five places.
 - **UI in the library**: the UI is the module `ui` behind the feature `gui`, its building blocks
   are public (`ui::kit`), and other crates add translations with `i18n::register`
-  ([ADR-008](adr/adr-008-ui-in-the-library.md)). Left: `ui::run()` takes no extra pages or tile
-  kinds yet – that comes with the two points above.
+  ([ADR-008](adr/adr-008-ui-in-the-library.md)); tile kinds are added with
+  `explorer::register_tile_kind`. Left: `ui::run()` takes no extra pages yet – that comes with the
+  point above.
 - **Launch monitors**: R10 code and generic code are mixed in `engine` and `mapping`; names like
   `R10Status` are used for generic status. Left until a second device is added (issue #1).
 
 Planned order: settings, events, moving the UI into the library together with its building blocks
-and translations (all done), then tile kinds and pages (#73/#74).
+and translations, tile kinds (all done), then pages (#74).

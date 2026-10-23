@@ -17,3 +17,4 @@ no longer holds is marked *Superseded by ADR-NNN* or *Deprecated*, not deleted.
 | [ADR-006](adr-006-settings-tolerate-unknown-values.md) | Settings tolerate values they don't know | Accepted |
 | [ADR-007](adr-007-bridge-events.md) | Bridge events through an mpsc fan-out | Accepted |
 | [ADR-008](adr-008-ui-in-the-library.md) | UI in the library | Accepted |
+| [ADR-009](adr-009-tile-kinds-as-modules.md) | Tile kinds as modules | Accepted |

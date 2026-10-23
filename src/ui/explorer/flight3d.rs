@@ -2,7 +2,145 @@
 //! with the painter – sky and haze, mown fairway, target greens with flags, distance boards,
 //! shadows on the ground, flights that fade with distance, landing rings and bounces.
 
+use std::rc::Rc;
+
+use serde::{Deserialize, Serialize};
+
 use super::*;
+
+/// The 3D flight tile (id `flight`).
+pub(super) struct Flight3d;
+
+/// A 3D flight tile's settings.
+#[derive(Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct Config {
+    /// Where the camera looks from.
+    camera: Camera,
+    /// The mean flight per club instead of the single shots.
+    averages: bool,
+}
+
+impl TileKind for Flight3d {
+    fn id(&self) -> &'static str {
+        "flight"
+    }
+
+    fn name(&self) -> &'static str {
+        tr("3D flight")
+    }
+
+    fn options(&self, ui: &mut egui::Ui, tile: &mut Tile, _units: Units) {
+        tile.change_config(|cfg: &mut Config| {
+            setting_row(ui, tr("Camera"), |ui| {
+                segments(ui, &mut cfg.camera, &Camera::ALL.map(|c| (c, camera_name(c))));
+            });
+            setting_row(ui, tr("Shows"), |ui| {
+                segments(ui, &mut cfg.averages, &[(false, tr("Shots")), (true, tr("Mean"))]);
+            });
+        });
+    }
+
+    fn header(&self, ui: &mut egui::Ui, tile: &mut Tile, _ctx: &TileCtx) {
+        tile.change_config(|cfg: &mut Config| {
+            for camera in Camera::ALL.into_iter().rev() {
+                let color = if cfg.camera == camera { WHITE } else { MUTED };
+                if link(ui, camera_name(camera), color).clicked() {
+                    cfg.camera = camera;
+                }
+            }
+        });
+    }
+
+    fn title_from(&self) -> f32 {
+        330.0
+    }
+
+    fn body(&self, ui: &mut egui::Ui, tile: &mut Tile, ctx: &TileCtx) {
+        let paths = paths(ctx);
+        if let Some(k) = flight_view(ui, tile, ctx, &paths) {
+            ctx.clicked.set(Some(k));
+        }
+    }
+}
+
+/// Camera of a 3D flight tile.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Camera {
+    /// Behind the tee, looking down the range.
+    #[default]
+    Tee,
+    /// From the side: height over distance.
+    Side,
+    /// From above and behind, at an angle.
+    Above,
+}
+
+impl Camera {
+    const ALL: [Self; 3] = [Self::Tee, Self::Side, Self::Above];
+}
+
+fn camera_name(camera: Camera) -> &'static str {
+    match camera {
+        Camera::Tee => tr("Tee"),
+        Camera::Side => tr("Side view"),
+        Camera::Above => tr("Above"),
+    }
+}
+
+/// A flight for drawing: points through the air (thinned out) and where the ball comes to rest.
+struct FlightPath {
+    air: Vec<[f32; 3]>,
+    rest: [f32; 3],
+}
+
+impl FlightPath {
+    /// The estimated path bent onto GSPro's numbers `to` (from the estimate `from`): as far, as
+    /// high and landing and stopping where GSPro says.
+    fn fitted(&self, from: &FlightSummary, to: &FlightSummary) -> Self {
+        let carry = from.carry.max(1.0) as f32;
+        let kz = to.carry as f32 / carry;
+        let ky = to.apex as f32 / from.apex.max(0.5) as f32;
+        let shift = (to.carry_side - from.carry_side) as f32;
+        let air = self.air.iter().map(|q| [q[0] + shift * (q[2] / carry), q[1] * ky, q[2] * kz]).collect();
+        Self { air, rest: [to.total_side as f32, 0.0, to.total as f32] }
+    }
+}
+
+impl From<&Flight> for FlightPath {
+    fn from(f: &Flight) -> Self {
+        let last = f.path.len().saturating_sub(1);
+        let air = f
+            .path
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| k % 4 == 0 || *k == last)
+            .map(|(_, p)| [p[0] as f32, p[1] as f32, p[2] as f32])
+            .collect();
+        Self { air, rest: [f.total_side as f32, 0.0, f.total as f32] }
+    }
+}
+
+/// The estimated path and flight of every shot seen, computed once (for all 3D tiles).
+#[derive(Default)]
+struct Paths(HashMap<Key, (Rc<FlightPath>, FlightSummary)>);
+
+/// The paths of the shots shown, in their order: bent onto GSPro's numbers where those are shown.
+fn paths(ctx: &TileCtx) -> Vec<Rc<FlightPath>> {
+    let mut cache = ctx.shared::<Paths>();
+    ctx.shown
+        .iter()
+        .zip(ctx.flights)
+        .map(|(s, f)| {
+            let (path, estimate) = cache.0.entry(key(s)).or_insert_with(|| {
+                let fl = flight::fly(&s.ball);
+                (Rc::new(FlightPath::from(&fl)), FlightSummary::from(&fl))
+            });
+            if ctx.gspro && s.gspro.is_some() { Rc::new(path.fitted(estimate, f)) } else { path.clone() }
+        })
+        .collect()
+}
 
 /// Mean flight per club: points per flight after resampling.
 const MEAN_POINTS: usize = 48;
@@ -175,9 +313,9 @@ struct Track {
 
 /// The mean flight of each club's shots that count: every flight resampled to the same number of
 /// points, then averaged point by point.
-fn mean_tracks(ctx: &TileCtx) -> Vec<Track> {
+fn mean_tracks(ctx: &TileCtx, paths: &[Rc<FlightPath>]) -> Vec<Track> {
     let mut groups: Vec<(Option<String>, Vec<&FlightPath>)> = Vec::new();
-    for (s, path) in ctx.shown.iter().zip(ctx.paths) {
+    for (s, path) in ctx.shown.iter().zip(paths) {
         if s.excluded || path.air.len() < 2 {
             continue;
         }
@@ -233,19 +371,19 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 
 /// The shots' estimated flights in 3D, fitted into the tile. Returns the shot clicked (at its
 /// landing point).
-pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCtx, edits: &mut Vec<Edit>) -> Option<Key> {
-    let camera = tile.camera;
-    let mean = tile.averages;
+fn flight_view(ui: &mut egui::Ui, tile: &mut Tile, ctx: &TileCtx, paths: &[Rc<FlightPath>]) -> Option<Key> {
+    let Config { camera, averages: mean } = tile.config();
+    let i = ctx.index;
     let rect = ui.available_rect_before_wrap();
     let u = ctx.units;
     // Range shown: a little beyond the longest shot, at least 100 m; half as wide as long, at most 60 m.
-    let far = ctx.paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
-    let apex = ctx.paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
-    let half = ctx.paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
+    let far = paths.iter().map(|p| p.rest[2].max(p.air.last().map_or(0.0, |q| q[2]))).fold(100.0_f32, f32::max) * 1.08;
+    let apex = paths.iter().flat_map(|p| p.air.iter().map(|q| q[1])).fold(10.0_f32, f32::max);
+    let half = paths.iter().map(|p| p.rest[0].abs()).fold(15.0_f32, f32::max).max(far * 0.12).min(60.0) * 1.3;
     // Diagonally from above the range is as wide as a real one, so it covers the whole tile.
     let half = if camera == Camera::Above { half.max(far * 0.45) } else { half };
     // Landing and resting points of the shots shown.
-    let lands: Vec<[f32; 3]> = ctx.paths.iter().flat_map(|p| p.air.last().copied().into_iter().chain([p.rest])).collect();
+    let lands: Vec<[f32; 3]> = paths.iter().flat_map(|p| p.air.last().copied().into_iter().chain([p.rest])).collect();
     // The camera of the preset: where it is, what it looks at, and how much the picture may
     // stretch where the tile has room (from the tee the spread is narrow and the flights tall,
     // from the side it is the other way round).
@@ -272,8 +410,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     // Dragging turns the camera around what it looks at, scrolling zooms, a double click goes
     // back to the preset; switching presets glides there.
     let resp = ui.interact(rect, egui::Id::new(("flight", i)), Sense::click_and_drag());
-    let mut views = ctx.views.borrow_mut();
-    let tv = views.entry((ctx.page, i)).or_default();
+    let mut tv = ctx.state::<TileView>();
     if resp.dragged() {
         let d = resp.drag_delta();
         tv.yaw -= d.x * 0.008;
@@ -312,7 +449,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     };
     tv.shown = Some(cam);
     let (zoom, yaw, pitch) = (tv.zoom, tv.yaw, tv.pitch);
-    drop(views);
+    drop(tv);
     // The picture is fitted with the camera as preset; turning it keeps that fit.
     let view = View::new(cam.eye, cam.at);
     let mut fit: Vec<egui::Vec2> = Vec::new();
@@ -327,7 +464,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         }
     } else {
         // The flights and the range; the near corners would be right below the camera.
-        fit.extend(ctx.paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
+        fit.extend(paths.iter().flat_map(|p| p.air.iter().chain([&p.rest])).filter_map(|q| view.project(*q)));
         fit.extend([[-half, 0.0, far], [half, 0.0, far], [0.0, apex, far * 0.5], [0.0, 0.0, 6.0]].iter().filter_map(|q| view.project(*q)));
     }
     let (lo, hi) = fit.iter().fold((vec2(f32::MAX, f32::MAX), vec2(f32::MIN, f32::MIN)), |(lo, hi), q| (lo.min(*q), hi.max(*q)));
@@ -351,16 +488,16 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
 
     let p = ui.painter_at(rect);
     // Where the flights peak on average: the tee view's height lines stand there.
-    let peaks: Vec<f32> = ctx.paths.iter().filter_map(|p| p.air.iter().max_by(|a, b| a[1].total_cmp(&b[1])).map(|q| q[2])).collect();
+    let peaks: Vec<f32> = paths.iter().filter_map(|p| p.air.iter().max_by(|a, b| a[1].total_cmp(&b[1])).map(|q| q[2])).collect();
     let apex_z = if peaks.is_empty() { far * 0.5 } else { peaks.iter().sum::<f32>() / peaks.len() as f32 };
     draw_range(&p, rect, camera, (far, half, apex, apex_z), u, &screen);
 
     // What to draw: the single shots, or only the mean flight per club.
     let any_selected = ctx.shown.iter().any(|s| ctx.selected.contains(&key(s)));
-    let mut tracks: Vec<Track> = if mean { mean_tracks(ctx) } else { Vec::new() };
+    let mut tracks: Vec<Track> = if mean { mean_tracks(ctx, paths) } else { Vec::new() };
     // A shot being animated flies in real time; the others step back meanwhile.
     let flying = ctx.anim.filter(|(k, t)| {
-        !mean && ctx.shown.iter().zip(ctx.paths).any(|(s, p)| &key(s) == *k && *t < p.air.len() as f32 * PATH_STEP + ROLL_TIME)
+        !mean && ctx.shown.iter().zip(paths).any(|(s, p)| &key(s) == *k && *t < p.air.len() as f32 * PATH_STEP + ROLL_TIME)
     });
     if flying.is_some() {
         ui.ctx().request_repaint();
@@ -368,7 +505,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let singles: Vec<Track> = ctx
         .shown
         .iter()
-        .zip(ctx.paths)
+        .zip(paths)
         .map(|(s, path)| {
             let selected = ctx.selected.contains(&key(s));
             let this_flying = flying.is_some_and(|(k, _)| k == &key(s));
@@ -408,7 +545,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     }
 
     // The selected shot: drop line from the apex, carry and apex next to the flight.
-    for ((s, path), f) in ctx.shown.iter().zip(ctx.paths).zip(ctx.flights) {
+    for ((s, path), f) in ctx.shown.iter().zip(paths).zip(ctx.flights) {
         if !ctx.selected.contains(&key(s)) || mean {
             continue;
         }
@@ -427,7 +564,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
     let dots: Vec<Dot> = ctx
         .shown
         .iter()
-        .zip(ctx.paths)
+        .zip(paths)
         .zip(ctx.flights)
         .filter_map(|((s, path), f)| {
             let land = path.air.last().and_then(|q| to_screen(*q))?;
@@ -464,7 +601,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         let c = r.center() + vec2(1.0, 0.0);
         p.add(egui::Shape::convex_polygon(vec![c + vec2(-3.5, -5.0), c + vec2(5.0, 0.0), c + vec2(-3.5, 5.0)], WHITE, Stroke::NONE));
         if b.on_hover_text(tr("Play the flight again")).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            edits.push(Edit::Replay(key(s)));
+            ctx.replay(s);
         }
     }
 
@@ -488,7 +625,7 @@ pub(super) fn flight_view(ui: &mut egui::Ui, i: usize, tile: &Tile, ctx: &TileCt
         let color = if mean == on { WHITE } else if resp.hovered() { SOFT } else { MUTED };
         p.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), color);
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && mean != on {
-            edits.push(Edit::Averages(i, on));
+            tile.change_config(|cfg: &mut Config| cfg.averages = on);
         }
         x += w;
     }

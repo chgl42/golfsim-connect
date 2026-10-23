@@ -320,6 +320,7 @@ fn core(en: &str) -> Option<&'static str> {
         "The shots view is as it came" => "Die Schläge-Ansicht ist im Auslieferungszustand",
         "Shots view reset." => "Schläge-Ansicht zurückgesetzt.",
         "Table" => "Tabelle",
+        "This tile needs a newer or extended version of the app (“{kind}”)." => "Diese Kachel braucht eine neuere oder erweiterte Version der App („{kind}“).",
         "Details" => "Details",
         "Page" => "Seite",
         "Page {n}" => "Seite {n}",

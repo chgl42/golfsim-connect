@@ -28,7 +28,7 @@ use crate::shape::{Curve, Shape};
 use crate::state::{self, R10Status};
 use crate::update;
 
-mod explorer;
+pub mod explorer;
 pub mod kit;
 #[cfg(target_os = "macos")]
 mod mac;
@@ -1284,14 +1284,14 @@ mod tests {
         let hidden: std::collections::BTreeSet<Option<String>> =
             ["W5", "H3", "H4", "I6", "I8", "GW", "LW"].into_iter().map(|c| Some(c.to_string())).collect();
         let analysis = {
-            use crate::settings::{ExplorerPage, Metric, Tile, TileKind, TileSize};
-            let scatter = |x, y| Tile { kind: TileKind::Scatter, size: TileSize::W2H2, x, y, ..Tile::default() };
+            use crate::settings::{ExplorerPage, Tile, TileSize};
+            let scatter = |x: &str, y: &str| Tile::new("scatter", TileSize::W2H2).with(&serde_json::json!({ "x": x, "y": y }));
             ExplorerPage {
                 name: "Analysis".into(),
                 tiles: vec![
-                    scatter(Metric::FaceToPath, Metric::SpinAxis),
-                    scatter(Metric::BallSpeed, Metric::Carry),
-                    Tile { kind: TileKind::Table, size: TileSize::W2H2, averages: true, ..Tile::default() },
+                    scatter("face_to_path", "spin_axis"),
+                    scatter("ball_speed", "carry"),
+                    Tile::new("table", TileSize::W2H2).with(&serde_json::json!({ "averages": true })),
                 ],
             }
         };
