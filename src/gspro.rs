@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::history;
 use crate::log;
+use crate::misread;
 use crate::notify::{self, Alert};
 use crate::state;
 use crate::mapping::{GsBall, GsClub, Tempo};
@@ -428,11 +429,15 @@ impl Link {
 }
 
 fn record_shot(ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, delivered: bool, shot_number: u32, test: bool) {
+    let misread = misread::check(&ball, club.as_ref());
+    if let Some(m) = misread {
+        log::gspro(&format!("⚠️  Possible misread ({}) – the shot is left out of the stats.", m.reason()));
+    }
     let rec = state::with(|s| {
         if delivered {
             s.shots_sent += 1;
         }
-        s.last_shot = Some(state::LastShot { ball, club, tempo, at: Instant::now(), delivered, shot_number });
+        s.last_shot = Some(state::LastShot { ball, club, tempo, at: Instant::now(), delivered, shot_number, misread });
         // GSPro's result of the previous shot no longer applies (the new one follows when it lands).
         s.gspro_result = None;
         if test {
@@ -440,6 +445,8 @@ fn record_shot(ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, deliver
         }
         let mut rec = history::ShotRecord::new(ball, club, s.gspro_club.clone(), delivered, shot_number);
         rec.tempo = tempo;
+        rec.misread = misread;
+        rec.excluded = misread.is_some();
         s.session.push(rec.clone());
         Some(rec)
     });

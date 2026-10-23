@@ -38,6 +38,9 @@ pub struct ShotRecord {
     /// GSPro's own result of the shot, read from its database after the ball came to rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gspro: Option<crate::gspro_db::GsproResult>,
+    /// The reading that looked wrong when the shot came in (it was excluded then).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub misread: Option<crate::misread::Misread>,
 }
 
 impl ShotRecord {
@@ -53,6 +56,7 @@ impl ShotRecord {
             tempo: None,
             excluded: false,
             gspro: None,
+            misread: None,
         }
     }
 
@@ -559,6 +563,7 @@ mod tests {
             tempo: club_speed.map(|_| Tempo { backswing: 0.81, downswing: 0.27 }),
             excluded: false,
             gspro: None,
+            misread: None,
         }
     }
 
