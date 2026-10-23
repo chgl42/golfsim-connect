@@ -2329,12 +2329,18 @@ struct Impact {
 impl OverlayContent {
     /// From the shared status.
     fn live(style: &OverlayStyle, metric: bool, meters: bool) -> Self {
-        let (r10, r10_detail, gs_ok, club, battery, last, to_pin) = state::with(|s| {
+        let (r10, r10_detail, gs_ok, gs_detail, club, battery, last, to_pin) = state::with(|s| {
             let to_pin = s.gspro_result.and_then(|r| r.to_pin);
-            (s.r10, s.r10_detail.clone(), s.gspro_connected, s.gspro_club.clone(), s.r10_battery, s.last_shot.clone(), to_pin)
+            let gspro = (s.gspro_connected, s.gspro_detail.clone());
+            (s.r10, s.r10_detail.clone(), gspro.0, gspro.1, s.gspro_club.clone(), s.r10_battery, s.last_shot.clone(), to_pin)
         });
         let pin = to_pin.map(|m| pin_text(m, meters));
-        Self::new(style, metric, (r10, &r10_detail, gs_ok), club.as_deref(), battery, last.as_ref(), pin)
+        let mut content = Self::new(style, metric, (r10, &r10_detail, gs_ok), club.as_deref(), battery, last.as_ref(), pin);
+        // What is wrong with GSPro, e.g. that its Connect needs a reset.
+        if r10 == R10Status::Ready && !gs_ok {
+            content.message = Some((tr_detail(&gs_detail), AMBER));
+        }
+        content
     }
 
     fn new(
