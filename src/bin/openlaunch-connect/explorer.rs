@@ -1665,7 +1665,10 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
         ui.label(RichText::new(name).size(13.0).color(WHITE));
         ui.label(RichText::new(time).size(12.0).color(MUTED));
         if s.excluded {
-            ui.label(RichText::new(tr("excluded")).size(12.0).color(AMBER));
+            let label = ui.label(RichText::new(tr("excluded")).size(12.0).color(AMBER));
+            if let Some(m) = s.misread {
+                label.on_hover_text(tr("Left out on its own: possible misread ({r}). Count takes it back.").replace("{r}", super::misread_name(m)));
+            }
         }
         if f.from_gspro {
             ui.label(RichText::new(tr("from GSPro")).size(12.0).color(GREEN))

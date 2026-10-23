@@ -19,8 +19,9 @@ use openlaunch_connect::i18n::{self, Language, tr, tr_detail};
 use openlaunch_connect::launcher;
 use openlaunch_connect::num;
 use openlaunch_connect::log;
+use openlaunch_connect::misread::Misread;
 use openlaunch_connect::settings::{Arrangement, DEFAULT_ARRANGEMENT, OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
-use openlaunch_connect::shape::Shape;
+use openlaunch_connect::shape::{Curve, Shape};
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
 
@@ -226,6 +227,12 @@ struct App {
     /// Where and how large the overlay window was first created (native points); later changes
     /// go through AppKit.
     overlay_first: Option<(egui::Pos2, egui::Vec2)>,
+    /// The main window's screen size when last known: macOS doesn't tell it while the window is
+    /// on no visible Space (e.g. GSPro in full screen on that screen), and the overlays must keep
+    /// being drawn then, or egui closes them.
+    screen_size: Option<egui::Vec2>,
+    /// Every window of the app is covered: the overlays are only kept open (see `App::logic`).
+    all_covered: bool,
     /// The overlay's size as measured in its own window (last frame).
     overlay_base: std::cell::Cell<egui::Vec2>,
     /// Where the overlay preview's tiles were drawn (last frame).
@@ -300,6 +307,8 @@ impl App {
             all_shots_session: 0,
             export_note: None,
             overlay_first: None,
+            screen_size: None,
+            all_covered: false,
             overlay_base: std::cell::Cell::new(egui::Vec2::ZERO),
             overlay_tile_rects: Default::default(),
             confirm_reset: false,
@@ -313,6 +322,7 @@ impl App {
                     at: Instant::now(),
                     delivered: true,
                     shot_number: 0,
+                    misread: None,
                 }
             },
             overlay_tab: None,
@@ -520,10 +530,10 @@ impl App {
                     FontId::proportional(12.0),
                     MUTED,
                 );
-                let (dot, what) = if s.delivered {
-                    (GREEN, tr("delivered to GSPro"))
-                } else {
-                    (AMBER, tr("NOT delivered to GSPro"))
+                let (dot, what) = match (s.delivered, s.misread) {
+                    (false, _) => (AMBER, tr("NOT delivered to GSPro").to_string()),
+                    (true, Some(m)) => (AMBER, tr("Misread? ({r})").replace("{r}", misread_name(m))),
+                    (true, None) => (GREEN, tr("delivered to GSPro").to_string()),
                 };
                 let y = last_r.bottom() - 18.0;
                 p.circle_filled(pos2(last_r.left() + 18.0, y), 4.0, dot);
@@ -841,7 +851,7 @@ impl App {
             self.passthrough.remove(&None);
             return;
         };
-        let Some(screen) = ctx.input(|i| i.viewport().monitor_size) else {
+        let Some(screen) = self.screen_size(ctx) else {
             return;
         };
         let style = &self.saved.overlay_style;
@@ -895,9 +905,14 @@ impl App {
         // The overlay's pass takes the zoom from the options when it begins: the overlay's size
         // there, the main window's back right after (no repaint is triggered either way).
         ctx.options_mut(|o| o.zoom_factor = user_scale);
+        let covered = self.all_covered;
         ctx.show_viewport_immediate(overlay_id(), builder, |ui, _class| {
+            // Only kept open (see `App::logic`).
+            if covered {
+                return;
+            }
             #[cfg(target_os = "macos")]
-            mac::float_over_fullscreen(OVERLAY_TITLE);
+            mac::float_over_fullscreen(ui.ctx(), OVERLAY_TITLE, grabbable);
             // Measured here, in the overlay's own window (the next frame sizes the window by it).
             let own = content.size(ui.ctx());
             overlay_base.set(own);
@@ -920,6 +935,14 @@ impl App {
             self.moving = None;
             self.save_overlays();
         }
+    }
+
+    /// The main window's screen size, or the last one known (see `screen_size`).
+    fn screen_size(&mut self, ctx: &egui::Context) -> Option<egui::Vec2> {
+        if let Some(size) = ctx.input(|i| i.viewport().monitor_size) {
+            self.screen_size = Some(size);
+        }
+        self.screen_size
     }
 
     /// Lets clicks go through the status (`None`) or a tile overlay, or not while it is moved;
@@ -1054,7 +1077,7 @@ impl App {
         if !self.show_overlay {
             return;
         }
-        let Some(screen) = ctx.input(|i| i.viewport().monitor_size) else {
+        let Some(screen) = self.screen_size(ctx) else {
             return;
         };
         let zoom = ctx.zoom_factor();
@@ -1110,10 +1133,15 @@ impl App {
             let mut dropped = None;
             // Drawn at its own size, whatever the main window's zoom (see `overlay`).
             ctx.options_mut(|o| o.zoom_factor = 1.0);
+            let covered = self.all_covered;
             ctx.show_viewport_immediate(tile_overlay_id(k), builder, |ui, _class| {
+                // Only kept open (see `App::logic`).
+                if covered {
+                    return;
+                }
                 #[cfg(target_os = "macos")]
                 {
-                    mac::float_over_fullscreen(&title);
+                    mac::float_over_fullscreen(ui.ctx(), &title, grabbable);
                     mac::place_window(&title, pos, size);
                 }
                 let rect = Rect::from_min_size(pos2(OVERLAY_BORDER, OVERLAY_BORDER), vec2(cfg.width, cfg.height()));
@@ -1500,7 +1528,23 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// While every window of the app is covered (the main window by GSPro and, for a moment, the
+    /// overlays), eframe skips `ui` – and egui would close the overlays left out of that pass. So
+    /// they are kept open here then, without drawing: a covered window isn't painted anyway, and
+    /// text drawn in such a pass would add letters to the font texture that eframe never uploads.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.all_covered = !ctx.input(|i| i.raw.viewports.values().any(|v| v.visible().unwrap_or(true)));
+        if self.all_covered {
+            self.overlay(ctx);
+            self.tile_overlays(ctx);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if !self.all_covered {
+            self.overlay(ui.ctx());
+            self.tile_overlays(ui.ctx());
+        }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(PAGE)).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             self.top_bar(ui);
@@ -1515,8 +1559,6 @@ impl eframe::App for App {
                 }
             });
         });
-        self.overlay(ui.ctx());
-        self.tile_overlays(ui.ctx());
         self.capture.tick(ui.ctx(), self.saved.overlay != OverlayPos::Off);
         let scale = self.saved.ui_scale;
         let old_zoom = ui.ctx().zoom_factor();
@@ -1762,25 +1804,47 @@ impl Capture {
 #[cfg(target_os = "macos")]
 mod mac {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSScreenSaverWindowLevel, NSWindowCollectionBehavior};
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{
+        NSApplication, NSNormalWindowLevel, NSScreenSaverWindowLevel, NSWindowCollectionBehavior,
+        NSWindowOrderingMode, NSWorkspace, NSWorkspaceDidActivateApplicationNotification,
+    };
+    use objc2_core_foundation::CFArray;
+    use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
     use std::ptr::NonNull;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use block2::RcBlock;
     use objc2_app_kit::{NSWindow, NSWindowDidEndLiveResizeNotification, NSWindowWillStartLiveResizeNotification};
-    use objc2_foundation::{NSNotification, NSNotificationCenter, NSSize, NSString};
+    use objc2_foundation::{NSArray, NSDictionary, NSNotification, NSNotificationCenter, NSNumber, NSSize, NSString, NSTimer};
 
     /// Aspect ratio the main window keeps while resizing (`None`: none, e.g. in full screen).
     static ASPECT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 
+    /// Middle of GSPro's window when last seen on screen (window-server coordinates: points from
+    /// the top left of the first screen).
+    static GSPRO_AT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+    /// The screen the overlays are on: GSPro's (e.g. a projector), else the main window's.
+    fn overlay_screen(mtm: MainThreadMarker) -> Option<objc2::rc::Retained<objc2_app_kit::NSScreen>> {
+        use objc2_app_kit::NSScreen;
+        let screens = NSScreen::screens(mtm);
+        let gspro_at = *GSPRO_AT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(i) = gspro_at.and_then(|at| screen_of(mtm, at)) {
+            return Some(screens.objectAtIndex(i));
+        }
+        let main_title = NSString::from_str(super::APP_NAME);
+        let windows = NSApplication::sharedApplication(mtm).windows();
+        windows.iter().find(|w| w.title().isEqualToString(&main_title)).and_then(|w| w.screen()).or_else(|| NSScreen::mainScreen(mtm))
+    }
+
     /// Put the content of the window titled `title` at `top_left` (points from the main screen's
     /// top left corner) with `size` (points), if it isn't there already.
     pub fn place_window(title: &str, top_left: eframe::egui::Pos2, size: eframe::egui::Vec2) {
-        use objc2_app_kit::NSScreen;
         use objc2_foundation::{NSPoint, NSRect};
         let Some(mtm) = MainThreadMarker::new() else { return };
-        let Some(screen) = NSScreen::mainScreen(mtm) else { return };
+        let Some(screen) = overlay_screen(mtm) else { return };
         let full = screen.frame();
         let title = NSString::from_str(title);
         let windows = NSApplication::sharedApplication(mtm).windows();
@@ -1801,21 +1865,20 @@ mod mac {
         }
     }
 
-    /// The mouse on the main screen, in points from its top left corner.
+    /// The mouse on the overlays' screen, in points from its top left corner.
     pub fn mouse_location() -> Option<eframe::egui::Pos2> {
-        use objc2_app_kit::{NSEvent, NSScreen};
+        use objc2_app_kit::NSEvent;
         let mtm = MainThreadMarker::new()?;
-        let full = NSScreen::mainScreen(mtm)?.frame();
+        let full = overlay_screen(mtm)?.frame();
         let at = NSEvent::mouseLocation();
         // AppKit counts from the bottom left.
         Some(eframe::egui::pos2((at.x - full.origin.x) as f32, (full.origin.y + full.size.height - at.y) as f32))
     }
 
-    /// The main screen without the menu bar and the Dock, in points from its top left corner.
+    /// The overlays' screen without the menu bar and the Dock, in points from its top left corner.
     pub fn visible_frame() -> Option<eframe::egui::Rect> {
-        use objc2_app_kit::NSScreen;
         let mtm = MainThreadMarker::new()?;
-        let screen = NSScreen::mainScreen(mtm)?;
+        let screen = overlay_screen(mtm)?;
         let (full, visible) = (screen.frame(), screen.visibleFrame());
         // AppKit counts from the bottom left.
         let top = (full.origin.y + full.size.height) - (visible.origin.y + visible.size.height);
@@ -1905,26 +1968,216 @@ mod mac {
     }
 
     /// Keep the window above full-screen apps: show it on every Space, including the
-    /// separate Space of a full-screen app, and above GSPro's own full-screen window.
-    pub fn float_over_fullscreen(title: &str) {
+    /// separate Space of a full-screen app, and place it for the app in front (see
+    /// [`arrange_overlays`]). `moving`: an overlay is being moved, so they all stay on top.
+    pub fn float_over_fullscreen(ctx: &eframe::egui::Context, title: &str, moving: bool) {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
+        CONTEXT.get_or_init(|| ctx.clone());
         let title = NSString::from_str(title);
         let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
             | NSWindowCollectionBehavior::Stationary
             | NSWindowCollectionBehavior::IgnoresCycle;
         for window in NSApplication::sharedApplication(mtm).windows() {
-            if !window.title().isEqualToString(&title) {
-                continue;
-            }
-            if window.collectionBehavior() != behavior {
+            if window.title().isEqualToString(&title) && window.collectionBehavior() != behavior {
                 window.setCollectionBehavior(behavior);
             }
-            if window.level() != NSScreenSaverWindowLevel {
-                window.setLevel(NSScreenSaverWindowLevel);
+        }
+        MOVING.store(moving, Ordering::Relaxed);
+        if !WATCHING_APPS.swap(true, Ordering::Relaxed) {
+            // Re-arranged when another app comes to the front, also while this one doesn't repaint.
+            let workspace = NSWorkspace::sharedWorkspace();
+            let block = RcBlock::new(|_: NonNull<NSNotification>| arrange_overlays(true));
+            let token = unsafe {
+                workspace.notificationCenter().addObserverForName_object_queue_usingBlock(
+                    Some(NSWorkspaceDidActivateApplicationNotification),
+                    None,
+                    None,
+                    &block,
+                )
+            };
+            // Observes for the lifetime of the app.
+            std::mem::forget(token);
+            // And checked four times a second: right after a switch the window list may not show
+            // the new order yet. The tick also keeps the overlays painted: egui stops painting
+            // while all its windows are covered (the main window by GSPro, the overlays by the
+            // main window) and doesn't start again when one of them shows.
+            let tick = RcBlock::new(|_: NonNull<NSTimer>| {
+                arrange_overlays(false);
+                if let Some(ctx) = CONTEXT.get() {
+                    ctx.request_repaint();
+                }
+            });
+            let timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(0.25, true, &tick) };
+            std::mem::forget(timer);
+        }
+        arrange_overlays(false);
+    }
+
+    /// An overlay is being moved.
+    static MOVING: AtomicBool = AtomicBool::new(false);
+    /// To repaint the overlays when they show again: a window that was hidden (or covered) while
+    /// the app didn't repaint comes back empty.
+    static CONTEXT: std::sync::OnceLock<eframe::egui::Context> = std::sync::OnceLock::new();
+    static WATCHING_APPS: AtomicBool = AtomicBool::new(false);
+    /// The app in front when the overlays were last arranged.
+    static ARRANGED_FOR: Mutex<Option<Front>> = Mutex::new(None);
+
+    /// The app in front, as far as the overlays care.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Front {
+        Ours,
+        Gspro,
+        Other,
+    }
+
+    /// GSPro's processes under CrossOver: "GSPro.exe", and "GSPconnect.exe" for its Connect window.
+    fn is_gspro(name: &str) -> bool {
+        name.to_lowercase().starts_with("gsp")
+    }
+
+    /// A normal window of another app on screen.
+    struct OtherWindow {
+        owner: String,
+        number: isize,
+        /// Its middle in window-server coordinates.
+        middle: Option<(f64, f64)>,
+    }
+
+    /// The normal windows on screen of other apps, front to back.
+    fn other_windows() -> Vec<OtherWindow> {
+        let options = CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
+        let Some(list) = CGWindowListCopyWindowInfo(options, 0) else { return Vec::new() };
+        // A CFArray of CFDictionaries; toll-free bridged to Foundation.
+        let list: &NSArray<NSDictionary<NSString, AnyObject>> = unsafe { &*std::ptr::from_ref::<CFArray>(&list).cast() };
+        let get = |info: &NSDictionary<NSString, AnyObject>, key: &str| info.objectForKey(&NSString::from_str(key));
+        let number = |info: &NSDictionary<NSString, AnyObject>, key: &str| {
+            get(info, key).and_then(|o| o.downcast::<NSNumber>().ok()).map(|n| n.integerValue())
+        };
+        let own = isize::try_from(std::process::id()).unwrap_or(-1);
+        list.iter()
+            .filter(|info| number(info, "kCGWindowLayer") == Some(0) && number(info, "kCGWindowOwnerPID") != Some(own))
+            .filter_map(|info| {
+                let owner = get(&info, "kCGWindowOwnerName").and_then(|o| o.downcast::<NSString>().ok())?.to_string();
+                let bounds = get(&info, "kCGWindowBounds").and_then(|o| o.downcast::<NSDictionary>().ok());
+                let middle = bounds.and_then(|b| {
+                    let v = |k: &str| b.objectForKey(&NSString::from_str(k)).and_then(|o| o.downcast::<NSNumber>().ok()).map(|n| n.doubleValue());
+                    Some((v("X")? + v("Width")? / 2.0, v("Y")? + v("Height")? / 2.0))
+                });
+                Some(OtherWindow { owner, number: number(&info, "kCGWindowNumber")?, middle })
+            })
+            .collect()
+    }
+
+    /// The screen (its index) a point in window-server coordinates is on.
+    fn screen_of(mtm: MainThreadMarker, (x, y): (f64, f64)) -> Option<usize> {
+        let screens = objc2_app_kit::NSScreen::screens(mtm);
+        // AppKit counts from the bottom left of the first screen.
+        let y = screens.firstObject()?.frame().size.height - y;
+        screens.iter().position(|s| {
+            let f = s.frame();
+            x >= f.origin.x && x < f.origin.x + f.size.width && y >= f.origin.y && y < f.origin.y + f.size.height
+        })
+    }
+
+    /// Who is in front on GSPro's screen: GSPro if it is the active app (the name macOS gives it
+    /// under CrossOver isn't reliable, so also if its window is the top one there), else this app
+    /// if it is active and its window is on that screen, else another app.
+    fn front(mtm: MainThreadMarker) -> Front {
+        let app = NSWorkspace::sharedWorkspace().frontmostApplication();
+        let ours = app.as_ref().is_some_and(|a| i64::from(a.processIdentifier()) == i64::from(std::process::id()));
+        let named_gspro = app.and_then(|a| a.localizedName()).is_some_and(|n| is_gspro(&n.to_string()));
+        let windows = other_windows();
+        // Remember where GSPro is: the overlays go to its screen.
+        if let Some(at) = windows.iter().find(|w| is_gspro(&w.owner)).and_then(|w| w.middle) {
+            *GSPRO_AT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(at);
+        }
+        let gspro_at = *GSPRO_AT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let gspro_screen = gspro_at.and_then(|at| screen_of(mtm, at));
+        if ours {
+            // This app's window covers GSPro only on GSPro's screen.
+            let main_title = NSString::from_str(super::APP_NAME);
+            let windows = NSApplication::sharedApplication(mtm).windows();
+            let main = windows.iter().find(|w| w.title().isEqualToString(&main_title)).map(|w| w.frame());
+            let main_screen = main.and_then(|f| {
+                let first = objc2_app_kit::NSScreen::screens(mtm).firstObject()?.frame();
+                // Its middle in window-server coordinates (from the top left of the first screen).
+                let middle = (f.origin.x + f.size.width / 2.0, first.size.height - (f.origin.y + f.size.height / 2.0));
+                screen_of(mtm, middle)
+            });
+            if gspro_screen.is_none() || main_screen == gspro_screen {
+                return Front::Ours;
             }
+        } else if named_gspro {
+            return Front::Gspro;
+        }
+        // The top window on GSPro's screen (of another app) decides.
+        let top_there = windows.iter().find(|w| gspro_screen.is_none() || w.middle.and_then(|m| screen_of(mtm, m)) == gspro_screen);
+        match top_there {
+            Some(w) if is_gspro(&w.owner) => Front::Gspro,
+            _ if ours => Front::Ours,
+            _ => Front::Other,
+        }
+    }
+
+    /// GSPro's frontmost window on screen (its window-server number), if GSPro runs.
+    fn gspro_window() -> Option<isize> {
+        other_windows().into_iter().find(|w| is_gspro(&w.owner)).map(|w| w.number)
+    }
+
+    /// The overlays sit right above GSPro: on top of everything while GSPro is in front (also in
+    /// full screen), else right above GSPro's window, under any window in front of it, this app's
+    /// too (hidden when GSPro doesn't run). `changed`: another app came to the front.
+    fn arrange_overlays(changed: bool) {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let front = if MOVING.load(Ordering::Relaxed) { Front::Gspro } else { front(mtm) };
+        let mut last = ARRANGED_FOR.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let reorder = changed || *last != Some(front);
+        *last = Some(front);
+        drop(last);
+        let app = NSApplication::sharedApplication(mtm);
+        let windows = app.windows();
+        let overlays: Vec<_> = windows
+            .iter()
+            .filter(|w| {
+                let t = w.title().to_string();
+                t.starts_with(super::OVERLAY_TITLE) || t.starts_with(super::TILE_OVERLAY_TITLE)
+            })
+            .collect();
+        if overlays.is_empty() {
+            return;
+        }
+        // Where they go: their level, whether they show, and the window they go behind or above.
+        let (level, shown, place) = match front {
+            Front::Gspro => (NSScreenSaverWindowLevel, true, None),
+            Front::Ours | Front::Other => match gspro_window().filter(|_| reorder) {
+                Some(n) => (NSNormalWindowLevel, true, Some((NSWindowOrderingMode::Above, n))),
+                None if reorder => (NSNormalWindowLevel, false, None),
+                // Placed when that app came to the front; only new overlays still need it.
+                None => (NSNormalWindowLevel, overlays.iter().any(|w| w.alphaValue() > 0.0), None),
+            },
+        };
+        let alpha = if shown { 1.0 } else { 0.0 };
+        let mut moved = false;
+        for window in overlays {
+            let new = window.level() != level || (window.alphaValue() - alpha).abs() > f64::EPSILON;
+            if !new && !reorder {
+                continue;
+            }
+            window.setLevel(level);
+            window.setAlphaValue(alpha);
+            if let Some((mode, other)) = place {
+                window.orderWindow_relativeTo(mode, other);
+            } else if front == Front::Gspro {
+                // A higher level alone doesn't bring it back into GSPro's full-screen Space.
+                window.orderFrontRegardless();
+            }
+            moved = true;
+        }
+        if moved && let Some(ctx) = CONTEXT.get() {
+            ctx.request_repaint();
         }
     }
 }
@@ -2364,7 +2617,7 @@ impl OverlayContent {
         let shot = last.filter(|_| message.is_none());
         let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
         let value = |glyph, text: String| Some(Cell::Value { glyph, text, color: WHITE });
-        let cell = |item: OverlayItem| -> Option<Cell> {
+        let value_cell = |item: OverlayItem| -> Option<Cell> {
             match item {
                 OverlayItem::Status => Some(Cell::Status),
                 OverlayItem::Club => club.map(|c| Cell::Value { glyph: None, text: club_name(c), color: SOFT }),
@@ -2387,6 +2640,25 @@ impl OverlayContent {
                     }
                 }
             }
+        };
+        // The value that looks misread stands out.
+        let suspect = |item: OverlayItem| {
+            shot.and_then(|s| s.misread).is_some_and(|m| match m {
+                Misread::Spin => item == OverlayItem::Spin,
+                Misread::Launch => item == OverlayItem::Vla,
+                Misread::Direction => item == OverlayItem::Hla,
+                Misread::SpinAxis => item == OverlayItem::SpinAxis,
+                Misread::Smash => matches!(item, OverlayItem::Smash | OverlayItem::ClubSpeed),
+            })
+        };
+        let cell = |item: OverlayItem| -> Option<Cell> {
+            let mut cell = value_cell(item)?;
+            if suspect(item)
+                && let Cell::Value { color, .. } = &mut cell
+            {
+                *color = AMBER;
+            }
+            Some(cell)
         };
         // A graphic fills its column.
         let mut columns: Vec<[Option<Cell>; 2]> = style
@@ -2828,6 +3100,17 @@ fn draw_glyph(p: &egui::Painter, c: egui::Pos2, glyph: Glyph, color: Color32) {
 }
 
 /// A shot shape's name in the language shown ("Straight" is the only one golfers translate).
+/// The reading that looks misread, for the UI.
+fn misread_name(m: Misread) -> &'static str {
+    match m {
+        Misread::Spin => tr("spin"),
+        Misread::Launch => tr("launch angle"),
+        Misread::Direction => tr("start direction"),
+        Misread::SpinAxis => tr("spin axis"),
+        Misread::Smash => tr("smash factor"),
+    }
+}
+
 fn shape_name(shape: Shape) -> String {
     let name = shape.name();
     if name == "Straight" { tr("Straight").to_string() } else { name }
@@ -2948,7 +3231,9 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
     let a = (i.hla * 3.0).to_radians() as f32;
     let heading = vec2(a.sin(), -a.cos());
     let tip = at(59.0 + heading.x * start_len, 88.0 + heading.y * start_len);
-    let bend = (i.spin_axis as f32 * 2.2).clamp(-40.0, 40.0);
+    // Curved only where the shape's name says so, like the announcement.
+    let shape = Shape::of(i.hla, i.spin_axis, false);
+    let bend = if shape.curve == Curve::None { 0.0 } else { (i.spin_axis as f32 * 2.2).clamp(-40.0, 40.0) };
     let control = at(59.0 + heading.x * (start_len + 22.0), 88.0 + heading.y * (start_len + 22.0));
     let end = at(59.0 + heading.x * 84.0 + bend, 88.0 + heading.y * 84.0);
     let curve: Vec<egui::Pos2> = (0..=16)
@@ -2963,7 +3248,6 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
     p.add(egui::Shape::convex_polygon(head, WHITE, Stroke::NONE));
     p.add(egui::Shape::closed_line(outline, Stroke::new(1.0, PAGE)));
     if labels {
-        let shape = Shape::of(i.hla, i.spin_axis, false);
         p.text(r.left_top() + vec2(6.0, 4.0), Align2::LEFT_TOP, shape_name(shape), FontId::proportional(11.5), WHITE);
     }
     if labels {
@@ -3242,6 +3526,7 @@ mod tests {
                 at: Instant::now().checked_sub(Duration::from_secs(4)).unwrap_or_else(Instant::now),
                 delivered: true,
                 shot_number: 56_728_296,
+                misread: None,
             });
             s.log.clear();
         });

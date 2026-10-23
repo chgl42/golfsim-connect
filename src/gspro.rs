@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::history;
 use crate::log;
+use crate::misread;
 use crate::notify::{self, Alert};
 use crate::state;
 use crate::mapping::{GsBall, GsClub, Tempo};
@@ -29,6 +30,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const MIN_SEND_GAP: Duration = Duration::from_millis(300);
 /// How long to wait for GSPro's reply before sending the next message.
 const REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
+/// How long a shot waits for GSPro when the connection is down (e.g. GSPro reconnecting).
+const HOLD_SHOT: Duration = Duration::from_secs(10);
 
 /// Commands from the R10 side to the GSPro side.
 #[derive(Debug, Clone)]
@@ -135,6 +138,16 @@ pub struct Link {
     silent: bool,
     /// The status shown while connected, e.g. "Connected (127.0.0.1:921)".
     connected_detail: String,
+    /// A shot that came while GSPro wasn't connected, sent when it is back (within [`HOLD_SHOT`]).
+    held: Option<Held>,
+}
+
+/// A shot waiting for GSPro.
+struct Held {
+    ball: GsBall,
+    club: Option<GsClub>,
+    tempo: Option<Tempo>,
+    at: Instant,
 }
 
 impl Link {
@@ -155,6 +168,7 @@ impl Link {
             unanswered: 0,
             silent: false,
             connected_detail: String::new(),
+            held: None,
         }
     }
 
@@ -167,6 +181,7 @@ impl Link {
     pub fn run(mut self, rx: &Receiver<Cmd>) {
         loop {
             self.ensure_connected();
+            self.send_held();
             self.read_responses();
             if self.is_connected() && self.last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
                 self.send_heartbeat();
@@ -190,48 +205,70 @@ impl Link {
                 }
             }
             Cmd::Shot { ball, club, tempo, test } => {
-                let was_ready = self.ready;
-                self.ready = true;
                 if !self.is_connected() {
                     // One immediate attempt, so a shot right after GSPro starts is not lost.
                     self.last_attempt = None;
                     self.ensure_connected();
                 }
-                if !self.is_connected() {
-                    log::gspro("⚠️  Shot dropped – not connected to GSPro.");
+                if self.is_connected() {
+                    self.send_shot(ball, club, tempo, test);
+                } else if test {
+                    log::gspro("⚠️  Test shot dropped – not connected to GSPro.");
                     record_shot(ball, club, tempo, false, 0, test);
-                    if test {
-                        self.ready = was_ready;
-                    }
-                    return;
-                }
-                if !was_ready {
-                    // Tell GSPro the launch monitor is ready before the first shot.
-                    self.send_heartbeat();
-                }
-                self.shot_number += 1;
-                let json = shot_json(self.shot_number, ball, club);
-                // Drain pending heartbeat replies so they aren't taken as the shot's ack.
-                self.read_responses();
-                self.awaiting_shot_ack = true;
-                log::gspro(&format!("Sending shot to GSPro (ShotNumber {}) …", self.shot_number));
-                let delivered = self.send(&json);
-                if delivered {
-                    if self.awaiting_shot_ack {
-                        log::gspro("No direct reply from GSPro to the shot.");
-                        self.count_unanswered();
-                    }
                 } else {
-                    self.awaiting_shot_ack = false;
-                }
-                record_shot(ball, club, tempo, delivered, self.shot_number, test);
-                // A test shot doesn't make the launch monitor ready (e.g. no R10 connected).
-                if test && !was_ready {
-                    self.ready = false;
-                    if self.is_connected() {
-                        self.send_heartbeat();
+                    // Kept until GSPro is back; a newer shot takes the place of an older one.
+                    if let Some(old) = self.held.take() {
+                        log::gspro("⚠️  Shot dropped – a newer one came while GSPro wasn't connected.");
+                        record_shot(old.ball, old.club, old.tempo, false, 0, false);
                     }
+                    log::gspro(&format!("GSPro not connected – holding the shot for {} s …", HOLD_SHOT.as_secs()));
+                    self.held = Some(Held { ball, club, tempo, at: Instant::now() });
                 }
+            }
+        }
+    }
+
+    /// Send the held shot once GSPro is connected again, or give it up after [`HOLD_SHOT`].
+    pub fn send_held(&mut self) {
+        let Some(held) = self.held.take_if(|h| self.stream.is_some() || h.at.elapsed() >= HOLD_SHOT) else { return };
+        if self.is_connected() {
+            log::gspro(&format!("GSPro is back – sending the held shot ({:.0} s late).", held.at.elapsed().as_secs_f64()));
+            self.send_shot(held.ball, held.club, held.tempo, false);
+        } else {
+            log::gspro(&format!("⚠️  Shot dropped – GSPro didn't come back within {} s.", HOLD_SHOT.as_secs()));
+            record_shot(held.ball, held.club, held.tempo, false, 0, false);
+        }
+    }
+
+    /// Send a shot to the connected GSPro and record it.
+    fn send_shot(&mut self, ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, test: bool) {
+        let was_ready = self.ready;
+        self.ready = true;
+        if !was_ready {
+            // Tell GSPro the launch monitor is ready before the first shot.
+            self.send_heartbeat();
+        }
+        self.shot_number += 1;
+        let json = shot_json(self.shot_number, ball, club);
+        // Drain pending heartbeat replies so they aren't taken as the shot's ack.
+        self.read_responses();
+        self.awaiting_shot_ack = true;
+        log::gspro(&format!("Sending shot to GSPro (ShotNumber {}) …", self.shot_number));
+        let delivered = self.send(&json);
+        if delivered {
+            if self.awaiting_shot_ack {
+                log::gspro("No direct reply from GSPro to the shot.");
+                self.count_unanswered();
+            }
+        } else {
+            self.awaiting_shot_ack = false;
+        }
+        record_shot(ball, club, tempo, delivered, self.shot_number, test);
+        // A test shot doesn't make the launch monitor ready (e.g. no R10 connected).
+        if test && !was_ready {
+            self.ready = false;
+            if self.is_connected() {
+                self.send_heartbeat();
             }
         }
     }
@@ -430,11 +467,15 @@ impl Link {
 }
 
 fn record_shot(ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, delivered: bool, shot_number: u32, test: bool) {
+    let misread = misread::check(&ball, club.as_ref());
+    if let Some(m) = misread {
+        log::gspro(&format!("⚠️  Possible misread ({}) – the shot is left out of the stats.", m.reason()));
+    }
     let rec = state::with(|s| {
         if delivered {
             s.shots_sent += 1;
         }
-        s.last_shot = Some(state::LastShot { ball, club, tempo, at: Instant::now(), delivered, shot_number });
+        s.last_shot = Some(state::LastShot { ball, club, tempo, at: Instant::now(), delivered, shot_number, misread });
         // GSPro's result of the previous shot no longer applies (the new one follows when it lands).
         s.gspro_result = None;
         if test {
@@ -442,6 +483,8 @@ fn record_shot(ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, deliver
         }
         let mut rec = history::ShotRecord::new(ball, club, s.gspro_club.clone(), delivered, shot_number);
         rec.tempo = tempo;
+        rec.misread = misread;
+        rec.excluded = misread.is_some();
         s.session.push(rec.clone());
         Some(rec)
     });
@@ -524,6 +567,54 @@ mod tests {
         assert!(link.silent);
         link.handle_response(&serde_json::json!({"Code": 200, "Message": "OK"}));
         assert!(!link.silent, "an answer clears it");
+    }
+
+    /// A shot while GSPro is away waits for it and goes out once it is back.
+    #[test]
+    fn held_shot_is_sent_after_the_reconnect() {
+        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
+        let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let mut link = Link::new(addr.to_string(), false);
+        let (ball, club) = crate::engine::test_shot();
+        link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: false });
+        assert!(link.held.is_some(), "held while nothing listens");
+
+        let listener = std::net::TcpListener::bind(addr).unwrap();
+        link.last_attempt = None;
+        link.ensure_connected();
+        let (mut gspro, _) = listener.accept().unwrap();
+        link.send_held();
+        assert!(link.held.is_none());
+        gspro.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut got = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = gspro.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+            if String::from_utf8_lossy(&got).contains("BallData") {
+                break;
+            }
+        }
+        assert!(String::from_utf8_lossy(&got).contains("BallData"), "the shot reached GSPro");
+    }
+
+    /// A held shot is given up when GSPro doesn't come back in time.
+    #[test]
+    fn held_shot_is_dropped_after_a_while() {
+        crate::notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::history::PERSIST.store(false, std::sync::atomic::Ordering::Relaxed);
+        let addr = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let mut link = Link::new(addr.to_string(), false);
+        let (ball, club) = crate::engine::test_shot();
+        link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: false });
+        link.send_held();
+        assert!(link.held.is_some(), "still waiting");
+        link.held.as_mut().unwrap().at -= HOLD_SHOT;
+        link.send_held();
+        assert!(link.held.is_none(), "given up");
     }
 
     #[test]

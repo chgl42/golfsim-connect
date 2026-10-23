@@ -2,8 +2,9 @@
 //! use: straight, draw, fade, hook, slice, push, pull and their combinations (push-draw …).
 //! Names are a right-hander's; a left-hander's shots are mirrored first.
 
-/// Start direction counts as straight within this many degrees of the target line.
-const STRAIGHT_START: f64 = 2.0;
+/// Start direction counts as straight within this many degrees of the target line (3° are about
+/// 8 m at 150 m).
+const STRAIGHT_START: f64 = 3.0;
 /// Spin axis (degrees) up to which the ball flies straight, and from which it hooks or slices.
 const NO_CURVE: f64 = 3.0;
 const HARD_CURVE: f64 = 10.0;
@@ -104,8 +105,8 @@ mod tests {
 
     #[test]
     fn thresholds_are_inclusive() {
-        assert_eq!(Shape::of(2.0, 3.0, false).name(), "Push-Fade");
-        assert_eq!(Shape::of(1.9, 2.9, false).name(), "Straight");
+        assert_eq!(Shape::of(3.0, 3.0, false).name(), "Push-Fade");
+        assert_eq!(Shape::of(2.9, 2.9, false).name(), "Straight");
         assert_eq!(Shape::of(0.0, 10.0, false).name(), "Slice");
     }
 }
