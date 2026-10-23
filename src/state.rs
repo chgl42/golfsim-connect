@@ -27,6 +27,8 @@ pub struct LastShot {
     pub at: Instant,
     pub delivered: bool,
     pub shot_number: u32,
+    /// The reading that looks wrong, if any (see `misread`).
+    pub misread: Option<crate::misread::Misread>,
 }
 
 #[derive(Debug)]

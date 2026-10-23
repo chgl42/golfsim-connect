@@ -131,8 +131,8 @@ fn de(en: &str) -> Option<&'static str> {
         // Status words
         "READY" => "BEREIT",
         "NO R10" => "KEIN R10",
-        "WAITING FOR GSPRO" => "WARTE AUF GSPRO",
-        "R10 NOT READY" => "R10 NICHT BEREIT",
+        "NO GSPRO" => "KEIN GSPRO",
+        "NOT READY" => "NICHT BEREIT",
 
         "COPY" => "KOPIEREN",
         "The log is empty" => "Das Log ist leer",
@@ -292,6 +292,14 @@ fn de(en: &str) -> Option<&'static str> {
         "Imperial (mph)" => "Imperial (mph)",
         "Overlay" => "Overlay",
         "OVERLAY" => "OVERLAY",
+        // Misreads (misread::check)
+        "Misread? ({r})" => "Fehlmessung? ({r})",
+        "Left out on its own: possible misread ({r}). Count takes it back." => "Automatisch ausgeschlossen: mögliche Fehlmessung ({r}). „Mitzählen“ nimmt ihn zurück.",
+        "spin" => "Spin",
+        "launch angle" => "Abflugwinkel",
+        "start direction" => "Startrichtung",
+        "spin axis" => "Spinachse",
+        "smash factor" => "Smash-Faktor",
         "LAYOUT" => "LAYOUT",
         "CONTENTS" => "INHALTE",
         "TILE {n}" => "KACHEL {n}",
