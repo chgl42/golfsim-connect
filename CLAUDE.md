@@ -140,6 +140,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - Release: in a PR, bump the version in `Cargo.toml` and `packaging/Info.plist` and rename `[Unreleased]` to
   `[X.Y.Z] – date` (plus compare links); after merging, `git tag vX.Y.Z && git push origin vX.Y.Z` on the merged
   `main` commit. The workflow uses that changelog section as the GitHub release notes.
+- Release candidate: tag `vX.Y.Z-rc.N` on `main` (no version bump needed) → a GitHub pre-release with the
+  `[Unreleased]` notes for testing; the app's update check doesn't offer pre-releases.
 - Keep local setup notes (machines, paths, personal workflow) out of this file – they go into `CLAUDE.local.md`,
   which is git-ignored.
 
