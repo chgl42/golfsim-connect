@@ -50,7 +50,7 @@ One crate with a library and two binaries.
 | `misread` | Plausibility check: marks a shot with a reading no club gives (left out of stats, still sent to GSPro) | Small, pure |
 | `shape` | Shot shape names (e.g. "Push-Draw") from start direction and spin axis | Deep, pure |
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
-| `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements | One flat struct |
+| `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
 | `i18n` | `tr()` lookup, German table, language switch | Closed table |
 | `notify` | macOS notifications, rate-limited per kind | Small |
@@ -170,9 +170,11 @@ and compares what changed (for example the key of the last session shot).
 Found in an architecture review; the planned work makes these places extensible so that features
 can be added without editing the core in many places.
 
-- **Settings**: one closed struct. An unknown value (e.g. a tile kind from a newer build) makes the
-  whole file fail to load, and the next save writes defaults over it. The GUI saves from eight
-  places, each mirroring fields into the edit copy by hand.
+- **Settings**: still one flat struct, but it reads what a newer or extended build wrote: an
+  unknown value drops only its entry, unknown top-level keys are written back unchanged, and an
+  unreadable file is kept as `settings.json.bad` ([ADR-006](adr/adr-006-settings-tolerate-unknown-values.md)).
+  The GUI changes settings through one method, `App::change_settings`. Left: unknown keys inside
+  nested objects and dropped entries are still lost on the next save.
 - **Events**: "shot recorded", "GSPro result arrived" and "R10 ready/problem" exist only as changes
   inside `state`. Recording a shot happens inside the protocol code of `gspro`.
 - **Tile kinds**: a new kind touches about ten places in three files.

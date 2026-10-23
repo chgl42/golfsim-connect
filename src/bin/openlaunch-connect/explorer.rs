@@ -449,6 +449,7 @@ impl App {
 
         // Second row: the filter and what to do with the selection, or the page while arranging.
         let mut exclude: Option<bool> = None;
+        let gspro_toggled;
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
         let mut row = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
         row.spacing_mut().item_spacing.x = 6.0;
@@ -487,11 +488,7 @@ impl App {
             }
             let gspro_chip = chip(&mut row, tr("GSPro results"), None, self.saved.gspro_results)
                 .on_hover_text(tr("Carry, total, apex and side as GSPro computed them, where it did; else the estimate (*)"));
-            if gspro_chip.clicked() {
-                self.saved.gspro_results = !self.saved.gspro_results;
-                self.edit.gspro_results = self.saved.gspro_results;
-                let _ = self.saved.save();
-            }
+            gspro_toggled = gspro_chip.clicked();
             if !ex.selected.is_empty() {
                 row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
@@ -628,12 +625,14 @@ impl App {
         if let Some(k) = replay {
             ex.anim = Some((k, Instant::now()));
         }
+        if gspro_toggled {
+            let on = !self.saved.gspro_results;
+            let _ = self.change_settings(|s| s.gspro_results = on);
+        }
         if layout_changed {
-            // Applies and saves at once, like the overlay's settings.
-            self.edit.explorer = self.saved.explorer.clone();
-            if let Err(e) = self.saved.save() {
-                log::info(&format!("Could not save the settings: {e}"));
-            }
+            // Applied above already; saved at once, like the overlay's settings.
+            let explorer = self.saved.explorer.clone();
+            let _ = self.change_settings(|s| s.explorer.clone_from(&explorer));
         }
         if let Some(excluded) = exclude {
             let keys = self.explorer.selected.clone();

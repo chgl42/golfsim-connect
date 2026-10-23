@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::engine::Config;
 use crate::history::ExportFormat;
@@ -29,6 +30,7 @@ pub struct Settings {
     /// Log raw GSPro OpenConnect messages.
     pub debug: bool,
     /// Always-on-top status overlay for playing with GSPro in full screen.
+    #[serde(deserialize_with = "tolerant::or_default")]
     pub overlay: OverlayPos,
     /// Placed by hand: its top left corner as fractions of the room the screen leaves (overrides
     /// the place in `overlay`, which still turns it on or off).
@@ -36,8 +38,10 @@ pub struct Settings {
     /// Size, background and contents of the overlay.
     pub overlay_style: OverlayStyle,
     /// Overlays with one tile of the shots explorer each.
+    #[serde(deserialize_with = "tolerant::list")]
     pub tile_overlays: Vec<TileOverlay>,
     /// Saved arrangements of all overlays; the one in use (`arrangement`) follows every change.
+    #[serde(deserialize_with = "tolerant::list")]
     pub arrangements: Vec<Arrangement>,
     pub arrangement: usize,
     /// Ask GitHub for a newer release on start.
@@ -50,19 +54,25 @@ pub struct Settings {
     /// macOS notifications for problems (battery, R10 errors, lost connections, undelivered shots).
     pub notifications: bool,
     /// UI language (the log stays English).
+    #[serde(deserialize_with = "tolerant::or_default")]
     pub language: Language,
     /// CSV layout chosen last (unused since the export asks each time; kept so the field still loads).
+    #[serde(deserialize_with = "tolerant::or_default")]
     pub export_format: ExportFormat,
     /// Pages and tiles of the shots explorer.
     pub explorer: Explorer,
     /// Carry, total, apex and side from GSPro where it sent them (else the estimate).
     pub gspro_results: bool,
+    /// Settings this version doesn't know (of a newer or extended build), written back unchanged.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 /// The shots explorer: pages of tiles on a grid of square cells.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Explorer {
+    #[serde(deserialize_with = "tolerant::list")]
     pub pages: Vec<ExplorerPage>,
 }
 
@@ -108,6 +118,7 @@ pub const DEFAULT_PAGE_NAMES: [&str; 3] = ["Range", "Ball flight", "Data"];
 pub struct ExplorerPage {
     /// Name on the page's tab; empty shows "Page n".
     pub name: String,
+    #[serde(deserialize_with = "tolerant::list")]
     pub tiles: Vec<Tile>,
 }
 
@@ -265,6 +276,7 @@ pub struct OverlayStyle {
     pub opacity: f32,
     /// The overlay's tiles: columns of two (top, bottom). The first column starts with the status,
     /// which can't be moved. One line shows them in this order.
+    #[serde(deserialize_with = "tolerant::layout")]
     pub layout: Vec<[Option<OverlayItem>; 2]>,
 }
 
@@ -350,6 +362,7 @@ pub struct Arrangement {
     pub overlay: OverlayPos,
     pub overlay_spot: Option<[f32; 2]>,
     pub overlay_style: OverlayStyle,
+    #[serde(deserialize_with = "tolerant::list")]
     pub tiles: Vec<TileOverlay>,
 }
 
@@ -500,6 +513,7 @@ impl Default for Settings {
             ui_scale: None,
             explorer: Explorer::default(),
             gspro_results: true,
+            extra: Map::new(),
         }
     }
 }
@@ -549,14 +563,30 @@ impl Settings {
     }
 
     /// The settings under the home folder `home`; the defaults if there are none or they can't be read.
+    /// Values this version doesn't know are left out (see `tolerant`); a file that can't be read at
+    /// all is kept as `settings.json.bad`, so the next save doesn't lose it.
     fn load_in(home: &Path) -> Self {
+        let own = Self::dir_in(home, DATA_DIR).join("settings.json");
+        if let Ok(bytes) = std::fs::read(&own) {
+            match serde_json::from_slice::<Self>(&bytes) {
+                Ok(s) => return s,
+                Err(e) => {
+                    let bad = own.with_extension("json.bad");
+                    let kept = match std::fs::write(&bad, &bytes) {
+                        Ok(()) => format!("kept as {}", bad.display()),
+                        Err(e) => format!("no copy kept ({e})"),
+                    };
+                    crate::log::info(&format!("Settings can't be read ({e}), {kept}; using the defaults"));
+                }
+            }
+        }
+        // Fall back to settings of earlier builds (GSProR10Connect, R10 Bridge).
         let read = |name: &str| {
             std::fs::read(Self::dir_in(home, name).join("settings.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Self>(&b).ok())
         };
-        // Fall back to settings of earlier builds (GSProR10Connect, R10 Bridge).
-        read(DATA_DIR).or_else(|| read("GSProR10Connect")).or_else(|| read("R10 Bridge")).unwrap_or_default()
+        read("GSProR10Connect").or_else(|| read("R10 Bridge")).unwrap_or_default()
     }
 
     /// # Errors
@@ -590,6 +620,41 @@ impl Settings {
             demo: std::env::var_os("OPENLAUNCH_DEMO").is_some(),
             ..Config::default()
         }
+    }
+}
+
+/// Reading settings that a newer or extended build wrote: a value this version doesn't know (e.g.
+/// a tile kind) leaves out only what holds it, with a log line, instead of failing the whole file.
+mod tolerant {
+    use serde::de::DeserializeOwned;
+    use serde::{Deserialize, Deserializer};
+    use serde_json::Value;
+
+    /// `value` as a `T`, or `None` (logged) if this version can't read it.
+    fn read<T: DeserializeOwned>(value: Value) -> Option<T> {
+        match T::deserialize(&value) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::log::info(&format!("Settings: left out {value} ({e})"));
+                None
+            }
+        }
+    }
+
+    /// A list without the entries this version can't read.
+    pub fn list<'de, D: Deserializer<'de>, T: DeserializeOwned>(d: D) -> Result<Vec<T>, D::Error> {
+        Ok(Vec::<Value>::deserialize(d)?.into_iter().filter_map(read).collect())
+    }
+
+    /// The value, or the default if this version can't read it.
+    pub fn or_default<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
+        Ok(read(Value::deserialize(d)?).unwrap_or_default())
+    }
+
+    /// The overlay's columns: an item this version doesn't know leaves its place empty.
+    pub fn layout<'de, D: Deserializer<'de>, T: DeserializeOwned>(d: D) -> Result<Vec<[Option<T>; 2]>, D::Error> {
+        let columns: Vec<[Value; 2]> = list(d)?;
+        Ok(columns.into_iter().map(|c| c.map(|v| read(v).flatten())).collect())
     }
 }
 
@@ -708,14 +773,16 @@ mod tests {
         assert_eq!(s.explorer, d.explorer);
         assert!(s.tile_overlays.is_empty() && s.arrangements.is_empty());
         assert_eq!((s.ui_scale, s.language, s.notifications, s.gspro_results), (None, d.language, true, true));
+        assert!(s.extra.is_empty(), "every key of the old file is known: {:?}", s.extra);
     }
 
-    /// Fields of a newer version are ignored, the rest loads.
+    /// Fields of a newer version are kept aside at the top level and ignored further in; the rest loads.
     #[test]
     fn unknown_fields_are_ignored() {
         let s: Settings = serde_json::from_str(r#"{"metric":false,"future_switch":true,"overlay_style":{"glow":3}}"#).unwrap();
         assert!(!s.metric);
         assert_eq!(s.overlay_style, OverlayStyle::default());
+        assert_eq!(s.extra.get("future_switch"), Some(&Value::Bool(true)));
     }
 
     /// Without settings of its own, the app takes those of the earlier names: GSProR10Connect
@@ -749,11 +816,9 @@ mod tests {
         assert!(!Settings::load_in(home.path()).metric);
     }
 
-    /// Today one value this version doesn't know (a tile kind or overlay item of a newer version,
-    /// or a typo) makes the whole file unreadable: `load` falls back to the defaults and the next
-    /// save overwrites everything. Wanted: the unknown value is dropped, the rest survives.
+    /// One value this version doesn't know (a tile kind or overlay item of a newer version, or a
+    /// typo) drops only what holds it; the rest survives (bug #70: all fell back to the defaults).
     #[test]
-    #[ignore = "bug #70: one unknown enum value makes all settings fall back to the defaults"]
     fn one_unknown_value_keeps_the_other_settings() {
         let mut s = Settings { metric: false, gspro_addr: "127.0.0.1:9210".into(), ..Settings::default() };
         s.overlay_style.layout[1][0] = Some(OverlayItem::Tempo);
@@ -762,12 +827,97 @@ mod tests {
         let item = json.replacen(r#""tempo""#, r#""launch_direction""#, 1);
         assert_ne!(tile, json);
         assert_ne!(item, json);
+        let mut loaded = Vec::new();
         for json in [tile, item] {
             let home = crate::test_util::TempDir::new("settings-unknown");
             write_in(home.path(), DATA_DIR, &json);
-            let loaded = Settings::load_in(home.path());
-            assert_eq!(loaded.gspro_addr, "127.0.0.1:9210", "{json}");
-            assert!(!loaded.metric, "{json}");
+            let l = Settings::load_in(home.path());
+            assert_eq!(l.gspro_addr, "127.0.0.1:9210", "{json}");
+            assert!(!l.metric, "{json}");
+            assert!(!Settings::dir_in(home.path(), DATA_DIR).join("settings.json.bad").exists(), "no copy needed");
+            loaded.push(l);
         }
+        // Only the tile with the unknown kind is gone, only the unknown item's place is empty.
+        assert_eq!(loaded[0].explorer.pages[0].tiles, s.explorer.pages[0].tiles[1..]);
+        assert_eq!(loaded[0].overlay_style, s.overlay_style);
+        assert_eq!(loaded[1].overlay_style.layout[1], [None, Some(OverlayItem::ClubSpeed)]);
+        assert_eq!(loaded[1].explorer, s.explorer);
+    }
+
+    /// An unknown tile kind takes only its tile with it, in the explorer and in the tile overlays
+    /// (of the arrangements, too); an unknown overlay position or language is the default.
+    #[test]
+    fn unknown_values_drop_only_their_entry() {
+        let mut s = Settings { tile_overlays: vec![TileOverlay::default(), TileOverlay::default()], ..Settings::default() };
+        s.keep_arrangement();
+        let mut v = serde_json::to_value(&s).unwrap();
+        v["explorer"]["pages"][0]["tiles"][1]["kind"] = "gapping".into();
+        v["tile_overlays"][0]["tile"]["kind"] = "gapping".into();
+        v["arrangements"][0]["tiles"][1]["pos"] = "center".into();
+        v["overlay"] = "center".into();
+        v["language"] = "klingon".into();
+        let loaded: Settings = serde_json::from_value(v).unwrap();
+        let kinds: Vec<TileKind> = loaded.explorer.pages[0].tiles.iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, [TileKind::Table, TileKind::Flight]);
+        assert_eq!(loaded.explorer.pages[1..], s.explorer.pages[1..]);
+        assert_eq!((loaded.tile_overlays.len(), loaded.arrangements[0].tiles.len()), (1, 1));
+        assert_eq!((loaded.overlay, loaded.language), (OverlayPos::default(), Language::default()));
+    }
+
+    /// An overlay item this version doesn't know leaves its place empty; the columns stay.
+    #[test]
+    fn unknown_overlay_item_leaves_its_place_empty() {
+        let json = r#"{"layout":[["status","club"],["launch_direction","ball_speed"],["hologram"]]}"#;
+        let style: OverlayStyle = serde_json::from_str(json).unwrap();
+        let (status, club, ball) = (OverlayItem::Status, OverlayItem::Club, OverlayItem::BallSpeed);
+        assert_eq!(style.layout, [[Some(status), Some(club)], [None, Some(ball)]], "a column that isn't one is left out");
+    }
+
+    /// Settings of a newer or extended build keep what this version doesn't know when it saves.
+    #[test]
+    fn unknown_settings_survive_a_save() {
+        let home = crate::test_util::TempDir::new("settings-extra");
+        write_in(home.path(), DATA_DIR, r#"{"metric":false,"swing_video":{"camera":2,"fps":120},"putting":true}"#);
+        let mut s = Settings::load_in(home.path());
+        assert!(!s.metric);
+        assert_eq!(s.extra.len(), 2);
+        s.meters = false;
+        s.save_in(home.path()).unwrap();
+        let file = Settings::dir_in(home.path(), DATA_DIR).join("settings.json");
+        let saved: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        assert_eq!(saved["swing_video"], serde_json::json!({"camera":2,"fps":120}));
+        assert_eq!((&saved["putting"], &saved["meters"]), (&Value::Bool(true), &Value::Bool(false)));
+        assert_eq!(Settings::load_in(home.path()), s);
+    }
+
+    /// Today's settings are written as they were before unknown values were kept.
+    #[test]
+    fn valid_settings_are_written_unchanged() {
+        let mut s = Settings { metric: false, ..Settings::default() };
+        s.tile_overlays.push(TileOverlay::default());
+        s.keep_arrangement();
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        let again: Settings = serde_json::from_str(&json).unwrap();
+        assert!(again.extra.is_empty());
+        assert_eq!(serde_json::to_string_pretty(&again).unwrap(), json);
+    }
+
+    /// A settings file that can't be read at all (cut off) is kept as settings.json.bad, replacing
+    /// an older copy, before the app starts with the defaults.
+    #[test]
+    fn unreadable_settings_are_kept_as_bad() {
+        let home = crate::test_util::TempDir::new("settings-bad");
+        let dir = Settings::dir_in(home.path(), DATA_DIR);
+        let bad = dir.join("settings.json.bad");
+        write_in(home.path(), DATA_DIR, r#"{"metric":false,"gspro_ad"#);
+        assert_eq!(Settings::load_in(home.path()), Settings::default());
+        assert_eq!(std::fs::read_to_string(&bad).unwrap(), r#"{"metric":false,"gspro_ad"#);
+        write_in(home.path(), DATA_DIR, "{ not json");
+        assert_eq!(Settings::load_in(home.path()), Settings::default());
+        assert_eq!(std::fs::read_to_string(&bad).unwrap(), "{ not json", "the older copy is replaced");
+        // Saving writes the settings anew; the copy stays.
+        Settings::default().save_in(home.path()).unwrap();
+        assert_eq!(Settings::load_in(home.path()), Settings::default());
+        assert!(bad.is_file());
     }
 }

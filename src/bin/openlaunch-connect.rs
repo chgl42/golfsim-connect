@@ -670,11 +670,7 @@ impl App {
                 let fits = |s: Option<f32>| room.is_none_or(|r| min_size(s).x <= r.x + 0.5 && min_size(s).y <= r.y + 0.5);
                 if segments_where(ui, &mut scale, &options, fits, tr("Too large for this screen")) {
                     // Applies and saves at once, like the overlay's settings.
-                    self.saved.ui_scale = scale;
-                    self.edit.ui_scale = scale;
-                    if let Err(e) = self.saved.save() {
-                        log::info(&format!("Could not save the settings: {e}"));
-                    }
+                    let _ = self.change_settings(|s| s.ui_scale = scale);
                 }
             });
         });
@@ -773,9 +769,9 @@ impl App {
         if button(ui, save_r, tr("SAVE"), Icon::None, true, dirty, tr("No changes")) {
             let restart = self.edit.gspro_addr != self.saved.gspro_addr
                 || (self.edit.tee_distance - self.saved.tee_distance).abs() > f32::EPSILON;
-            match self.edit.save() {
+            let edit = self.edit.clone();
+            match self.change_settings(|s| s.clone_from(&edit)) {
                 Ok(()) => {
-                    self.saved = self.edit.clone();
                     i18n::set(self.saved.language);
                     self.note = Some(if restart {
                         tr("Saved. Address and distance apply after the next start.").into()
@@ -820,9 +816,7 @@ impl App {
                     }
                 });
             if reset {
-                self.saved.explorer = openlaunch_connect::settings::Explorer::default();
-                self.edit.explorer = self.saved.explorer.clone();
-                self.note = Some(match self.saved.save() {
+                self.note = Some(match self.change_settings(|s| s.explorer = openlaunch_connect::settings::Explorer::default()) {
                     Ok(()) => tr("Shots view reset.").into(),
                     Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
                 });
@@ -931,9 +925,9 @@ impl App {
         ctx.options_mut(|o| o.zoom_factor = zoom);
         self.set_passthrough(ctx, None, !grabbable);
         if let Some(at) = dropped {
-            self.saved.overlay_spot = Some(overlay_spot(visible, size, at));
+            let spot = overlay_spot(visible, size, at);
             self.moving = None;
-            self.save_overlays();
+            self.change_overlays(|s| s.overlay_spot = Some(spot));
         }
     }
 
@@ -955,29 +949,32 @@ impl App {
         }
     }
 
-    /// Saves the overlays (applied at once), into the arrangement in use, too.
-    fn save_overlays(&mut self) {
-        let s = &mut self.saved;
-        s.keep_arrangement();
-        // The settings page saves its own copy; it keeps these as they are.
-        let e = &mut self.edit;
-        e.overlay = s.overlay;
-        e.overlay_spot = s.overlay_spot;
-        e.overlay_style = s.overlay_style.clone();
-        e.tile_overlays.clone_from(&s.tile_overlays);
-        e.arrangements.clone_from(&s.arrangements);
-        e.arrangement = s.arrangement;
-        if let Err(e) = s.save() {
-            log::info(&format!("Saving the overlay settings failed: {e}"));
-        }
+    /// The one way settings change outside the Settings page's SAVE: `change` is applied to the
+    /// settings in use and to the Settings page's copy (so its unsaved edits stay, and stay
+    /// visible as such), then the settings are saved. A failure is logged.
+    fn change_settings(&mut self, change: impl Fn(&mut Settings)) -> Result<(), String> {
+        change(&mut self.saved);
+        change(&mut self.edit);
+        self.saved.save().inspect_err(|e| log::info(&format!("Could not save the settings: {e}")))
     }
 
-    /// Shows the overlays of arrangement `i` (and saves that it is in use).
-    fn use_arrangement(&mut self, i: usize) {
-        self.saved.use_arrangement(i);
+    /// Changes the overlays (applied and saved at once), in the arrangement in use, too.
+    fn change_overlays(&mut self, change: impl Fn(&mut Settings)) {
+        let _ = self.change_settings(|s| {
+            change(s);
+            s.keep_arrangement();
+        });
+    }
+
+    /// Shows the overlays of the arrangement `choose` returns, after the changes it makes (and
+    /// saves that it is in use).
+    fn use_arrangement(&mut self, choose: impl Fn(&mut Settings) -> usize) {
+        self.change_overlays(|s| {
+            let i = choose(s);
+            s.use_arrangement(i);
+        });
         self.moving = None;
         self.overlay_tab = self.overlay_tab.filter(|&k| k < self.saved.tile_overlays.len());
-        self.save_overlays();
     }
 
     /// The arrangement's name as shown (the first one's translated while unchanged).
@@ -1017,18 +1014,21 @@ impl App {
             }
         });
         if let Some(name) = renamed {
-            let i = self.saved.arrangement;
-            self.saved.arrangements[i].name = name;
-            self.save_overlays();
+            self.change_overlays(|s| {
+                let i = s.arrangement;
+                s.arrangements[i].name.clone_from(&name);
+            });
         }
         if added {
-            let n = self.saved.arrangements.len() + 1;
-            let copy = Arrangement { name: tr("Arrangement {n}").replace("{n}", &n.to_string()), ..self.saved.arrangements[self.saved.arrangement].clone() };
-            self.saved.arrangements.push(copy);
-            self.use_arrangement(self.saved.arrangements.len() - 1);
+            let name = tr("Arrangement {n}").replace("{n}", &(self.saved.arrangements.len() + 1).to_string());
+            self.use_arrangement(|s| {
+                let copy = Arrangement { name: name.clone(), ..s.arrangements[s.arrangement].clone() };
+                s.arrangements.push(copy);
+                s.arrangements.len() - 1
+            });
         }
         if let Some(i) = chosen {
-            self.use_arrangement(i);
+            self.use_arrangement(|_| i);
         }
     }
 
@@ -1057,11 +1057,12 @@ impl App {
                 }
             });
         if delete && i < self.saved.arrangements.len() && self.saved.arrangements.len() > 1 {
-            self.saved.arrangements.remove(i);
-            let next = self.saved.arrangement.min(self.saved.arrangements.len() - 1);
-            // Shown without writing the deleted one's overlays into another.
-            self.saved.arrangement = next;
-            self.use_arrangement(next);
+            self.use_arrangement(|s| {
+                s.arrangements.remove(i);
+                // Shown without writing the deleted one's overlays into another.
+                s.arrangement = s.arrangement.min(s.arrangements.len() - 1);
+                s.arrangement
+            });
         }
         if modal.should_close() {
             self.confirm_delete_arrangement = None;
@@ -1153,9 +1154,9 @@ impl App {
             ctx.options_mut(|o| o.zoom_factor = zoom);
             self.set_passthrough(ctx, Some(k), !grabbable);
             if let Some(at) = dropped {
-                self.saved.tile_overlays[k].spot = Some(overlay_spot(visible, size, at));
+                let spot = overlay_spot(visible, size, at);
                 self.moving = None;
-                self.save_overlays();
+                self.change_overlays(|s| s.tile_overlays[k].spot = Some(spot));
             }
         }
     }
@@ -1219,10 +1220,11 @@ impl App {
         self.overlay_preview(ui, preview, pos, &mut style);
 
         if pos != self.saved.overlay || spot != self.saved.overlay_spot || style != self.saved.overlay_style {
-            self.saved.overlay = pos;
-            self.saved.overlay_spot = spot;
-            self.saved.overlay_style = style;
-            self.save_overlays();
+            self.change_overlays(|s| {
+                s.overlay = pos;
+                s.overlay_spot = spot;
+                s.overlay_style.clone_from(&style);
+            });
         }
     }
 
@@ -1269,13 +1271,13 @@ impl App {
         self.tile_overlay_preview(ui, right, &cfg);
 
         if remove {
-            self.saved.tile_overlays.remove(k);
+            self.change_overlays(|s| {
+                s.tile_overlays.remove(k);
+            });
             self.moving = None;
             self.overlay_tab = k.checked_sub(1).or((!self.saved.tile_overlays.is_empty()).then_some(0));
-            self.save_overlays();
         } else if cfg != self.saved.tile_overlays[k] {
-            self.saved.tile_overlays[k] = cfg;
-            self.save_overlays();
+            self.change_overlays(|s| s.tile_overlays[k].clone_from(&cfg));
         }
     }
 
@@ -1292,9 +1294,8 @@ impl App {
         self.arrangement_menu(&resp, true);
         let count = self.saved.tile_overlays.len();
         if overlay_tabs(ui, card, &mut self.overlay_tab, count) {
-            self.saved.tile_overlays.push(TileOverlay::default());
+            self.change_overlays(|s| s.tile_overlays.push(TileOverlay::default()));
             self.overlay_tab = Some(count);
-            self.save_overlays();
         }
     }
 
@@ -1498,12 +1499,10 @@ impl App {
             caps_text(ui.painter(), r.left_center(), egui::Align::Min, tr("LOG"), 15.0, MUTED);
             ui.add_space(12.0);
             // Troubleshooting switch next to the log it fills; saved right away.
-            if toggle(ui, &mut self.saved.debug, tr("Log GSPro messages")).changed() {
-                self.edit.debug = self.saved.debug;
-                openlaunch_connect::gspro::DEBUG.store(self.saved.debug, std::sync::atomic::Ordering::Relaxed);
-                if let Err(e) = self.saved.save() {
-                    log::info(&format!("Could not save settings: {e}"));
-                }
+            let mut debug = self.saved.debug;
+            if toggle(ui, &mut debug, tr("Log GSPro messages")).changed() {
+                openlaunch_connect::gspro::DEBUG.store(debug, std::sync::atomic::Ordering::Relaxed);
+                let _ = self.change_settings(|s| s.debug = debug);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(120.0, 26.0), Sense::hover());
@@ -1690,12 +1689,7 @@ impl App {
         let since = *self.size_changed.get_or_insert_with(Instant::now);
         if since.elapsed() >= Duration::from_secs(1) {
             self.size_changed = None;
-            self.saved.window_size = Some(size);
-            // Keep unsaved edits on the settings page apart from this.
-            self.edit.window_size = Some(size);
-            if let Err(e) = self.saved.save() {
-                log::info(&format!("Could not save the window size: {e}"));
-            }
+            let _ = self.change_settings(|s| s.window_size = Some(size));
         }
     }
 }
@@ -3994,6 +3988,34 @@ mod tests {
         let side = layout.iter().position(|c| c[0] == Some(ImpactSide)).unwrap();
         insert_tile(&mut layout, (side, 0), 1);
         assert_eq!(layout[1], [Some(ImpactSide), None]);
+    }
+
+    /// Settings changed at once (window size, overlays, arrangements) reach the Settings page's
+    /// copy, without saving or losing what is edited there.
+    #[test]
+    fn changes_outside_the_settings_page_keep_its_unsaved_edits() {
+        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        let settings = Settings { launcher_path: Some(PathBuf::from("/GSPro.app")), ..Settings::default() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut app = App::new(settings, tx);
+        assert_eq!(app.edit, app.saved);
+        // An unsaved edit on the Settings page, then changes applied at once elsewhere.
+        app.edit.metric = false;
+        app.change_settings(|s| s.window_size = Some([1100.0, 517.0])).unwrap();
+        app.change_overlays(|s| s.tile_overlays.push(TileOverlay::default()));
+        app.use_arrangement(|s| {
+            s.arrangements.push(Arrangement { name: "Range".into(), ..Arrangement::default() });
+            1
+        });
+        assert!(app.saved.metric && !app.edit.metric, "the edit stays unsaved");
+        assert_eq!(app.edit, Settings { metric: false, ..app.saved.clone() }, "everything else is mirrored");
+        assert_eq!((app.saved.arrangement, app.saved.tile_overlays.len()), (1, 0));
+        assert_eq!(app.saved.arrangements[0].tiles.len(), 1, "kept in the arrangement it was added to");
+        // The page's SAVE takes the edit.
+        let edit = app.edit.clone();
+        app.change_settings(|s| s.clone_from(&edit)).unwrap();
+        assert_eq!(app.edit, app.saved);
+        assert!(!app.saved.metric);
     }
 
     /// Dragging a tile in the overlay preview onto another swaps the two.
