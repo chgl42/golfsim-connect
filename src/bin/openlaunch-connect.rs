@@ -21,7 +21,7 @@ use openlaunch_connect::num;
 use openlaunch_connect::log;
 use openlaunch_connect::misread::Misread;
 use openlaunch_connect::settings::{Arrangement, DEFAULT_ARRANGEMENT, OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
-use openlaunch_connect::shape::Shape;
+use openlaunch_connect::shape::{Curve, Shape};
 use openlaunch_connect::state::{self, R10Status};
 use openlaunch_connect::update;
 
@@ -3250,7 +3250,9 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
     let a = (i.hla * 3.0).to_radians() as f32;
     let heading = vec2(a.sin(), -a.cos());
     let tip = at(59.0 + heading.x * start_len, 88.0 + heading.y * start_len);
-    let bend = (i.spin_axis as f32 * 2.2).clamp(-40.0, 40.0);
+    // Curved only where the shape's name says so, like the announcement.
+    let shape = Shape::of(i.hla, i.spin_axis, false);
+    let bend = if shape.curve == Curve::None { 0.0 } else { (i.spin_axis as f32 * 2.2).clamp(-40.0, 40.0) };
     let control = at(59.0 + heading.x * (start_len + 22.0), 88.0 + heading.y * (start_len + 22.0));
     let end = at(59.0 + heading.x * 84.0 + bend, 88.0 + heading.y * 84.0);
     let curve: Vec<egui::Pos2> = (0..=16)
@@ -3265,7 +3267,6 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
     p.add(egui::Shape::convex_polygon(head, WHITE, Stroke::NONE));
     p.add(egui::Shape::closed_line(outline, Stroke::new(1.0, PAGE)));
     if labels {
-        let shape = Shape::of(i.hla, i.spin_axis, false);
         p.text(r.left_top() + vec2(6.0, 4.0), Align2::LEFT_TOP, shape_name(shape), FontId::proportional(11.5), WHITE);
     }
     if labels {
