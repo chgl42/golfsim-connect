@@ -50,6 +50,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the landing area over a range as wide as a real one, so it fills the tile; the tee view has height lines where the
   flights peak.
 
+- **Overlay keeps its size:** a message (no R10, no GSPro, shot not delivered) now lies on a band over the values,
+  and the last shot's values stay dimmed underneath instead of disappearing; before the first shot each value
+  shows a dash. Every column is as wide as its widest value, so the overlay no longer changes width from shot to
+  shot. The status words are shorter: *No GSPro* and *Not ready*.
+
 ### Fixed
 - The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
   window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
