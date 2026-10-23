@@ -300,6 +300,7 @@ fn de(en: &str) -> Option<&'static str> {
         "start direction" => "Startrichtung",
         "spin axis" => "Spinachse",
         "smash factor" => "Smash-Faktor",
+        "GSPro Connect doesn't answer – press Reset GSPro Connect in GSPro's settings" => "GSPro Connect antwortet nicht – in GSPro unter Settings „Reset GSPro Connect“ drücken",
         "LAYOUT" => "LAYOUT",
         "CONTENTS" => "INHALTE",
         "TILE {n}" => "KACHEL {n}",
