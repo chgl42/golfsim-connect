@@ -125,7 +125,7 @@ cd openlaunch-connect
 | Status | Meaning |
 |---|---|
 | **READY** (green) | R10 armed and GSPro connected |
-| **WAITING FOR GSPRO** / **R10 NOT READY** (amber) | one side is connected, the other isn't ready yet |
+| **NO GSPRO** / **NOT READY** (amber) | one side is connected, the other isn't ready yet |
 | **NO R10** (red) | searching for the R10 – also shown a few seconds after the R10 is switched off; the app reconnects on its own |
 
 Hover over the status panel for details; the **LOG** page shows everything that happens.
@@ -231,7 +231,7 @@ in `shots.jsonl` in the same folder (one JSON object per shot; test shots are no
 - **"No handshake"** – a macOS pairing dialog may be hidden; otherwise switch the R10 off and on.
 - **No notifications** – click *Test* in the settings; if nothing appears, allow notifications for OpenLaunch Connect in *System Settings → Notifications* (macOS shows them only while the app is in the background).
 - **No tempo shown** – the R10 didn't time that swing (e.g. very slow swings, or a test shot).
-- **WAITING FOR GSPRO** – GSPro isn't running or its connect window is closed. Only one OpenConnect client can be connected – quit other connectors (e.g. gspro-r10).
+- **NO GSPRO** – GSPro isn't running or its connect window is closed. Only one OpenConnect client can be connected – quit other connectors (e.g. gspro-r10).
 - **Shot sent but no ball flight** – GSPro must be the active window with a ball teed up.
 - macOS does **not** list the R10 in the Bluetooth settings – that's normal for this kind of BLE device; the app connects on its own.
 

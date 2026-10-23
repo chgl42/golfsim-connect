@@ -2517,10 +2517,13 @@ fn status_word(r10: R10Status, gs_ok: bool) -> (Color32, &'static str) {
     match (r10, gs_ok) {
         (R10Status::Ready, true) => (GREEN, tr("READY")),
         (R10Status::Searching, _) => (RED, tr("NO R10")),
-        (_, false) => (AMBER, tr("WAITING FOR GSPRO")),
-        (R10Status::Connected, true) => (AMBER, tr("R10 NOT READY")),
+        (_, false) => (AMBER, tr("NO GSPRO")),
+        (R10Status::Connected, true) => (AMBER, tr("NOT READY")),
     }
 }
+
+/// Every word `status_word` can give (English source texts).
+const STATUS_WORDS: [&str; 4] = ["READY", "NO R10", "NO GSPRO", "NOT READY"];
 
 /// Overlay content: status, club and battery on top; last shot (or what's wrong) below.
 /// Height of the two-line overlay with the impact graphics.
@@ -2542,10 +2545,11 @@ const EMPTY_TILE_W: f32 = 44.0;
 enum Cell {
     /// Dot and status word in the status colour.
     Status,
-    /// A value, with its symbol in front.
-    Value { glyph: Option<Glyph>, text: String, color: Color32 },
-    /// Battery level of the R10.
-    Battery(u8),
+    /// A value, with its symbol in front; as wide as `wide`, the widest text it can take, so the
+    /// overlay keeps its size from shot to shot.
+    Value { glyph: Option<Glyph>, text: String, color: Color32, wide: String },
+    /// Battery level of the R10 (`None`: not known, e.g. no R10 connected).
+    Battery(Option<u8>),
     /// An impact graphic, filling its column.
     Graphic(OverlayItem),
     /// A value filling its column, in large figures.
@@ -2558,8 +2562,8 @@ struct OverlayContent {
     word: &'static str,
     /// The tiles in columns (top, bottom); the first one holds the status.
     columns: Vec<[Option<Cell>; 2]>,
-    /// Not ready, no shot yet or not delivered: shown next to the first column instead of the
-    /// others (the battery stays).
+    /// Not ready or not delivered: shown on a band over the other columns, whose last values stay
+    /// dimmed underneath (the overlay keeps its size).
     message: Option<(String, Color32)>,
     one_line: bool,
     opacity: f32,
@@ -2611,33 +2615,45 @@ impl OverlayContent {
             (_, false) if r10 != R10Status::Ready => Some((tr_detail(r10_detail), AMBER)),
             (_, false) => Some((tr("GSPro not connected").to_string(), AMBER)),
             (Some(s), true) if !s.delivered => Some((tr("Last shot NOT delivered to GSPro").to_string(), AMBER)),
-            (Some(_), true) => None,
-            (None, true) => Some((tr("Hit away").to_string(), SOFT)),
+            _ => None,
         };
-        let shot = last.filter(|_| message.is_none());
+        // The last shot's values stay, also under a message; a dash where there is none yet.
+        let shot = last;
         let (factor, unit) = if metric { (MPH_TO_KMH, "km/h") } else { (1.0, "mph") };
-        let value = |glyph, text: String| Some(Cell::Value { glyph, text, color: WHITE });
+        let value = |glyph, text: Option<String>, wide: String| {
+            Some(Cell::Value { glyph, text: text.unwrap_or_else(|| "–".into()), color: WHITE, wide })
+        };
+        let speed = |mph: f64| format!("{:.1} {unit}", mph * factor);
         let value_cell = |item: OverlayItem| -> Option<Cell> {
+            let b = shot.map(|s| &s.ball);
             match item {
                 OverlayItem::Status => Some(Cell::Status),
-                OverlayItem::Club => club.map(|c| Cell::Value { glyph: None, text: club_name(c), color: SOFT }),
-                OverlayItem::Battery => battery.map(Cell::Battery),
-                OverlayItem::Pin => pin.clone().filter(|_| shot.is_some()).and_then(|p| value(Some(Glyph::Pin), p)),
-                OverlayItem::ImpactSide | OverlayItem::ImpactTop => shot.map(|_| Cell::Graphic(item)),
-                _ => {
-                    let s = shot?;
-                    let b = &s.ball;
-                    match item {
-                        OverlayItem::BallSpeed => value(Some(Glyph::BallSpeed), format!("{:.1} {unit}", b.speed * factor)),
-                        OverlayItem::ClubSpeed => value(Some(Glyph::ClubSpeed), format!("{:.1} {unit}", s.club?.speed * factor)),
-                        OverlayItem::Smash => value(Some(Glyph::Smash), format!("{:.2}", history::smash(b, s.club.as_ref())?)),
-                        OverlayItem::Spin => value(Some(Glyph::Spin), format!("{:.0}", b.total_spin)),
-                        OverlayItem::Vla => value(None, format!("VLA {}°", num(b.vla, 1))),
-                        OverlayItem::Hla => value(None, format!("HLA {}°", num(b.hla, 1))),
-                        OverlayItem::SpinAxis => value(None, format!("{} {}°", tr("Axis"), num(b.spin_axis, 1))),
-                        OverlayItem::Tempo => value(Some(Glyph::Tempo), format!("{:.1} : 1", s.tempo?.ratio())),
-                        _ => None,
-                    }
+                OverlayItem::Club => Some(Cell::Value {
+                    glyph: None,
+                    text: club.map_or_else(|| "–".into(), club_name),
+                    color: SOFT,
+                    wide: club_name("PW"),
+                }),
+                OverlayItem::Battery => Some(Cell::Battery(battery)),
+                OverlayItem::Pin => value(Some(Glyph::Pin), pin.clone().filter(|_| shot.is_some()), pin_text(888.0, true)),
+                OverlayItem::ImpactSide | OverlayItem::ImpactTop => Some(Cell::Graphic(item)),
+                OverlayItem::BallSpeed => value(Some(Glyph::BallSpeed), b.map(|b| speed(b.speed)), speed(288.8 / factor)),
+                OverlayItem::ClubSpeed => {
+                    value(Some(Glyph::ClubSpeed), shot.and_then(|s| s.club).map(|c| speed(c.speed)), speed(288.8 / factor))
+                }
+                OverlayItem::Smash => value(
+                    Some(Glyph::Smash),
+                    shot.and_then(|s| history::smash(&s.ball, s.club.as_ref())).map(|v| format!("{v:.2}")),
+                    "8.88".into(),
+                ),
+                OverlayItem::Spin => value(Some(Glyph::Spin), b.map(|b| format!("{:.0}", b.total_spin)), "18888".into()),
+                OverlayItem::Vla => value(None, b.map(|b| format!("VLA {}°", num(b.vla, 1))), "VLA -88.8°".into()),
+                OverlayItem::Hla => value(None, b.map(|b| format!("HLA {}°", num(b.hla, 1))), "HLA -88.8°".into()),
+                OverlayItem::SpinAxis => {
+                    value(None, b.map(|b| format!("{} {}°", tr("Axis"), num(b.spin_axis, 1))), format!("{} -88.8°", tr("Axis")))
+                }
+                OverlayItem::Tempo => {
+                    value(Some(Glyph::Tempo), shot.and_then(|s| s.tempo).map(|t| format!("{:.1} : 1", t.ratio())), "8.8 : 1".into())
                 }
             }
         };
@@ -2677,7 +2693,7 @@ impl OverlayContent {
             None => columns.push([Some(Cell::Status), None]),
             _ => {}
         }
-        let impact = last.filter(|_| ready).filter(|s| s.delivered).map(|s| Impact {
+        let impact = last.map(|s| Impact {
             spin_axis: s.ball.spin_axis,
             aoa: s.club.map(|c| c.angle_of_attack),
             vla: s.ball.vla,
@@ -2694,10 +2710,9 @@ impl OverlayContent {
             .iter()
             .enumerate()
             .map(|(k, [a, b])| {
-                let shows = |c: &Cell| self.message.is_none() || k == 0 || matches!(c, Cell::Battery(_));
-                (k, [a.as_ref().filter(|c| shows(c)), b.as_ref().filter(|c| shows(c))])
+                (k, [a.as_ref(), b.as_ref()])
             })
-            .filter(|(_, [a, b])| a.is_some() || b.is_some() || (self.edit && self.message.is_none()))
+            .filter(|(_, [a, b])| a.is_some() || b.is_some() || self.edit)
             .collect()
     }
 
@@ -2708,7 +2723,7 @@ impl OverlayContent {
         for (k, col) in self.shown_columns() {
             let whole = matches!(col[0], Some(Cell::Graphic(_) | Cell::Tall(_)));
             for (r, cell) in col.into_iter().enumerate() {
-                if cell.is_some() || (self.edit && self.message.is_none() && !(whole && r == 1)) {
+                if cell.is_some() || (self.edit && !(whole && r == 1)) {
                     out.push((k, r, cell));
                 }
             }
@@ -2726,40 +2741,25 @@ impl OverlayContent {
     }
 
     /// Where the columns go (left edge and width, from the panel's left) and the panel's height.
-    /// The message, if any, comes after the first column as one more "column".
     fn tiles(&self, measure: &dyn Fn(&str, FontId) -> f32) -> (Vec<(f32, f32)>, f32) {
         let columns = self.shown_columns();
         let mut x = TILE_PAD_L;
         let mut out = Vec::new();
         let width = |cell: Option<&Cell>| cell.map_or(EMPTY_TILE_W, |c| cell_width(c, self.word, self.one_line, measure));
         if self.one_line {
-            // One row: every tile after the other, the message after the first.
-            for (n, (_, _, cell)) in self.shown_tiles().into_iter().enumerate() {
+            // One row: every tile after the other.
+            for (_, _, cell) in self.shown_tiles() {
                 let w = width(cell);
                 out.push((x, w));
                 x += w + 16.0;
-                if n == 0
-                    && let Some((text, _)) = &self.message
-                {
-                    let w = measure(text, FontId::proportional(14.0));
-                    out.push((x, w));
-                    x += w + 16.0;
-                }
             }
             return (out, 40.0);
         }
-        for (n, (_, col)) in columns.iter().enumerate() {
+        for (_, col) in &columns {
             let whole = matches!(col[0], Some(Cell::Graphic(_) | Cell::Tall(_)));
             let w = if whole { width(col[0]) } else { col.iter().map(|c| width(*c)).fold(0.0, f32::max) };
             out.push((x, w));
             x += w + TILE_GAP;
-            if n == 0
-                && let Some((text, _)) = &self.message
-            {
-                let w = measure(text, FontId::proportional(14.0));
-                out.push((x, w));
-                x += w + TILE_GAP;
-            }
         }
         // Taller with an impact graphic, which has its values underneath.
         let graphic = columns.iter().any(|(_, c)| matches!(c[0], Some(Cell::Graphic(_))));
@@ -2770,14 +2770,23 @@ impl OverlayContent {
 /// Width of a tile's contents.
 fn cell_width(cell: &Cell, word: &str, one_line: bool, measure: &dyn Fn(&str, FontId) -> f32) -> f32 {
     match cell {
-        Cell::Status => 16.0 + measure(word, cond(if one_line { 20.0 } else { 24.0 })),
-        Cell::Value { glyph, text, .. } => (if glyph.is_some() { GLYPH_W } else { 0.0 }) + measure(text, FontId::proportional(14.0)),
-        Cell::Battery(level) => 32.0 + measure(&format!("{level} %"), FontId::proportional(13.0)),
+        // As wide as the longest status word, so the overlay doesn't change with the status.
+        Cell::Status => {
+            let font = cond(if one_line { 20.0 } else { 24.0 });
+            16.0 + STATUS_WORDS.iter().map(|w| measure(tr(w), font.clone())).fold(measure(word, font.clone()), f32::max)
+        }
+        Cell::Value { glyph, text, wide, .. } => {
+            let font = FontId::proportional(14.0);
+            (if glyph.is_some() { GLYPH_W } else { 0.0 }) + measure(text, font.clone()).max(measure(wide, font))
+        }
+        Cell::Battery(_) => 32.0 + measure("100 %", FontId::proportional(13.0)),
         // The panel spans the gaps on both sides.
         Cell::Graphic(_) => impact_panel_width(one_line) - if one_line { 16.0 } else { TILE_GAP },
         Cell::Tall(inner) if one_line => cell_width(inner, word, true, measure),
         Cell::Tall(inner) => match inner.as_ref() {
-            Cell::Value { glyph, text, .. } => (if glyph.is_some() { GLYPH_W + 4.0 } else { 0.0 }) + measure(text, cond(TALL_SIZE)),
+            Cell::Value { glyph, text, wide, .. } => {
+                (if glyph.is_some() { GLYPH_W + 4.0 } else { 0.0 }) + measure(text, cond(TALL_SIZE)).max(measure(wide, cond(TALL_SIZE)))
+            }
             other => cell_width(other, word, false, measure),
         },
     }
@@ -2884,7 +2893,7 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
             p.circle_filled(pos2(at.x + 4.0, at.y), 5.0, c.color);
             caps_text(p, pos2(at.x + 16.0, at.y), egui::Align::Min, c.word, if c.one_line { 20.0 } else { 24.0 }, c.color);
         }
-        Cell::Value { glyph, text, color } => {
+        Cell::Value { glyph, text, color, .. } => {
             let mut x = at.x;
             if let Some(g) = glyph {
                 draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
@@ -2894,11 +2903,16 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
         }
         Cell::Battery(level) => {
             let w = cell_width(cell, c.word, c.one_line, &measure);
-            draw_battery(p, pos2(at.x + w, at.y), *level);
+            match level {
+                Some(level) => draw_battery(p, pos2(at.x + w, at.y), *level),
+                None => {
+                    p.text(pos2(at.x + w, at.y), Align2::RIGHT_CENTER, "–", FontId::proportional(14.0), MUTED);
+                }
+            }
         }
         Cell::Tall(inner) => match inner.as_ref() {
             // In one line just the value; two lines draw it large (see below).
-            Cell::Value { glyph, text, color } if !c.one_line => {
+            Cell::Value { glyph, text, color, .. } if !c.one_line => {
                 let mut x = at.x;
                 if let Some(g) = glyph {
                     draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
@@ -2906,7 +2920,7 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
                 }
                 caps_text(p, pos2(x, at.y), egui::Align::Min, text, TALL_SIZE, *color);
             }
-            Cell::Value { glyph, text, color } => {
+            Cell::Value { glyph, text, color, .. } => {
                 let mut x = at.x;
                 if let Some(g) = glyph {
                     draw_glyph(p, pos2(x + 8.0, at.y), *g, LABEL);
@@ -2914,7 +2928,7 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
                 }
                 p.text(pos2(x, at.y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
             }
-            Cell::Battery(level) => draw_battery(p, pos2(at.x + cell_width(inner, c.word, c.one_line, &measure), at.y), *level),
+            Cell::Battery(Some(level)) => draw_battery(p, pos2(at.x + cell_width(inner, c.word, c.one_line, &measure), at.y), *level),
             _ => {}
         },
         Cell::Graphic(item) => {
@@ -2935,7 +2949,7 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
     if c.one_line {
         let y = rect.center().y;
         let mut tile = tiles.iter();
-        for (n, (k, r, cell)) in c.shown_tiles().into_iter().enumerate() {
+        for (k, r, cell) in c.shown_tiles() {
             let Some(&(x, w)) = tile.next() else { break };
             let area = Rect::from_min_size(pos2(rect.left() + x, rect.top()), vec2(w, rect.height()));
             match cell {
@@ -2943,14 +2957,8 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
                 None => placeholder(area),
             }
             hit.push((k, r, area));
-            // The message has its own place after the first tile.
-            if n == 0
-                && let Some((text, color)) = &c.message
-                && let Some(&(mx, _)) = tile.next()
-            {
-                p.text(pos2(rect.left() + mx, y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
-            }
         }
+        message_band(p, rect, &tiles, c);
         return hit;
     }
     // Two rows, a thin line between the columns.
@@ -2979,14 +2987,31 @@ fn overlay_ui(p: &egui::Painter, rect: Rect, c: &OverlayContent) -> Vec<(usize, 
                 hit.push((k, r, area));
             }
         }
-        if n == 0
-            && let Some((text, color)) = &c.message
-            && let Some(&(mx, _)) = tile.next()
-        {
-            p.text(pos2(rect.left() + mx, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), *color);
-        }
     }
+    message_band(p, rect, &tiles, c);
     hit
+}
+
+/// The message on a band over every column but the status, whose last values stay dimmed
+/// underneath.
+fn message_band(p: &egui::Painter, rect: Rect, tiles: &[(f32, f32)], c: &OverlayContent) {
+    let (Some((text, color)), Some(&(x, _))) = (&c.message, tiles.get(1)) else { return };
+    let gap = if c.one_line { 16.0 } else { TILE_GAP };
+    let band = Rect::from_min_max(pos2(rect.left() + x - gap / 2.0 + 1.0, rect.top() + 1.0), rect.max - vec2(1.0, 1.0));
+    p.rect(band, CornerRadius { nw: 0, sw: 0, ne: 7, se: 7 }, PAGE.gamma_multiply(0.94), Stroke::NONE, StrokeKind::Inside);
+    p.line_segment([band.left_top(), band.left_bottom()], Stroke::new(2.0, *color));
+    let inner = band.shrink2(vec2(14.0, 6.0));
+    let mut job = egui::text::LayoutJob::single_section(
+        format!("▲  {text}"),
+        egui::TextFormat { font_id: FontId::proportional(14.0), color: *color, ..Default::default() },
+    );
+    job.wrap.max_width = inner.width();
+    job.wrap.max_rows = if c.one_line { 1 } else { 3 };
+    let galley = p.layout_job(job);
+    let at = pos2(inner.left(), inner.center().y - galley.size().y / 2.0);
+    // A solid ground right under the text, so no value shows through it.
+    p.rect_filled(Rect::from_min_size(at, galley.size()).expand2(vec2(8.0, 3.0)), 4.0, PAGE);
+    p.galley(at, galley, *color);
 }
 
 /// Symbols in front of the overlay's values.
@@ -3852,6 +3877,53 @@ mod tests {
         });
         harness.step();
         save(&harness.render().unwrap(), "overlay-symbols.png");
+    }
+
+    /// The overlay in each state: ready, R10 away, GSPro away (with the last shot dimmed under
+    /// the message), no shot yet, and in one line – all of the same size.
+    #[test]
+    #[ignore = "writes screenshots; run on demand"]
+    fn overlay_states() {
+        use egui_kittest::Harness;
+        demo_state();
+        let (ball, club) = engine::test_shot();
+        let shot = state::LastShot { ball, club: Some(club), tempo: None, at: Instant::now(), delivered: true, shot_number: 1, misread: None };
+        let one_line = OverlayStyle { one_line: true, ..OverlayStyle::default() };
+        let states = [
+            ("ready", OverlayStyle::default(), (R10Status::Ready, "Ready", true), Some(&shot)),
+            ("no-r10", OverlayStyle::default(), (R10Status::Searching, "Searching for R10 …", true), Some(&shot)),
+            ("no-gspro", OverlayStyle::default(), (R10Status::Ready, "Ready", false), Some(&shot)),
+            ("no-shot", OverlayStyle::default(), (R10Status::Ready, "Ready", true), None),
+            ("one-line", one_line, (R10Status::Searching, "Searching for R10 …", true), Some(&shot)),
+        ];
+        for (name, style, status, last) in states {
+            let shot = last.cloned();
+            let drawn = std::rc::Rc::new(std::cell::Cell::new(Rect::ZERO));
+            let size_out = drawn.clone();
+            let mut harness = Harness::builder()
+                .with_size(vec2(1100.0, OVERLAY_IMPACT_H + 20.0))
+                .with_pixels_per_point(2.0)
+                .wgpu()
+                .build_ui(move |ui| {
+                    if ui.ctx().fonts(|f| f.families().contains(&FontFamily::Name("cond".into()))) {
+                        let battery = (status.0 != R10Status::Searching).then_some(82);
+                        let content = OverlayContent::new(&style, true, status, Some("I7"), battery, shot.as_ref(), None);
+                        let rect = Rect::from_min_size(ui.max_rect().min, content.size(ui.ctx()));
+                        size_out.set(rect);
+                        overlay_ui(ui.painter(), rect, &content);
+                    } else {
+                        setup_style(ui.ctx());
+                    }
+                });
+            for _ in 0..3 {
+                harness.step();
+            }
+            let r = drawn.get();
+            println!("{name}: {:.0}×{:.0}", r.width(), r.height());
+            let (min, size) = (r.min * 2.0, r.size() * 2.0);
+            let image = image::imageops::crop_imm(&harness.render().unwrap(), min.x as u32, min.y as u32, size.x as u32, size.y as u32).to_image();
+            save(&image, &format!("overlay-{name}.png"));
+        }
     }
 
     #[test]

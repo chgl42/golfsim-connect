@@ -131,8 +131,8 @@ fn de(en: &str) -> Option<&'static str> {
         // Status words
         "READY" => "BEREIT",
         "NO R10" => "KEIN R10",
-        "WAITING FOR GSPRO" => "WARTE AUF GSPRO",
-        "R10 NOT READY" => "R10 NICHT BEREIT",
+        "NO GSPRO" => "KEIN GSPRO",
+        "NOT READY" => "NICHT BEREIT",
 
         "COPY" => "KOPIEREN",
         "The log is empty" => "Das Log ist leer",
