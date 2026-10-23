@@ -37,8 +37,10 @@ strip = true
 mac-notification-sys = "0.6"
 objc2 = "0.6"
 block2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder", "NSScreen", "NSEvent"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "block2"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder", "NSScreen", "NSEvent", "NSWorkspace", "NSRunningApplication", "libc", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSGeometry", "NSNotification", "NSOperation", "NSDictionary", "NSValue", "NSTimer", "NSDate", "block2"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindow"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray"] }
 rfd = "0.17.2"
 
 [dev-dependencies]

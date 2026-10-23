@@ -12,6 +12,7 @@ pub mod i18n;
 pub mod launcher;
 pub mod log;
 pub mod mapping;
+pub mod misread;
 pub mod notify;
 pub mod settings;
 pub mod shape;

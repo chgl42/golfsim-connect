@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   in the head is the arrangement in use – click it to switch, rename, save the overlays as a new arrangement (e.g.
   *Range* with dispersion and 3D flight, *Course* with only the status) or delete one. Every change is kept in the
   arrangement in use. With more than one, the Play page shows *Overlay: …* to switch quickly.
+- **Misreads are caught:** a shot with a reading no real shot gives – no spin measured, a launch angle above 60°,
+  a start direction or spin axis far off, a smash factor no club reaches – still goes to GSPro, but is left out of
+  the stats and exports right away (*excluded* on the shots page, *Count* takes it back). The overlay shows the
+  doubtful value in amber, the Play page says *Misread? (spin)*.
 - **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
   the pin, from GSPro's results (in m or yd).
 - **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle
@@ -56,6 +60,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   shot. The status words are shorter: *No GSPro* and *Not ready*.
 
 ### Fixed
+- The overlays covered every window: they now sit right above GSPro – on top while GSPro is in front or the top window
+  on its screen (also in full screen), else right under the windows in front of GSPro, OpenLaunch Connect's own
+  too, and hidden while GSPro isn't running. With two screens (e.g. a projector) they stay on GSPro's
+  screen, wherever the main window is.
+- Overlays could vanish and only come back after clicking OpenLaunch Connect, when its window was on GSPro's screen
+  behind GSPro.
+- A shot hit while GSPro was reconnecting (e.g. after a restart of GSPro) was dropped; it now waits up to 10 s for
+  GSPro and is sent as soon as it is back.
 - The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
   window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
 
