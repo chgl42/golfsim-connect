@@ -50,6 +50,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the landing area over a range as wide as a real one, so it fills the tile; the tee view has height lines where the
   flights peak.
 
+- **Shot shapes:** a shot counts as *push* or *pull* from 3° off the target line (was 2°, about 5 m at 150 m),
+  and the overlay's top view bends the flight only when the shape is named with a curve (from 3° of spin axis), so
+  graphic and name always agree.
+
 ### Fixed
 - The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
   window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
