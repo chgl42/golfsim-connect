@@ -55,6 +55,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   flights peak.
 
 ### Fixed
+- The overlays covered every window: they now sit right above GSPro – on top while GSPro is in front or the top window
+  on its screen (also in full screen), else right under the windows in front of GSPro, OpenLaunch Connect's own
+  too, and hidden while GSPro isn't running. With two screens (e.g. a projector) they stay on GSPro's
+  screen, wherever the main window is.
+- Overlays could vanish and only come back after clicking OpenLaunch Connect, when its window was on GSPro's screen
+  behind GSPro.
 - The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
   window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
 
