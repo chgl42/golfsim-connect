@@ -19,6 +19,9 @@ pub mod shape;
 pub mod state;
 pub mod update;
 
+#[cfg(test)]
+mod test_util;
+
 /// `v` with `digits` decimals, without the minus sign of values that round to zero ("-0.0" → "0.0").
 #[must_use]
 pub fn num(v: f64, digits: usize) -> String {

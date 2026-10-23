@@ -183,7 +183,7 @@ mod tests {
     use super::*;
 
     /// The row GSPro wrote for a shot of 118.7 mph at 16.8° (metric display).
-    const SAMPLE: &str = r#"{"Carry":150.037933,"TotalDistance":152.765411,"BallSpeed":191.029129,"BackSpin":7106.0,"SideSpin":211.0,"HLA":1.0,"VLA":16.8,"Decent":47.39972,"PeakHeight":28.6936054,"Offline":5.00848,"rawSpinAxis":1.7,"rawCarryGame":150.027908,"rawCarryLM":0.0,"DistanceToPin":239.375977,"club":"DR","ClubSpeed":135.50676,"Path":-1.2,"AoA":-3.9,"FaceToTarget":0.7,"FaceToPath":-1.9000001,"Lie":0.0,"Loft":0.0,"DynamicLoft":0.0,"CR":0.0,"HI":0.0,"VI":0.0,"SmashFactor":1.40973878}"#;
+    const SAMPLE: &str = crate::fixture!("gspro-lastshot.json");
 
     #[test]
     fn metric_row_matches_its_shot() {
@@ -218,5 +218,80 @@ mod tests {
         let (id, json) = read_last(&path).unwrap().unwrap();
         assert_eq!((id, json.as_str()), (1, SAMPLE));
         std::fs::remove_file(&path).unwrap();
+    }
+
+    /// A session shot; `speed` and `vla` of 118.7 mph and 16.8° match `SAMPLE`.
+    fn shot(n: u32, speed: f64, vla: f64) -> history::ShotRecord {
+        let (ball, club) = crate::engine::test_shot();
+        let ball = crate::mapping::GsBall { speed, vla, ..ball };
+        history::ShotRecord::new(ball, Some(club), Some("DR".into()), true, n)
+    }
+
+    const MPH: f64 = 191.029_129 / MPH_TO_KMH;
+
+    /// GSPro's result goes to the newest of the last five session shots it matches that has none
+    /// yet, into the shot history and the state; the others stay as they were.
+    #[test]
+    fn result_is_attached_to_the_newest_matching_shot() {
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("gspro-db-attach");
+        let session = vec![shot(1, MPH, 16.8), shot(2, MPH, 16.8), shot(3, 90.0, 22.0), shot(4, MPH, 16.8), shot(5, 80.0, 25.0)];
+        for r in &session {
+            history::append(r).unwrap();
+        }
+        state::with(|s| {
+            s.session.clone_from(&session);
+            s.gspro_result = None;
+        });
+        attach(SAMPLE);
+        let (now, result) = state::with(|s| (s.session.clone(), s.gspro_result));
+        let want = result_for(SAMPLE, MPH, 16.8).unwrap();
+        assert_eq!(result, Some(want));
+        let with_result: Vec<u32> = now.iter().filter(|r| r.gspro.is_some()).map(|r| r.shot_number).collect();
+        assert_eq!(with_result, [4], "the newest matching shot");
+        assert_eq!(now[3].gspro, Some(want));
+        let saved = history::load_all();
+        assert_eq!(saved[3].gspro, Some(want), "kept in the history");
+        assert!(saved.iter().enumerate().all(|(i, r)| i == 3 || r.gspro.is_none()));
+
+        // The same row again (GSPro wrote it twice): the next older match without a result gets it.
+        attach(SAMPLE);
+        let with_result: Vec<u32> = state::with(|s| s.session.iter().filter(|r| r.gspro.is_some()).map(|r| r.shot_number).collect());
+        assert_eq!(with_result, [2, 4]);
+    }
+
+    /// Only the last five shots are looked at; a result that matches none of them belongs to the
+    /// last shot sent (a test shot): shown, not kept.
+    #[test]
+    fn result_of_a_shot_not_in_the_session_is_only_shown() {
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("gspro-db-test-shot");
+        let mut session = vec![shot(1, MPH, 16.8)];
+        session.extend((2..=6).map(|n| shot(n, 90.0, 22.0)));
+        let (ball, club) = crate::engine::test_shot();
+        let ball = crate::mapping::GsBall { speed: MPH, vla: 16.8, ..ball };
+        state::with(|s| {
+            s.session.clone_from(&session);
+            s.gspro_result = None;
+            s.last_shot = Some(state::LastShot {
+                ball,
+                club: Some(club),
+                tempo: None,
+                at: std::time::Instant::now(),
+                delivered: true,
+                shot_number: 7,
+                misread: None,
+            });
+        });
+        attach(SAMPLE);
+        let (now, result) = state::with(|s| (s.session.clone(), s.gspro_result));
+        assert_eq!(now, session, "the old matching shot is out of reach");
+        assert_eq!(result, result_for(SAMPLE, MPH, 16.8));
+        assert!(history::load_all().is_empty());
+
+        // Matches nothing at all: nothing changes.
+        state::with(|s| s.gspro_result = None);
+        attach(&SAMPLE.replace("191.029129", "50.0"));
+        assert_eq!(state::with(|s| s.gspro_result), None);
     }
 }
