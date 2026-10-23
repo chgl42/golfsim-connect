@@ -19,6 +19,8 @@ pub mod recorder;
 pub mod settings;
 pub mod shape;
 pub mod state;
+#[cfg(feature = "gui")]
+pub mod ui;
 pub mod update;
 
 #[cfg(test)]

@@ -266,7 +266,7 @@ cargo build --release --bin openlaunch
   GSPro address setting or `openlaunch --gspro 127.0.0.1:<port>`.
 - `OPENLAUNCH_DEMO=1` simulates an R10 (READY, a few sample shots).
 - README screenshots are rendered offscreen (no window needed):
-  `cargo test --bin openlaunch-connect readme_screenshots -- --ignored`, then `python3 tools/banner.py .` for the banner.
+  `cargo test --lib readme_screenshots -- --ignored`, then `python3 tools/banner.py .` for the banner.
 
 ## Releases
 

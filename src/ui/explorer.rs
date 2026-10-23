@@ -3,17 +3,16 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use openlaunch_connect::flight::{self, Flight};
-use openlaunch_connect::history::Stat;
+use crate::flight::{self, Flight};
+use crate::history::Stat;
 use std::rc::Rc;
 
-use openlaunch_connect::shape::Shape;
-use openlaunch_connect::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileOverlay, TileSize};
+use crate::shape::Shape;
+use crate::settings::{Camera, DEFAULT_PAGE_NAMES, ExplorerPage, Metric, Tile, TileKind, TileOverlay, TileSize};
 
 use super::*;
 
-// The 3D flight tile, next to this file.
-#[path = "flight3d.rs"]
+// The 3D flight tile, in explorer/.
 mod flight3d;
 
 /// Gap between tiles.
@@ -126,7 +125,7 @@ struct FlightSummary {
 impl FlightSummary {
     /// GSPro's numbers in place of the estimate. GSPro reports the side where the ball stopped;
     /// the side at the landing is the estimate's, scaled to it.
-    fn with_gspro(self, g: Option<&openlaunch_connect::gspro_db::GsproResult>) -> Self {
+    fn with_gspro(self, g: Option<&crate::gspro_db::GsproResult>) -> Self {
         let Some(g) = g else { return self };
         let carry_side = if self.total_side.abs() > 0.5 { self.carry_side * g.side / self.total_side } else { g.side };
         Self { carry: g.carry, total: g.total, carry_side, total_side: g.side, apex: g.apex }
@@ -374,34 +373,16 @@ impl App {
         }
         if let Some(i) = self.explorer.confirm_remove {
             let name = self.saved.explorer.pages.get(i).map(|p| page_name(p, i)).unwrap_or_default();
-            let mut remove = false;
-            let modal = egui::Modal::new(egui::Id::new("remove-page"))
-                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
-                .show(bar_ui.ctx(), |ui| {
-                    ui.set_width(360.0);
-                    ui.label(RichText::new(tr("Remove the page “{name}”?").replace("{name}", &name)).size(16.0).color(WHITE));
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(tr("Its tiles go with it. Your shots are kept.")).size(13.0).color(SOFT));
-                    ui.add_space(16.0);
-                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
-                    let ok_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
-                    let cancel_r = Rect::from_min_max(pos2(ok_r.left() - 140.0, row.top()), pos2(ok_r.left() - 10.0, row.bottom()));
-                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
-                        ui.close();
-                    }
-                    if button(ui, ok_r, tr("REMOVE"), Icon::None, true, true, "") {
-                        remove = true;
-                        ui.close();
-                    }
-                });
-            let pages = &mut self.saved.explorer.pages;
-            if remove && i < pages.len() && pages.len() > 1 {
-                pages.remove(i);
-                self.explorer.page = self.explorer.page.min(pages.len() - 1);
-                layout_changed = true;
-            }
-            if modal.should_close() {
+            let title = tr("Remove the page “{name}”?").replace("{name}", &name);
+            let text = tr("Its tiles go with it. Your shots are kept.");
+            if let Some(remove) = confirm(bar_ui.ctx(), "remove-page", &title, text, tr("REMOVE")) {
                 self.explorer.confirm_remove = None;
+                let pages = &mut self.saved.explorer.pages;
+                if remove && i < pages.len() && pages.len() > 1 {
+                    pages.remove(i);
+                    self.explorer.page = self.explorer.page.min(pages.len() - 1);
+                    layout_changed = true;
+                }
             }
         }
         if self.explorer.arrange && link(&mut bar_ui, "+", ICON).on_hover_text(tr("Add a page")).clicked() {
@@ -651,29 +632,26 @@ impl App {
         }
         if self.explorer.export_dialog {
             let mut picked = None;
-            let modal = egui::Modal::new(egui::Id::new("export-csv"))
-                .frame(egui::Frame::new().fill(TILE).stroke(Stroke::new(1.0, BUTTON_LINE)).corner_radius(8).inner_margin(20))
-                .show(ui.ctx(), |ui| {
-                    ui.set_width(380.0);
-                    let title = tr("Export {n} shots as CSV").replace("{n}", &export.len().to_string());
-                    ui.label(RichText::new(title).size(16.0).color(WHITE));
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(tr("The shots shown, with the filter. Choose the layout:")).size(13.0).color(SOFT));
-                    ui.add_space(10.0);
-                    for f in ExportFormat::ALL {
-                        if format_choice(ui, f) {
-                            picked = Some(f);
-                            ui.close();
-                        }
-                        ui.add_space(6.0);
-                    }
-                    ui.add_space(8.0);
-                    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
-                    let cancel_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
-                    if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+            let modal = dialog(ui.ctx(), "export-csv", 380.0, |ui| {
+                let title = tr("Export {n} shots as CSV").replace("{n}", &export.len().to_string());
+                ui.label(RichText::new(title).size(16.0).color(WHITE));
+                ui.add_space(4.0);
+                ui.label(RichText::new(tr("The shots shown, with the filter. Choose the layout:")).size(13.0).color(SOFT));
+                ui.add_space(10.0);
+                for f in ExportFormat::ALL {
+                    if format_choice(ui, f) {
+                        picked = Some(f);
                         ui.close();
                     }
-                });
+                    ui.add_space(6.0);
+                }
+                ui.add_space(8.0);
+                let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
+                let cancel_r = Rect::from_min_max(pos2(row.right() - 130.0, row.top()), row.max);
+                if button(ui, cancel_r, tr("CANCEL"), Icon::None, false, true, "") {
+                    ui.close();
+                }
+            });
             if modal.should_close() {
                 self.explorer.export_dialog = false;
             }
@@ -1877,7 +1855,7 @@ mod tests {
     use super::*;
 
     /// Renders the explorer in a few states (averages page, a selection, arranging):
-    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --bin openlaunch-connect explorer_states -- --ignored`
+    /// `OPENLAUNCH_SCREENSHOT_DIR=<dir> cargo test --lib explorer_states -- --ignored`
     #[test]
     #[ignore = "writes screenshots; run on demand"]
     fn explorer_states() {
@@ -1885,7 +1863,7 @@ mod tests {
 
         let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") { Language::German } else { Language::English };
         i18n::set(language);
-        super::super::tests::demo_state();
+        let _state = super::super::tests::demo_state();
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
         type Setup = fn(&mut App, &[Key]);
@@ -1983,8 +1961,10 @@ mod tests {
     fn tiles_are_dragged_into_place() {
         use egui_kittest::Harness;
 
+        // Shots recorded by the lib's tests beside it would end up in the tiles.
+        let _state = crate::test_util::state_lock();
         // Moving a tile saves the layout at once – not into the real settings file.
-        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let settings = Settings { overlay: OverlayPos::Off, ..Settings::default() };
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
@@ -2021,7 +2001,8 @@ mod tests {
     fn flight_tile_switches_to_the_means() {
         use egui_kittest::Harness;
 
-        openlaunch_connect::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        let _state = crate::test_util::state_lock();
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let settings = Settings { overlay: OverlayPos::Off, ..Settings::default() };
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
@@ -2055,7 +2036,7 @@ mod tests {
     fn flight_tile_orbits_and_animates() {
         use egui_kittest::Harness;
 
-        super::super::tests::demo_state();
+        let _state = super::super::tests::demo_state();
         let settings = Settings { overlay: OverlayPos::Off, ..Settings::default() };
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {

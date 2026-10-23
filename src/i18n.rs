@@ -1,8 +1,13 @@
 //! UI translations. The English text is the key (gettext style): `tr("Settings")`
 //! returns the German text when German is active and falls back to English for
 //! anything not in the table. The log stays English on purpose (support/debugging).
+//!
+//! Code outside this crate adds the German texts of its own UI with [`register`] and checks
+//! them in a test with [`untranslated`].
 
+#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -41,16 +46,31 @@ impl Language {
     }
 }
 
+#[cfg(not(test))]
 static GERMAN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+thread_local! {
+    /// Unit tests: the language of this test thread, so tests that switch it (the UI tests, too)
+    /// can't change it for the tests running beside them.
+    static GERMAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Switch the UI language.
 pub fn set(language: Language) {
+    #[cfg(not(test))]
     GERMAN.store(language.is_german(), Ordering::Relaxed);
+    #[cfg(test)]
+    GERMAN.set(language.is_german());
 }
 
 #[must_use]
 pub fn german() -> bool {
-    GERMAN.load(Ordering::Relaxed)
+    #[cfg(not(test))]
+    let on = GERMAN.load(Ordering::Relaxed);
+    #[cfg(test)]
+    let on = GERMAN.get();
+    on
 }
 
 /// Translate a fixed UI text.
@@ -84,8 +104,52 @@ pub fn tr_detail(text: &str) -> String {
     text.to_string()
 }
 
-#[expect(clippy::too_many_lines, reason = "one flat match arm per UI text; splitting the table would only scatter it")]
+/// A table of German texts: the German text of an English one, if it has one (e.g. a function
+/// with one `match`, like this crate's own table).
+pub type Table = fn(&str) -> Option<&'static str>;
+
+/// Tables added with [`register`], looked in after the core table.
+static TABLES: RwLock<Vec<Table>> = RwLock::new(Vec::new());
+
+/// Adds a table of German texts, e.g. for the pages another crate adds to the app. [`tr`] and
+/// [`tr_detail`] look in this crate's table first, then in the added ones in the order they were
+/// added. Call it once per table, before the UI is shown.
+pub fn register(table: Table) {
+    TABLES.write().unwrap_or_else(std::sync::PoisonError::into_inner).push(table);
+}
+
+/// The German text of `en`: this crate's table, then the registered ones.
 fn de(en: &str) -> Option<&'static str> {
+    core(en).or_else(|| TABLES.read().unwrap_or_else(std::sync::PoisonError::into_inner).iter().find_map(|table| table(en)))
+}
+
+/// The UI texts in `sources` (Rust source code) passed to `tr("…")` that have no German text,
+/// neither in this crate's table nor in a registered one. For a test of a crate that adds UI
+/// texts: register its table, then
+/// `assert!(i18n::untranslated(&[include_str!("page.rs")]).is_empty())`.
+#[must_use]
+pub fn untranslated(sources: &[&str]) -> Vec<String> {
+    sources
+        .iter()
+        .flat_map(|src| literals(src, "tr("))
+        .map(|t| t.replace("\\n", "\n"))
+        .filter(|t| de(t).is_none())
+        .collect()
+}
+
+/// String literals that directly follow `prefix` in `src`, e.g. every `tr("…")`.
+fn literals<'a>(src: &'a str, prefix: &str) -> Vec<&'a str> {
+    let pat = format!("{prefix}\"");
+    src.match_indices(&pat)
+        .filter_map(|(i, _)| {
+            let rest = &src[i + pat.len()..];
+            rest.find("\")").map(|end| &rest[..end])
+        })
+        .collect()
+}
+
+#[expect(clippy::too_many_lines, reason = "one flat match arm per UI text; splitting the table would only scatter it")]
+fn core(en: &str) -> Option<&'static str> {
     Some(match en {
         // Navigation and sections
         "PLAY" => "SPIEL",
@@ -413,28 +477,36 @@ fn de(en: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// String literals that directly follow `prefix` in `src`, e.g. every `tr("…")`.
-    fn literals<'a>(src: &'a str, prefix: &str) -> Vec<&'a str> {
-        let pat = format!("{prefix}\"");
-        src.match_indices(&pat)
-            .filter_map(|(i, _)| {
-                let rest = &src[i + pat.len()..];
-                rest.find("\")").map(|end| &rest[..end])
-            })
-            .collect()
+    /// Every source file of the UI (`src/ui/`, with its subfolders).
+    fn ui_sources() -> Vec<String> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(std::fs::read_to_string(&path).unwrap());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui"), &mut out);
+        assert!(out.len() >= 6, "the UI's files are found");
+        out
     }
 
     #[test]
     fn every_ui_text_has_a_german_translation() {
-        let gui = [include_str!("bin/openlaunch-connect.rs"), include_str!("bin/openlaunch-connect/explorer.rs")]
-            .concat()
-            .replace("\\n", "\n");
-        let mut missing: Vec<&str> =
-            [literals(&gui, "tr("), literals(&gui, "send_now(")].concat().into_iter().filter(|t| de(t).is_none()).collect();
+        let sources = ui_sources();
+        let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
+        let mut missing = untranslated(&sources);
+        let gui = sources.concat();
+        missing.extend(literals(&gui, "send_now(").into_iter().filter(|t| de(t).is_none()).map(String::from));
         // Status details set by the bridge threads.
         let bridge = [include_str!("engine.rs"), include_str!("gspro.rs")].concat();
         for prefix in ["R10Status::Searching, ", "R10Status::Connected, ", "R10Status::Ready, ", "set_gspro(false, "] {
-            missing.extend(literals(&bridge, prefix).into_iter().filter(|t| de(t).is_none()));
+            missing.extend(literals(&bridge, prefix).into_iter().filter(|t| de(t).is_none()).map(String::from));
         }
         // Notification texts, including formatted ones like "R10 battery low ({level} %)".
         for kind in ["BatteryLow", "DeviceError", "R10Lost", "GsproLost", "ShotNotDelivered"] {
@@ -443,11 +515,34 @@ mod tests {
                     literals(&bridge, &prefix)
                         .into_iter()
                         .map(|t| t.split(" (").next().unwrap_or(t))
-                        .filter(|t| de(t).is_none()),
+                        .filter(|t| de(t).is_none())
+                        .map(String::from),
                 );
             }
         }
         assert!(missing.is_empty(), "missing German texts: {missing:#?}");
+    }
+
+    /// A crate that adds UI texts registers its own table; the core table comes first.
+    #[test]
+    fn registered_tables_add_texts() {
+        fn extension(en: &str) -> Option<&'static str> {
+            Some(match en {
+                "Only in an extension" => "Nur in einer Erweiterung",
+                "SETTINGS" => "NICHT DIESE",
+                _ => return None,
+            })
+        }
+        let page = r#"ui.label(tr("Only in an extension")); ui.label(tr("SETTINGS"));"#;
+        assert_eq!(untranslated(&[page]), ["Only in an extension"]);
+        register(extension);
+        assert!(untranslated(&[page]).is_empty());
+        set(Language::German);
+        assert_eq!(tr("Only in an extension"), "Nur in einer Erweiterung");
+        assert_eq!(tr_detail("Only in an extension (2)"), "Nur in einer Erweiterung (2)");
+        assert_eq!(tr("SETTINGS"), "EINSTELLUNGEN");
+        set(Language::English);
+        assert_eq!(tr("Only in an extension"), "Only in an extension");
     }
 
     #[test]
@@ -459,7 +554,7 @@ mod tests {
 
     #[test]
     fn details_keep_their_suffix() {
-        GERMAN.store(true, Ordering::Relaxed);
+        set(Language::German);
         assert_eq!(tr_detail("Connected (127.0.0.1:921)"), "Verbunden (127.0.0.1:921)");
         assert_eq!(
             tr_detail("R10 is tilted – please level it (Roll 1.0°, Pitch 4.2°)"),
@@ -468,7 +563,7 @@ mod tests {
         assert_eq!(tr_detail("Radar saturated (too close to wall/net?)"), "Radar übersteuert (zu nah an Wand/Netz?)");
         assert_eq!(tr_detail("Something new"), "Something new");
         assert_eq!(tr("Not in the table"), "Not in the table");
-        GERMAN.store(false, Ordering::Relaxed);
+        set(Language::English);
         assert_eq!(tr("SETTINGS"), "SETTINGS");
     }
 }
