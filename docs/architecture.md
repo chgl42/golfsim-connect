@@ -47,6 +47,7 @@ One crate with a library and two binaries.
 | `gspro` | OpenConnect client `Link`: one JSON per read, pacing, replies 200/201/5xx, heartbeats, reconnect, holding a shot while GSPro is away | Deep; also records shots (history, notifications) |
 | `gspro_db` | GSPro's own results from `GSPro.db` (`LastShot`), matched to our shots by ball speed and launch angle | Deep |
 | `flight` | Estimated ball flight (drag/lift, 3D, roll-out) when GSPro's result is missing | Deep, pure |
+| `misread` | Plausibility check: marks a shot with a reading no club gives (left out of stats, still sent to GSPro) | Small, pure |
 | `shape` | Shot shape names (e.g. "Push-Draw") from start direction and spin axis | Deep, pure |
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements | One flat struct |
@@ -63,7 +64,8 @@ One crate with a library and two binaries.
   Pages are methods on `App`.
 - **Shots explorer** (`openlaunch-connect/explorer.rs`): pages of tiles on a grid. Tile kinds
   (table, details, averages, dispersion, 3D flight in `flight3d.rs`) are an enum in `settings`.
-- **Overlays**: the status overlay and tile overlays are extra egui viewports. On macOS their
+- **Overlays**: the status overlay and tile overlays are extra egui viewports that stay with GSPro:
+  above it while it is in front, ordered right above its window otherwise, on its screen, hidden without it. On macOS their
   frames, window levels and stacking above GSPro are set through AppKit (`mac` module), because
   egui reports a second window's size in zoomed points and doesn't apply layer transforms there
   ([ADR-005](adr/adr-005-overlay-windows-placed-through-appkit.md)).
