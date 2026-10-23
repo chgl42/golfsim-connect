@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
+use crate::events::{self, Event};
 use crate::history::ShotRecord;
 use crate::mapping::{GsBall, GsClub, Tempo};
 
@@ -88,20 +89,33 @@ pub fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     f(&mut guard)
 }
 
+/// Set the R10's status; a change is published as [`Event::R10Status`](crate::events::Event::R10Status).
 pub fn set_r10(status: R10Status, detail: impl Into<String>) {
     let detail = detail.into();
-    with(|s| {
+    let changed = with(|s| {
+        let changed = s.r10 != status || s.r10_detail != detail;
         s.r10 = status;
-        s.r10_detail = detail;
+        s.r10_detail.clone_from(&detail);
+        changed
     });
+    if changed {
+        events::publish(Event::R10Status { status, detail });
+    }
 }
 
+/// Set the GSPro connection's status; a change is published as
+/// [`Event::GsproStatus`](crate::events::Event::GsproStatus).
 pub fn set_gspro(connected: bool, detail: impl Into<String>) {
     let detail = detail.into();
-    with(|s| {
+    let changed = with(|s| {
+        let changed = s.gspro_connected != connected || s.gspro_detail != detail;
         s.gspro_connected = connected;
-        s.gspro_detail = detail;
+        s.gspro_detail.clone_from(&detail);
+        changed
     });
+    if changed {
+        events::publish(Event::GsproStatus { connected, detail });
+    }
 }
 
 pub fn push_log(line: String) {

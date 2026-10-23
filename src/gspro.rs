@@ -11,10 +11,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::history;
 use crate::log;
-use crate::misread;
 use crate::notify::{self, Alert};
+use crate::recorder::record_shot;
 use crate::state;
 use crate::mapping::{GsBall, GsClub, Tempo};
 
@@ -466,38 +465,6 @@ impl Link {
     }
 }
 
-fn record_shot(ball: GsBall, club: Option<GsClub>, tempo: Option<Tempo>, delivered: bool, shot_number: u32, test: bool) {
-    let misread = misread::check(&ball, club.as_ref());
-    if let Some(m) = misread {
-        log::gspro(&format!("⚠️  Possible misread ({}) – the shot is left out of the stats.", m.reason()));
-    }
-    let rec = state::with(|s| {
-        if delivered {
-            s.shots_sent += 1;
-        }
-        s.last_shot = Some(state::LastShot { ball, club, tempo, at: Instant::now(), delivered, shot_number, misread });
-        // GSPro's result of the previous shot no longer applies (the new one follows when it lands).
-        s.gspro_result = None;
-        if test {
-            return None;
-        }
-        let mut rec = history::ShotRecord::new(ball, club, s.gspro_club.clone(), delivered, shot_number);
-        rec.tempo = tempo;
-        rec.misread = misread;
-        rec.excluded = misread.is_some();
-        s.session.push(rec.clone());
-        Some(rec)
-    });
-    if !delivered && !test {
-        notify::alert(Alert::ShotNotDelivered, "Shot was not delivered to GSPro");
-    }
-    if let Some(rec) = rec
-        && let Err(e) = history::append(&rec)
-    {
-        log::gspro(&format!("⚠️  Could not save shot history: {e}"));
-    }
-}
-
 /// GSPro ignores a shot whose ShotNumber it has already seen, so numbering must
 /// keep increasing across restarts. Seconds since 2025-01-01 does that and fits in i32.
 fn initial_shot_number() -> u32 {
@@ -539,6 +506,7 @@ pub fn drain_json_values(buf: &mut Vec<u8>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history;
 
     /// A test shot – here to a connection GSPro has just closed – is not delivered and
     /// leaves the launch monitor's readiness as it was.
@@ -640,51 +608,6 @@ mod tests {
         assert_eq!(v["ShotDataOptions"]["IsHeartBeat"], true);
         assert_eq!(v["ShotDataOptions"]["LaunchMonitorIsReady"], true);
         assert!(v.get("BallData").is_none());
-    }
-
-    /// `record_shot`: the shot becomes the last one and, unless it is a test shot, joins the session
-    /// and the history, with the club GSPro has chosen; GSPro's result of the shot before is gone.
-    #[test]
-    fn recorded_shots_go_to_the_session_and_the_history() {
-        let _state = crate::test_util::state_lock();
-        let _history = crate::test_util::TestHistory::new("record-shot");
-        notify::ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-        let earlier = crate::gspro_db::GsproResult { carry: 1.0, total: 2.0, side: 0.0, apex: 1.0, descent: 1.0, to_pin: None };
-        let (sent, session) = state::with(|s| {
-            s.gspro_club = Some("PW".into());
-            s.gspro_result = Some(earlier);
-            (s.shots_sent, s.session.len())
-        });
-        let (ball, club) = crate::engine::test_shot();
-        let tempo = Some(Tempo { backswing: 0.8, downswing: 0.27 });
-        record_shot(ball, Some(club), tempo, true, 4711, false);
-        let (last, now_sent, rec, result) = state::with(|s| {
-            (s.last_shot.clone().unwrap(), s.shots_sent, s.session.last().cloned().unwrap(), s.gspro_result)
-        });
-        assert_eq!((last.ball, last.club, last.tempo, last.delivered, last.shot_number), (ball, Some(club), tempo, true, 4711));
-        assert_eq!(last.misread, None);
-        assert_eq!(now_sent, sent + 1);
-        assert_eq!(result, None, "the earlier shot's result no longer applies");
-        assert_eq!((rec.ball, rec.club, rec.tempo, rec.shot_number), (ball, Some(club), tempo, 4711));
-        assert_eq!((rec.club_code.as_deref(), rec.delivered, rec.excluded), (Some("PW"), true, false));
-        assert_eq!(history::load_all(), std::slice::from_ref(&rec));
-
-        // A test shot: the last shot, but neither in the session nor in the history.
-        let (test_ball, _) = crate::engine::test_shot();
-        record_shot(test_ball, None, None, true, 4712, true);
-        let (last, n, now_sent) = state::with(|s| (s.last_shot.clone().unwrap(), s.session.len(), s.shots_sent));
-        assert_eq!((last.ball, last.shot_number), (test_ball, 4712));
-        assert_eq!((n, now_sent), (session + 1, sent + 2), "counted as sent, not kept");
-        assert_eq!(history::load_all().len(), 1);
-
-        // Not delivered: kept, not counted as sent. A misread is kept but excluded.
-        let misread = GsBall { total_spin: 100.0, ..ball };
-        record_shot(misread, Some(club), None, false, 0, false);
-        let (last, rec, now_sent) = state::with(|s| (s.last_shot.clone().unwrap(), s.session.last().cloned().unwrap(), s.shots_sent));
-        assert!(!last.delivered && last.misread.is_some());
-        assert!(!rec.delivered && rec.excluded && rec.misread.is_some());
-        assert_eq!(now_sent, sent + 2);
-        assert_eq!(history::load_all().len(), 2);
     }
 
     /// What a fake GSPro got: every TCP read, and whether it was exactly one JSON message.

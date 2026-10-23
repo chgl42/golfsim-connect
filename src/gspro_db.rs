@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{history, log, state};
+use crate::{log, recorder, state};
 
 /// How often the database is looked at.
 const POLL: Duration = Duration::from_secs(1);
@@ -138,14 +138,13 @@ pub fn watch() {
 }
 
 /// Add GSPro's result to the newest recent shot it belongs to (test shots aren't in the
-/// session: their result is only logged).
+/// session: their result is only logged). Storing it is the recorder's job.
 fn attach(json: &str) {
     let found = state::with(|s| {
         let n = s.session.len();
-        s.session.iter_mut().skip(n.saturating_sub(5)).rev().filter(|r| r.gspro.is_none()).find_map(|r| {
+        s.session.iter().skip(n.saturating_sub(5)).rev().filter(|r| r.gspro.is_none()).find_map(|r| {
             let result = result_for(json, r.ball.speed, r.ball.vla)?;
-            r.gspro = Some(result);
-            Some((r.time.clone(), r.shot_number, result))
+            Some(((r.time.clone(), r.shot_number), result))
         })
     });
     let describe = |r: &GsproResult| {
@@ -159,19 +158,16 @@ fn attach(json: &str) {
         )
     };
     match found {
-        Some((time, number, result)) => {
-            state::with(|s| s.gspro_result = Some(result));
+        Some((shot, result)) => {
             log::gspro(&format!("GSPro result: {}", describe(&result)));
-            if let Err(e) = history::set_gspro(&time, number, result) {
-                log::gspro(&format!("Could not save GSPro's result: {e}"));
-            }
+            recorder::gspro_result(Some(shot), result);
         }
         // A test shot: matched with the last shot sent, not kept.
         None => {
             let last = state::with(|s| s.last_shot.as_ref().map(|l| (l.ball.speed, l.ball.vla)));
             if let Some(result) = last.and_then(|(mph, vla)| result_for(json, mph, vla)) {
-                state::with(|s| s.gspro_result = Some(result));
                 log::gspro(&format!("GSPro result of a shot not in the session (e.g. a test shot): {}", describe(&result)));
+                recorder::gspro_result(None, result);
             }
         }
     }
@@ -181,6 +177,7 @@ fn attach(json: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::history;
 
     /// The row GSPro wrote for a shot of 118.7 mph at 16.8° (metric display).
     const SAMPLE: &str = crate::fixture!("gspro-lastshot.json");

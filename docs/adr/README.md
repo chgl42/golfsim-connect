@@ -15,3 +15,4 @@ no longer holds is marked *Superseded by ADR-NNN* or *Deprecated*, not deleted.
 | [ADR-004](adr-004-merge-commits.md) | Merge pull requests with a merge commit | Accepted |
 | [ADR-005](adr-005-overlay-windows-placed-through-appkit.md) | Place overlay windows through AppKit | Accepted |
 | [ADR-006](adr-006-settings-tolerate-unknown-values.md) | Settings tolerate values they don't know | Accepted |
+| [ADR-007](adr-007-bridge-events.md) | Bridge events through an mpsc fan-out | Accepted |
