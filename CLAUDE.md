@@ -14,6 +14,10 @@ Not affiliated with Garmin or GSPro – use trademarks descriptively only.
 
 ## Structure
 
+Overview with diagrams (threads, a shot end to end, data, where change is hard): `docs/architecture.md`.
+Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same PR, from `docs/adr/template.md`).
+
+
 - `src/lib.rs` – library used by both binaries
   - `engine.rs` – R10 thread (BLE, reconnect, events → status) and start of the GSPro thread; `test_shot()`, `demo_session()`
   - `flight.rs` – estimated ball flight from the launch data (`fly()`: drag/lift from the spin factor, 3D,
