@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **The app knows where GSPro is:** it follows GSPro's log to see whether GSPro shows its menus, the range or a
+  course. In the menus the tile overlays step aside so they don't cover GSPro's buttons, and come back on the range
+  or a course; the status overlay stays.
 - **Tile overlay:** a second overlay with one tile of the shots page – dispersion, 3D flight, table, details or
   correlation – on top of GSPro, also in full screen, and click-through like the status overlay. On the Overlay page
   (tab *Tile*) choose its place, size (small, medium, large), background, the tile and its options, and whether it

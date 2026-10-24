@@ -8,6 +8,7 @@ pub mod events;
 pub mod flight;
 pub mod gspro;
 pub mod gspro_db;
+pub mod gspro_log;
 pub mod history;
 pub mod i18n;
 pub mod launcher;

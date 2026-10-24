@@ -82,6 +82,9 @@ Each item: setup → action → what you should see (log line or screen). Lines 
   display, let go. → They stay there, also after a restart of the app and of GSPro, and let clicks through again.
 - [ ] **Arrangements.** → Add a tile overlay, save the overlays as a new arrangement, switch between the two. →
   Each arrangement brings back its own overlays (place, size, tiles); after a restart the one in use is still in use.
+- [ ] **GSPro's menus.** A tile overlay on. → Start GSPro (main menu). → Only the status overlay shows; the log
+  says *GSPro is in: Menu*. → Open the range. → The tile overlays come back (*GSPro is in: Range*). → Back to the
+  menu, then load a course. → Hidden in the menu, back on the course (*Course*). The log shows no player name.
 
 ## Settings and history survive a restart
 

@@ -53,9 +53,11 @@ pub fn start(cfg: Config) -> Sender<Cmd> {
     crate::history::PERSIST.store(!cfg.demo, std::sync::atomic::Ordering::Relaxed);
     let (tx, rx) = mpsc::channel::<Cmd>();
     let link = Link::new(cfg.gspro_addr.clone(), cfg.debug);
-    // GSPro's own results of the shots, from its database (not in the demo: nothing to match).
+    // GSPro's own results of the shots, from its database (not in the demo: nothing to match),
+    // and where GSPro is, from its log.
     if !cfg.demo {
         crate::gspro_db::watch();
+        crate::gspro_log::watch();
     }
     thread::Builder::new()
         .name("gspro".into())

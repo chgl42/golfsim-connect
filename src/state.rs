@@ -44,6 +44,8 @@ pub struct State {
     pub gspro_detail: String,
     /// Club currently selected in GSPro (from the 201 player info).
     pub gspro_club: Option<String>,
+    /// Where GSPro is (menu, range, course), from its log; `None` while unknown.
+    pub gspro_mode: Option<crate::gspro_log::GameMode>,
     /// Handedness reported by GSPro ("RH"/"LH").
     pub gspro_handed: Option<String>,
     pub last_shot: Option<LastShot>,
@@ -69,6 +71,7 @@ impl Default for State {
             gspro_connected: false,
             gspro_detail: "Waiting for GSPro …".into(),
             gspro_club: None,
+            gspro_mode: None,
             gspro_handed: None,
             last_shot: None,
             gspro_result: None,

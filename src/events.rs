@@ -37,6 +37,9 @@ pub enum Event {
     BatteryLow { level: u8 },
     /// The R10 reported a problem (e.g. "R10 is tilted – please level it (…)").
     DeviceError { what: String },
+    /// GSPro went to its menus, the range or a course (from its log), or that isn't known any
+    /// more (`None`, e.g. GSPro restarted).
+    GsproMode { mode: Option<crate::gspro_log::GameMode> },
 }
 
 static SUBSCRIBERS: Mutex<Vec<Sender<Event>>> = Mutex::new(Vec::new());

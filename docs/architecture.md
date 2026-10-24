@@ -19,12 +19,15 @@ flowchart LR
   App -- "OpenConnect JSON<br/>TCP 127.0.0.1:921" --> GSPro["GSPro<br/>(Windows, in CrossOver)"]
   GSPro -. "writes" .-> DB[("GSPro.db<br/>LastShot")]
   DB -. "read-only, polled" .-> App
+  GSPro -. "writes" .-> PL[("Player.log")]
+  PL -. "followed" .-> App
   App -- "GitHub releases API<br/>(update check)" --> GH["github.com"]
 ```
 
 What GSPro does **not** send back over OpenConnect (its carry, total, apex, offline, distance to
 the pin) is read from its own SQLite database in the CrossOver bottle
-([ADR-002](adr/adr-002-gspro-results-from-its-database.md)).
+([ADR-002](adr/adr-002-gspro-results-from-its-database.md)). Where GSPro is – its menus, the range or
+a course – is followed in the log it writes next to it ([ADR-011](adr/adr-011-gspro-mode-from-its-log.md)).
 
 ## Building blocks
 
@@ -49,6 +52,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `mapping` | R10 data → OpenConnect units (m/s → mph, spin axis inverted, back/side spin), swing tempo | Deep, pure |
 | `gspro` | OpenConnect client `Link`: one JSON per read, pacing, replies 200/201/5xx, heartbeats, reconnect, holding a shot while GSPro is away | Deep; hands each shot to the recorder |
 | `gspro_db` | GSPro's own results from `GSPro.db` (`LastShot`), matched to our shots by ball speed and launch angle | Deep; hands each result to the recorder |
+| `gspro_log` | Where GSPro is (menu, range, course), from markers in its `Player.log`; `state.gspro_mode` and `Event::GsproMode` | Small; a follower that starts over when GSPro starts a new log |
 | `recorder` | Records a shot and GSPro's result of a shot: state, session, `shots.jsonl`, notification, then the event | Small |
 | `events` | Bridge events: `subscribe()` → mpsc receiver, `publish()` to every subscriber ([ADR-007](adr/adr-007-bridge-events.md)) | Small, one enum and two functions |
 | `flight` | Estimated ball flight (drag/lift, 3D, roll-out) when GSPro's result is missing | Deep, pure |
@@ -114,6 +118,7 @@ flowchart TB
     R["r10<br/>engine::r10_loop"]
     G["gspro<br/>gspro::Link::run"]
     D["gspro-db<br/>polls GSPro.db every 1 s"]
+    L["gspro-log<br/>follows Player.log every 1 s"]
   end
   UI["GUI<br/>repaints every 250 ms"]
   S[("state<br/>(global mutex)")]
@@ -130,6 +135,8 @@ flowchart TB
   REC -- "append / update" --> H
   R -- "R10Status, BatteryLow, DeviceError" --> EV
   G -- "GsproStatus" --> EV
+  L -- "GSPro's mode" --> S
+  L -- "GsproMode" --> EV
   REC -- "ShotRecorded, GsproResult" --> EV
   EV --> SUB
   UI -- "reads" --> S
@@ -193,6 +200,7 @@ that list isn't always the session (all time, the preview's sample shot).
 | Settings | `~/Library/Application Support/OpenLaunch Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; old folder names migrated on start |
 | Shot history | `…/OpenLaunch Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
+| GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
 | App log | stderr + the last 400 lines in `state` | `log` | English |
 
 ## Platform

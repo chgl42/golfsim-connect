@@ -19,3 +19,4 @@ no longer holds is marked *Superseded by ADR-NNN* or *Deprecated*, not deleted.
 | [ADR-008](adr-008-ui-in-the-library.md) | UI in the library | Accepted |
 | [ADR-009](adr-009-tile-kinds-as-modules.md) | Tile kinds as modules | Accepted |
 | [ADR-010](adr-010-pages-own-their-state.md) | Pages own their state | Accepted |
+| [ADR-011](adr-011-gspro-mode-from-its-log.md) | Where GSPro is, from its log | Accepted |
