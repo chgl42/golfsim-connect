@@ -53,6 +53,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `log.rs` – timestamped log to stderr + `state`
   - `ui/` – **the app** (ADR-008), see below
 - `src/bin/openlaunch-connect/main.rs` – the app's binary: only `openlaunch_connect::ui::run()`
+  (another crate adds pages with `ui::run_with(pages)`)
 - `src/ui/mod.rs` – **the app** (egui/eframe), styled after GSPro's in-game look
   (navy, tiles, condensed figures, status panel with READY, battery glyph). Layout base size 1000×470 (`BASE_SIZE`);
   with the interface size *Auto* (`ui_scale: None`) larger windows zoom the whole UI uniformly (`apply_window_zoom`,
@@ -61,6 +62,11 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   pass runs with the overlay's size as zoom (`options.zoom_factor` set around `show_viewport_immediate`), and on macOS
   its frame is set through AppKit (`ui/mac.rs`, `mac::place_window`, native points, within the visible frame) – egui takes a second
   window's size in native points but reports it in zoomed ones, and a layer transform isn't applied in it.
+  Pages implement the trait `ui::Page` (`id`, `label`, `ui`) and keep their own state (ADR-010, `ui/page.rs`); what they
+  share comes through `AppCtx` (`settings()`, `change_settings`, the one way settings change; `commands()`; for the core
+  pages `edit`, `explorer`, `moving` and the arrangement operations). The list `page::pages` makes the navigation
+  (Play, Shots, Log, Overlay, extra pages, Settings); a new core page goes there. Tests open a page with
+  `App::show_page("id")` and reach its state with `App::page_mut::<P>()`.
   Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
   `OverlayContent` builds what both the overlay window and the preview draw. The *Shots* page is the explorer
@@ -70,7 +76,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   above the middle of the text box; `caps_text` centres the capitals on `pos.y` (measured).
   Controls (buttons, toggles, segments, stepper, cards, the confirm dialog) are drawn with the painter, in the public
   module `ui::kit` (`src/ui/kit.rs`) with the palette – see `button()`, `card()`, `toggle()`, `confirm()`. Only `ui::run`,
-  `ui::kit` and the re-exported `ui::egui`/`ui::eframe` are public; everything else stays `pub(super)`/private.
+  `ui::run_with`, `ui::Page`, `ui::AppCtx`, `ui::kit` and the re-exported `ui::egui`/`ui::eframe` are public; everything else stays `pub(super)`/private.
 - `src/main.rs` – CLI `openlaunch` (`t` + Enter = test shot, `--test-shot`, `--debug`)
 - `vendor/tenover/` – R10 protocol library [divotmaker/10over](https://github.com/divotmaker/10over)
   (MIT/Apache, alpha) with **local patches**, documented in `vendor/tenover/PATCHES.md`: bundled protoc, battery level
@@ -146,7 +152,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   LLVM_PROFDATA=/opt/homebrew/opt/llvm/bin/llvm-profdata` in front).
 - `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot; `OPENLAUNCH_DEMO=range`:
   a 65-shot range session with a full bag of fourteen clubs, `engine::demo_range()`, to try the explorer; on the MacBook:
-  `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=settings|overlay|log|shots`
+  `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=<page id>` (`settings`, `overlay`, `log`, `shots`)
   opens another page; `OPENLAUNCH_SCREENSHOT[_OVERLAY]=<png>` saves the visible window and quits.
 
 ## Code quality

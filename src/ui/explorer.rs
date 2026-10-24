@@ -261,22 +261,46 @@ struct Row {
     warn: bool,
 }
 
-impl App {
-    pub(super) fn shots(&mut self, ui: &mut egui::Ui) {
+/// *Shots*: the explorer. Its filter, selection and pages shown are in `AppCtx::explorer`, which
+/// the tile overlays use, too.
+#[derive(Default)]
+pub(super) struct ShotsPage {
+    /// Show all recorded shots instead of this session.
+    all_time: bool,
+    /// Cached contents of the history file (loaded when "All time" is chosen).
+    all_shots: Vec<ShotRecord>,
+    /// Session length when `all_shots` was loaded (new shots reload it).
+    all_shots_session: usize,
+    export_note: Option<String>,
+}
+
+impl Page for ShotsPage {
+    fn id(&self) -> &'static str {
+        "shots"
+    }
+
+    fn label(&self) -> &'static str {
+        tr("SHOTS")
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
         let session: Vec<ShotRecord> = state::with(|s| s.session.clone());
         // A new shot flies in the 3D tiles (not the ones there when the page first shows).
         let latest = session.last().map(key);
-        if let Some(seen) = &self.explorer.last_latest
+        if let Some(seen) = &app.explorer.last_latest
             && latest.is_some()
             && *seen != latest
         {
-            self.explorer.anim = latest.clone().map(|k| (k, Instant::now()));
+            app.explorer.anim = latest.clone().map(|k| (k, Instant::now()));
         }
-        self.explorer.last_latest = Some(latest);
-        if self.explorer.anim.as_ref().is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(15)) {
-            self.explorer.anim = None;
+        app.explorer.last_latest = Some(latest);
+        if app.explorer.anim.as_ref().is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(15)) {
+            app.explorer.anim = None;
         }
-        let units = Units { metric: self.saved.metric, meters: self.saved.meters };
+        let units = Units { metric: app.settings().metric, meters: app.settings().meters };
+        let use_gspro = app.settings().gspro_results;
+        // Pages and tiles are changed here, then applied and saved at once (below).
+        let mut layout = app.settings().explorer.clone();
 
         // Source, pages, arranging and export.
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
@@ -294,16 +318,16 @@ impl App {
             self.all_shots_session = session.len();
         }
         let shots: Vec<ShotRecord> = if self.all_time { self.all_shots.clone() } else { session };
-        self.explorer.page = self.explorer.page.min(self.saved.explorer.pages.len().saturating_sub(1));
+        app.explorer.page = app.explorer.page.min(layout.pages.len().saturating_sub(1));
         bar_ui.add_space(18.0);
         let mut layout_changed = false;
         // A page's tab: click shows it, right-click opens its settings.
         let mut page_edit: Option<PageEdit> = None;
-        let removable = self.saved.explorer.pages.len() > 1;
-        let page_count = self.saved.explorer.pages.len();
-        for (i, page) in self.saved.explorer.pages.iter().enumerate() {
+        let removable = layout.pages.len() > 1;
+        let page_count = layout.pages.len();
+        for (i, page) in layout.pages.iter().enumerate() {
             // While configuring, the page shown is edited right in its tab: move, rename, remove.
-            if self.explorer.arrange && i == self.explorer.page {
+            if app.explorer.arrange && i == app.explorer.page {
                 let ui = &mut bar_ui;
                 if i > 0 && link(ui, "◀", LABEL).on_hover_text(tr("Move the page left")).clicked() {
                     page_edit = Some(PageEdit::Move(i, -1));
@@ -326,12 +350,12 @@ impl App {
                 ui.add_space(6.0);
                 continue;
             }
-            let mut tab = page_tab(&mut bar_ui, &page_name(page, i), i == self.explorer.page);
-            if self.explorer.arrange {
+            let mut tab = page_tab(&mut bar_ui, &page_name(page, i), i == app.explorer.page);
+            if app.explorer.arrange {
                 tab = tab.on_hover_text(tr("Right-click for the page's settings"));
             }
             if tab.clicked() || tab.secondary_clicked() {
-                self.explorer.page = i;
+                app.explorer.page = i;
             }
             // Stays open while typing the name; the entries close it themselves.
             egui::Popup::context_menu(&tab).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
@@ -352,55 +376,55 @@ impl App {
             });
         }
         if let Some(edit) = page_edit {
-            let pages = &mut self.saved.explorer.pages;
+            let pages = &mut layout.pages;
             match edit {
                 PageEdit::Rename(i, name) => pages[i].name = name,
                 PageEdit::AddPage => {
                     pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
-                    self.explorer.page = pages.len() - 1;
+                    app.explorer.page = pages.len() - 1;
                 }
                 PageEdit::Move(i, by) => {
                     let j = i.saturating_add_signed(by);
                     if j < pages.len() {
                         pages.swap(i, j);
-                        self.explorer.page = j;
+                        app.explorer.page = j;
                     }
                 }
                 // Asks first (below): the page's tiles go with it.
-                PageEdit::Remove(i) => self.explorer.confirm_remove = Some(i),
+                PageEdit::Remove(i) => app.explorer.confirm_remove = Some(i),
             }
             layout_changed = true;
         }
-        if let Some(i) = self.explorer.confirm_remove {
-            let name = self.saved.explorer.pages.get(i).map(|p| page_name(p, i)).unwrap_or_default();
+        if let Some(i) = app.explorer.confirm_remove {
+            let name = layout.pages.get(i).map(|p| page_name(p, i)).unwrap_or_default();
             let title = tr("Remove the page “{name}”?").replace("{name}", &name);
             let text = tr("Its tiles go with it. Your shots are kept.");
             if let Some(remove) = confirm(bar_ui.ctx(), "remove-page", &title, text, tr("REMOVE")) {
-                self.explorer.confirm_remove = None;
-                let pages = &mut self.saved.explorer.pages;
+                app.explorer.confirm_remove = None;
+                let pages = &mut layout.pages;
                 if remove && i < pages.len() && pages.len() > 1 {
                     pages.remove(i);
-                    self.explorer.page = self.explorer.page.min(pages.len() - 1);
+                    app.explorer.page = app.explorer.page.min(pages.len() - 1);
                     layout_changed = true;
                 }
             }
         }
-        if self.explorer.arrange && link(&mut bar_ui, "+", ICON).on_hover_text(tr("Add a page")).clicked() {
-            self.saved.explorer.pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
-            self.explorer.page = self.saved.explorer.pages.len() - 1;
+        if app.explorer.arrange && link(&mut bar_ui, "+", ICON).on_hover_text(tr("Add a page")).clicked() {
+            layout.pages.push(ExplorerPage { name: String::new(), tiles: vec![Tile::default()] });
+            app.explorer.page = layout.pages.len() - 1;
             layout_changed = true;
         }
         bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(150.0, 30.0), Sense::hover());
             // Asks for the layout in a dialog (below).
             if button(ui, rect, tr("EXPORT CSV"), Icon::None, false, !shots.is_empty(), tr("No shots to export")) {
-                self.explorer.export_dialog = true;
+                app.explorer.export_dialog = true;
             }
-            let label = if self.explorer.arrange { tr("DONE") } else { tr("CONFIGURE") };
+            let label = if app.explorer.arrange { tr("DONE") } else { tr("CONFIGURE") };
             let w = ui.painter().layout_no_wrap(tr("CONFIGURE").to_string(), cond(19.0), WHITE).size().x + 36.0;
             let (rect, _) = ui.allocate_exact_size(vec2(w.max(110.0), 30.0), Sense::hover());
-            if button(ui, rect, label, Icon::None, self.explorer.arrange, true, "") {
-                self.explorer.arrange = !self.explorer.arrange;
+            if button(ui, rect, label, Icon::None, app.explorer.arrange, true, "") {
+                app.explorer.arrange = !app.explorer.arrange;
             }
             if let Some(note) = &self.export_note {
                 ui.label(RichText::new(note).size(12.0).color(MUTED));
@@ -412,7 +436,7 @@ impl App {
         let color_of = |code: &Option<String>| {
             CLUB_COLORS[codes.iter().position(|c| c == code).unwrap_or(0) % CLUB_COLORS.len()]
         };
-        let ex = &mut self.explorer;
+        let ex = &mut *app.explorer;
         ex.selected.retain(|k| shots.iter().any(|s| &key(s) == k));
         if ex.selected.is_empty() {
             ex.only_selected = false;
@@ -424,8 +448,7 @@ impl App {
             .filter(|s| !ex.only_selected || ex.selected.contains(&key(s)))
             .collect();
         let export: Vec<ShotRecord> = if ex.export_dialog { shown.iter().map(|s| (*s).clone()).collect() } else { Vec::new() };
-        let use_gspro = self.saved.gspro_results;
-        let page_has_flight = self.saved.explorer.pages.get(ex.page).is_some_and(|p| p.tiles.iter().any(|t| t.kind == TileKind::Flight));
+        let page_has_flight = layout.pages.get(ex.page).is_some_and(|p| p.tiles.iter().any(|t| t.kind == TileKind::Flight));
         let (flights, paths) = ex.flights_of(&shown, use_gspro, page_has_flight);
 
         // Second row: the filter and what to do with the selection, or the page while arranging.
@@ -467,7 +490,7 @@ impl App {
             if chip(&mut row, tr("Hide excluded"), None, ex.hide_excluded).clicked() {
                 ex.hide_excluded = !ex.hide_excluded;
             }
-            let gspro_chip = chip(&mut row, tr("GSPro results"), None, self.saved.gspro_results)
+            let gspro_chip = chip(&mut row, tr("GSPro results"), None, use_gspro)
                 .on_hover_text(tr("Carry, total, apex and side as GSPro computed them, where it did; else the estimate (*)"));
             gspro_toggled = gspro_chip.clicked();
             if !ex.selected.is_empty() {
@@ -499,7 +522,7 @@ impl App {
         // The tiles of the page shown.
         let area = ui.available_rect_before_wrap();
         let (cols, rows, cell) = grid(area.size());
-        let page_tiles = self.saved.explorer.pages[ex.page].tiles.clone();
+        let page_tiles = layout.pages[ex.page].tiles.clone();
         // While configuring, an empty tile with a + comes last: it adds a tile.
         let mut sizes: Vec<TileSize> = page_tiles.iter().map(|t| t.size).collect();
         if ex.arrange {
@@ -575,7 +598,7 @@ impl App {
         let mut replay: Option<Key> = None;
         let changes_layout = edits.iter().any(|e| !matches!(e, Edit::Replay(_)));
         if !edits.is_empty() {
-            let tiles = &mut self.saved.explorer.pages[ex.page].tiles;
+            let tiles = &mut layout.pages[ex.page].tiles;
             for edit in edits {
                 match edit {
                     Edit::Kind(i, kind) => tiles[i].kind = kind,
@@ -607,16 +630,14 @@ impl App {
             ex.anim = Some((k, Instant::now()));
         }
         if gspro_toggled {
-            let on = !self.saved.gspro_results;
-            let _ = self.change_settings(|s| s.gspro_results = on);
+            let _ = app.change_settings(|s| s.gspro_results = !use_gspro);
         }
         if layout_changed {
-            // Applied above already; saved at once, like the overlay's settings.
-            let explorer = self.saved.explorer.clone();
-            let _ = self.change_settings(|s| s.explorer.clone_from(&explorer));
+            // Applied and saved at once, like the overlay's settings.
+            let _ = app.change_settings(|s| s.explorer.clone_from(&layout));
         }
         if let Some(excluded) = exclude {
-            let keys = self.explorer.selected.clone();
+            let keys = app.explorer.selected.clone();
             let mark = |shots: &mut Vec<ShotRecord>| {
                 for s in shots.iter_mut().filter(|s| keys.contains(&key(s))) {
                     s.excluded = excluded;
@@ -630,7 +651,7 @@ impl App {
                 }
             }
         }
-        if self.explorer.export_dialog {
+        if app.explorer.export_dialog {
             let mut picked = None;
             let modal = dialog(ui.ctx(), "export-csv", 380.0, |ui| {
                 let title = tr("Export {n} shots as CSV").replace("{n}", &export.len().to_string());
@@ -653,7 +674,7 @@ impl App {
                 }
             });
             if modal.should_close() {
-                self.explorer.export_dialog = false;
+                app.explorer.export_dialog = false;
             }
             if let Some(f) = picked {
                 self.export_note = Some(export_csv(&export, f));
@@ -1930,9 +1951,9 @@ mod tests {
             }),
             ("explorer-export.png", |app, _| app.explorer.export_dialog = true),
             ("explorer-reset.png", |app, _| {
-                app.page = Page::Settings;
+                app.show_page("settings");
                 app.saved.explorer.pages.pop();
-                app.confirm_reset = true;
+                app.page_mut::<SettingsPage>().confirm_reset = true;
             }),
         ];
         for (name, setup) in states {
@@ -1946,7 +1967,7 @@ mod tests {
                     setup_style(&cc.egui_ctx);
                     App::new(settings, tx)
                 });
-            harness.state_mut().page = Page::Shots;
+            harness.state_mut().show_page("shots");
             harness.state_mut().remember_size = false;
             setup(harness.state_mut(), &keys);
             for _ in 0..6 {
@@ -1971,7 +1992,7 @@ mod tests {
             setup_style(&cc.egui_ctx);
             App::new(settings, tx)
         });
-        harness.state_mut().page = Page::Shots;
+        harness.state_mut().show_page("shots");
         harness.state_mut().remember_size = false;
         harness.state_mut().show_overlay = false;
         harness.state_mut().explorer.arrange = true;
@@ -2009,7 +2030,7 @@ mod tests {
             setup_style(&cc.egui_ctx);
             App::new(settings, tx)
         });
-        harness.state_mut().page = Page::Shots;
+        harness.state_mut().show_page("shots");
         harness.state_mut().remember_size = false;
         harness.state_mut().show_overlay = false;
         harness.state_mut().explorer.page = 1; // Ball flight: 3D from the tee (2×2) first
@@ -2043,7 +2064,7 @@ mod tests {
             setup_style(&cc.egui_ctx);
             App::new(settings, tx)
         });
-        harness.state_mut().page = Page::Shots;
+        harness.state_mut().show_page("shots");
         harness.state_mut().remember_size = false;
         harness.state_mut().show_overlay = false;
         harness.state_mut().explorer.page = 1; // Ball flight
