@@ -188,13 +188,13 @@ the spin axis, named for right-handers.
 Click a shot in a table or a dot in a chart to select it everywhere; then show only the selected shots, or
 *Exclude* misreads from the stats and exports (*Count* takes them back).
 
-**Your own pages:** *CONFIGURE* shows an empty tile with **+** to add tiles, a menu on each tile for what it shows
+**Your own pages:** *CUSTOMIZE* shows an empty tile with **+** to add tiles, a menu on each tile for what it shows
 and its size (1×1 up to the whole page), and lets you drag tiles into place or remove them (×). The page shown can be
-renamed, moved and removed right in its tab; **+** next to the tabs adds a page. The layout is saved; *Reset shots
-view* in the settings brings back the default pages.
+renamed, moved and removed right in its tab; **+** next to the tabs adds a page. *DONE* keeps the changes, *CANCEL*
+undoes them. The layout is saved; *Reset shots view* in the settings brings back the default pages.
 
 <p align="center">
-  <img src="docs/images/screenshot-configure.png" alt="Configure mode: tile menus, the empty tile with + and the page's tools in its tab" width="80%">
+  <img src="docs/images/screenshot-configure.png" alt="Customize mode: tile menus, the empty tile with + and the page's tools in its tab" width="80%">
 </p>
 
 *EXPORT CSV* writes the shots shown and asks for the layout: OpenLaunch, Garmin Golf or Awesome Golf.
