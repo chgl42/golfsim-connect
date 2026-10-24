@@ -27,6 +27,9 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `gspro_db.rs` – GSPro's own results (carry, total, apex, offline, to pin) from its SQLite DB in the CrossOver bottle
     (`…/AppData/LocalLow/GSPro/GSPro/GSPro.db`, table `LastShot`, read-only, polled each second; matched by ball speed
     in km/h or mph and VLA) → `ShotRecord::gspro`, `history::Distances` picks them or the estimate
+  - `gspro_log.rs` – where GSPro is (`GameMode`: menu, range, course) from markers in its `Player.log` next to
+    `GSPro.db` (followed each second, starts over with a new log) → `state.gspro_mode`, `Event::GsproMode`; in the
+    menus the tile overlays are hidden. The log holds the player's name: only the markers are read, never logged
   - `gspro.rs` – OpenConnect client (`Link`), heartbeats, reconnect, reply parsing (codes 200/201/5xx)
   - `mapping.rs` – R10 data → OpenConnect (m/s → mph, **spin axis inverted**, back/side spin from total + axis), `Tempo`
   - `state.rs` – shared status for the GUI (R10/GSPro status, device, battery, last shot, session shots, club/hand, log)

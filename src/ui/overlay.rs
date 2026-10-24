@@ -3,6 +3,7 @@
 //! arrangements.
 
 use super::*;
+use crate::gspro_log::GameMode;
 
 impl App {
     /// Always-on-top, click-through status panel for playing GSPro in full screen.
@@ -117,13 +118,15 @@ impl App {
         }
     }
 
-    /// Always-on-top, click-through windows with one tile of the shots explorer each. Overlays at
+    /// Always-on-top, click-through windows with one tile of the shots explorer each (not in GSPro's
+    /// menus). Overlays at
     /// the same place (not placed by hand) stack: each under the one before (above it at the bottom
     /// of the screen), the status first.
     pub(super) fn tile_overlays(&mut self, ctx: &egui::Context) {
         let tiles = self.saved.tile_overlays.clone();
         self.moving = self.moving.take().filter(|m| m.tile.is_none_or(|k| tiles.get(k).is_some_and(|t| t.pos != OverlayPos::Off)));
-        if !self.show_overlay {
+        let moving_tile = self.moving.as_ref().is_some_and(|m| m.tile.is_some());
+        if !self.show_overlay || !tiles_shown(state::with(|s| s.gspro_mode), moving_tile) {
             return;
         }
         let Some(screen) = self.screen_size(ctx) else {
@@ -1506,6 +1509,12 @@ fn backdrop(p: &egui::Painter, area: Rect) {
 
 /// Which overlay the page edits: tabs in the header of the left card (`card`), the status and
 /// the `count` tiles, then *+*. Returns whether *+* was clicked.
+/// Whether the tile overlays are shown: not in GSPro's menus, where they'd cover its buttons –
+/// unless one is being moved. While GSPro's place isn't known (no log yet) they are.
+fn tiles_shown(mode: Option<GameMode>, moving_tile: bool) -> bool {
+    mode != Some(GameMode::Menu) || moving_tile
+}
+
 fn overlay_tabs(ui: &mut egui::Ui, card: Rect, tab: &mut Option<usize>, count: usize) -> bool {
     let mut right = card.right() - 16.0;
     let mut add = false;
@@ -1732,6 +1741,15 @@ mod tests {
             }
             save(&harness.render().unwrap(), name);
         }
+    }
+
+    #[test]
+    fn tile_overlays_are_hidden_in_gspros_menus() {
+        assert!(!tiles_shown(Some(GameMode::Menu), false));
+        assert!(tiles_shown(Some(GameMode::Menu), true), "one being moved stays");
+        assert!(tiles_shown(Some(GameMode::Range), false));
+        assert!(tiles_shown(Some(GameMode::Course), false));
+        assert!(tiles_shown(None, false), "GSPro's place unknown");
     }
 
     /// Switching from a tile overlay's tab to an arrangement with fewer tile overlays goes back
