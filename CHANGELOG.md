@@ -64,6 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   shot. The status words are shorter: *No GSPro* and *Not ready*.
 
 ### Fixed
+- **GSPro replies:** the player info GSPro sends after a shot (the club in use) is no longer taken as the reply to
+  the next shot, which logged that shot as "No direct reply" and could show the GSPro Connect hint for nothing.
 - **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile
   overlays than the tab shown, and no longer copies the overlay being edited into the arrangement switched to.
 - The overlays covered every window: they now sit right above GSPro – on top while GSPro is in front or the top window

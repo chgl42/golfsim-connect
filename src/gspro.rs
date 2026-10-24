@@ -380,7 +380,8 @@ impl Link {
         }
     }
 
-    /// Read and handle all available replies; returns how many were handled.
+    /// Read and handle all available replies; returns how many answer a message (all but the
+    /// player info, 201, which GSPro sends on its own when the club changes).
     pub fn read_responses(&mut self) -> usize {
         let Some(stream) = self.stream.as_mut() else {
             return 0;
@@ -411,7 +412,7 @@ impl Link {
         for resp in &responses {
             self.handle_response(resp);
         }
-        responses.len()
+        responses.iter().filter(|r| r.get("Code").and_then(Value::as_i64) != Some(201)).count()
     }
 
     /// A shot went out: after [`UNANSWERED_SHOTS`] without a word from GSPro, say how to fix it.
@@ -678,8 +679,7 @@ mod tests {
         for (ball, club) in shots {
             link.handle(Cmd::Shot { ball, club: Some(club), tempo: None, test: false });
         }
-        // The 201 comes a moment after the 200 the shot waited for (and the second shot's 200
-        // after the reply it took, see `a_late_201_is_not_taken_as_the_next_reply`).
+        // The 201 comes a moment after the 200 the shot waited for.
         let deadline = Instant::now() + Duration::from_secs(3);
         while (state::with(|s| s.gspro_handed.is_none()) || link.unanswered > 0) && Instant::now() < deadline {
             link.read_responses();
@@ -705,12 +705,9 @@ mod tests {
         assert!(numbers[0] > 0 && numbers[1] == numbers[0] + 1, "new shot numbers: {numbers:?}");
     }
 
-    /// Today the 201 that follows a shot's 200, arriving while the next shot waits out
-    /// [`MIN_SEND_GAP`], is read as that shot's reply: `wait_for_reply` stops at it, the shot is
-    /// logged as "No direct reply" and counted as unanswered (the real 200 comes later). Wanted:
-    /// only a 200 (or an error) ends the wait for a shot.
+    /// The 201 that follows a shot's 200, arriving while the next shot waits out
+    /// [`MIN_SEND_GAP`], isn't that shot's reply: only a 200 (or an error) ends the wait (#86).
     #[test]
-    #[ignore = "found in #68: a late 201 is taken as the next shot's reply"]
     fn a_late_201_is_not_taken_as_the_next_reply() {
         let _state = crate::test_util::state_lock();
         let _history = crate::test_util::TestHistory::new("link-late-201");
