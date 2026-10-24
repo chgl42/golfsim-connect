@@ -327,6 +327,7 @@ fn core(en: &str) -> Option<&'static str> {
         "Add a page" => "Seite hinzufügen",
         "DONE" => "FERTIG",
         "CUSTOMIZE" => "ANPASSEN",
+        "Arrangement" => "Anordnung",
         "Add tile" => "Kachel hinzufügen",
         "Right-click for the page's settings" => "Rechtsklick für die Einstellungen der Seite",
         "Remove page" => "Seite entfernen",

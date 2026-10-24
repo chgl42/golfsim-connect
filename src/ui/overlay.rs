@@ -381,7 +381,8 @@ impl OverlayPage {
         let left = Rect::from_min_size(area.min, vec2(col_w, area.height()));
         let right = Rect::from_min_size(pos2(area.left() + col_w + 10.0, area.top()), vec2(col_w, area.height()));
 
-        let title = app.arrangement_name(app.settings().arrangement).to_uppercase();
+        let arrangement = app.settings().arrangement;
+        let title = app.arrangement_name(arrangement).to_uppercase();
         card(ui, left, &title, Icon::Layout, |ui| {
             ui.spacing_mut().item_spacing.y = 7.0;
             ui.horizontal(|ui| {
@@ -403,6 +404,10 @@ impl OverlayPage {
             });
         });
         self.overlay_card_head(ui, app, left, &title);
+        if app.settings().arrangement != arrangement {
+            // Another arrangement was chosen in the head: the values above are the one left's.
+            return;
+        }
 
         card(ui, right, tr("CONTENTS"), Icon::List, |ui| {
             ui.label(RichText::new(tr("Click a tile in the preview to choose what it shows, drag it to move it.")).size(13.0).color(SOFT));
@@ -442,7 +447,8 @@ impl OverlayPage {
         let left = Rect::from_min_size(area.min, vec2(col_w, area.height()));
         let right = Rect::from_min_size(pos2(area.left() + col_w + 10.0, area.top()), vec2(col_w, area.height()));
 
-        let title = app.arrangement_name(app.settings().arrangement).to_uppercase();
+        let arrangement = app.settings().arrangement;
+        let title = app.arrangement_name(arrangement).to_uppercase();
         card(ui, left, &title, Icon::Layout, |ui| {
             ui.spacing_mut().item_spacing.y = 7.0;
             ui.horizontal(|ui| {
@@ -472,6 +478,10 @@ impl OverlayPage {
             });
         });
         self.overlay_card_head(ui, app, left, &title);
+        if app.settings().arrangement != arrangement || k >= app.settings().tile_overlays.len() {
+            // Another arrangement was chosen in the head: `cfg` is a tile of the one left.
+            return;
+        }
         self.tile_overlay_preview(ui, app, right, &cfg);
 
         if remove {
@@ -491,6 +501,7 @@ impl OverlayPage {
         let w = ui.painter().layout_no_wrap(title.to_string(), cond(15.0), LABEL).size().x + title.chars().count() as f32 * 1.5;
         let head = Rect::from_min_max(pos2(card.left() + 14.0, card.top() + 6.0), pos2(card.left() + 58.0 + w, card.top() + 36.0));
         let resp = ui.interact(head, ui.id().with("arrangement"), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("Arrangement")));
         let c = pos2(head.right() - 4.0, card.top() + 21.0);
         let color = if resp.hovered() { WHITE } else { LABEL };
         ui.painter().add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)], color, Stroke::NONE));
@@ -1721,6 +1732,52 @@ mod tests {
             }
             save(&harness.render().unwrap(), name);
         }
+    }
+
+    /// Switching from a tile overlay's tab to an arrangement with fewer tile overlays goes back
+    /// to the status tab and leaves both arrangements as they were.
+    #[test]
+    fn switching_to_an_arrangement_with_fewer_tiles() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = demo_state();
+        let range = vec![TileOverlay::default(), TileOverlay { pos: OverlayPos::TopRight, ..TileOverlay::default() }];
+        let mut settings = Settings { tile_overlays: range.clone(), ..Settings::default() };
+        settings.keep_arrangement();
+        settings.arrangements[0].name = "Range".into();
+        settings.arrangements.push(Arrangement { name: "Course".into(), overlay: OverlayPos::Off, tiles: vec![TileOverlay { pos: OverlayPos::Left, ..TileOverlay::default() }], ..Arrangement::default() });
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = egui_kittest::Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(settings, tx)
+        });
+        harness.state_mut().show_page("overlay");
+        harness.state_mut().show_overlay = false;
+        harness.state_mut().remember_size = false;
+        harness.state_mut().page_mut::<OverlayPage>().overlay_tab = Some(1);
+        harness.run_steps(3);
+        harness.get_by_label("Arrangement").click();
+        harness.run_steps(3);
+        harness.get_by_label("Course").click();
+        harness.run_steps(3);
+
+        let app = harness.state();
+        assert_eq!(app.saved.arrangement, 1);
+        assert_eq!(app.saved.arrangements[0].tiles, range, "the one left is unchanged");
+        assert_eq!(app.saved.arrangements[1].tiles[0].pos, OverlayPos::Left, "the one shown didn't get the other's tile");
+        assert_eq!(app.saved.tile_overlays, app.saved.arrangements[1].tiles);
+        assert_eq!(harness.state_mut().page_mut::<OverlayPage>().overlay_tab, None, "back on the status tab");
+
+        // And from the status tab back: Range's status overlay isn't Course's.
+        harness.get_by_label("Arrangement").click();
+        harness.run_steps(3);
+        harness.get_by_label("Range").click();
+        harness.run_steps(3);
+        let app = harness.state();
+        assert_eq!(app.saved.arrangement, 0);
+        assert_eq!(app.saved.arrangements[0].overlay, Settings::default().overlay, "Range didn't get Course's status overlay");
+        assert_eq!(app.saved.arrangements[1].overlay, OverlayPos::Off);
+        assert_eq!(app.saved.overlay, app.saved.arrangements[0].overlay);
     }
 
     #[test]
