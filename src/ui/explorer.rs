@@ -13,7 +13,7 @@ use std::sync::{PoisonError, RwLock};
 
 use crate::flight::{self, Flight};
 
-use crate::settings::{DEFAULT_PAGE_NAMES, ExplorerPage, Tile, TileOverlay, TileSize};
+use crate::settings::{DEFAULT_PAGE_NAMES, Explorer, ExplorerPage, Tile, TileOverlay, TileSize};
 
 use super::*;
 
@@ -123,6 +123,8 @@ fn key(s: &ShotRecord) -> Key {
 pub(super) struct ExplorerState {
     page: usize,
     arrange: bool,
+    /// Pages and page shown when CUSTOMIZE was clicked; CANCEL goes back to them.
+    before_arrange: Option<(Explorer, usize)>,
     hidden_clubs: BTreeSet<Option<String>>,
     hide_excluded: bool,
     only_selected: bool,
@@ -444,11 +446,27 @@ impl Page for ShotsPage {
             if button(ui, rect, tr("EXPORT CSV"), Icon::None, false, !shots.is_empty(), tr("No shots to export")) {
                 app.explorer.export_dialog = true;
             }
-            let label = if app.explorer.arrange { tr("DONE") } else { tr("CONFIGURE") };
-            let w = ui.painter().layout_no_wrap(tr("CONFIGURE").to_string(), cond(19.0), WHITE).size().x + 36.0;
-            let (rect, _) = ui.allocate_exact_size(vec2(w.max(110.0), 30.0), Sense::hover());
+            let width = |ui: &egui::Ui, labels: &[&str]| {
+                let w = labels.iter().map(|l| ui.painter().layout_no_wrap((*l).to_string(), cond(19.0), WHITE).size().x).fold(0.0, f32::max);
+                (w + 36.0).max(110.0)
+            };
+            let label = if app.explorer.arrange { tr("DONE") } else { tr("CUSTOMIZE") };
+            let (rect, _) = ui.allocate_exact_size(vec2(width(ui, &[tr("CUSTOMIZE"), tr("DONE")]), 30.0), Sense::hover());
             if button(ui, rect, label, Icon::None, app.explorer.arrange, true, "") {
                 app.explorer.arrange = !app.explorer.arrange;
+                app.explorer.before_arrange = app.explorer.arrange.then(|| (layout.clone(), app.explorer.page));
+            }
+            if app.explorer.arrange {
+                // Drops what was changed since CUSTOMIZE (the changes were saved at once).
+                let (rect, _) = ui.allocate_exact_size(vec2(width(ui, &[tr("CANCEL")]), 30.0), Sense::hover());
+                if button(ui, rect, tr("CANCEL"), Icon::None, false, true, "") {
+                    app.explorer.arrange = false;
+                    if let Some((before, page)) = app.explorer.before_arrange.take() {
+                        layout_changed |= layout != before;
+                        layout = before;
+                        app.explorer.page = page.min(layout.pages.len().saturating_sub(1));
+                    }
+                }
             }
             if let Some(note) = &self.export_note {
                 ui.label(RichText::new(note).size(12.0).color(MUTED));
@@ -569,7 +587,7 @@ impl Page for ShotsPage {
                 ui.painter().text(
                     area.center(),
                     Align2::CENTER_CENTER,
-                    tr("No tiles on this page – CONFIGURE adds some."),
+                    tr("No tiles on this page – CUSTOMIZE adds some."),
                     FontId::proportional(13.0),
                     MUTED,
                 );
@@ -1656,10 +1674,40 @@ mod tests {
         assert_eq!(harness.state().saved.explorer.pages[0].tiles[0], gapping);
     }
 
+    /// CANCEL undoes what was changed since CUSTOMIZE; DONE keeps it.
+    #[test]
+    fn cancel_undoes_the_changes_since_customize() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        let tiles = vec![Tile::new("details", TileSize::W2H2)];
+        let mut harness = explorer_with(tiles.clone(), false);
+        let add_one = |harness: &mut egui_kittest::Harness<'static, App>| {
+            harness.get_by_label("CUSTOMIZE").click();
+            harness.run_steps(3);
+            harness.get_by_label("Add tile").click();
+            harness.run_steps(3);
+            harness.get_by_label("Table").click();
+            harness.run_steps(3);
+            assert_eq!(harness.state().saved.explorer.pages[0].tiles.len(), 2, "added and saved at once");
+        };
+        add_one(&mut harness);
+        harness.get_by_label("CANCEL").click();
+        harness.run_steps(3);
+        assert!(!harness.state().explorer.arrange);
+        assert_eq!(harness.state().saved.explorer.pages[0].tiles, tiles, "back as before");
+
+        add_one(&mut harness);
+        harness.get_by_label("DONE").click();
+        harness.run_steps(3);
+        assert!(!harness.state().explorer.arrange);
+        assert_eq!(harness.state().saved.explorer.pages[0].tiles.len(), 2, "kept");
+    }
+
     /// The tiles the app starts with are of the core's kinds.
     #[test]
     fn default_tiles_are_of_the_core_kinds() {
-        let pages = crate::settings::Explorer::default().pages;
+        let pages = Explorer::default().pages;
         let overlay = TileOverlay::default().tile;
         for tile in pages.iter().flat_map(|p| &p.tiles).chain([&Tile::default(), &overlay]) {
             assert!(CORE_KINDS.iter().any(|k| k.id() == tile.kind), "{}", tile.kind);

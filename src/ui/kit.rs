@@ -374,6 +374,7 @@ fn draw_icon(p: &egui::Painter, c: egui::Pos2, icon: Icon, color: Color32) {
 pub fn button(ui: &mut egui::Ui, rect: Rect, label: &str, icon: Icon, primary: bool, enabled: bool, disabled_hint: &str) -> bool {
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let resp = ui.interact(rect, ui.id().with(("button", label)), sense);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     let hovered = enabled && resp.hovered();
     let pressed = enabled && resp.is_pointer_button_down_on();
     let r = if pressed { rect.translate(vec2(0.0, 1.0)) } else { rect };

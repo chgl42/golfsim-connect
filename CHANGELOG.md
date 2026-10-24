@@ -38,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
 ### Changed
+- **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
+  pages and tiles since.
 - **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash
   factor and spin, VLA and HLA, distance to the pin and battery – followed by the impact graphics, with symbols
   instead of words (a golf ball with speed lines, a driver, club face and ball, a ball with an arrow around it, a
