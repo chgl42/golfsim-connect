@@ -1,0 +1,35 @@
+{
+  "gspro_addr": "127.0.0.1:921",
+  "metric": true,
+  "meters": true,
+  "explorer": {
+    "pages": [
+      {
+        "name": "Range",
+        "tiles": [
+          { "kind": "table", "size": "w3_h2", "averages": true, "total": false, "x": "hla", "y": "spin_axis", "camera": "tee" },
+          { "kind": "dispersion", "size": "w2_h2", "averages": false, "total": true, "x": "hla", "y": "spin_axis", "camera": "tee" },
+          { "kind": "flight", "size": "w1_h2", "averages": true, "total": false, "x": "hla", "y": "spin_axis", "camera": "above" }
+        ]
+      },
+      {
+        "name": "Analysis",
+        "tiles": [
+          { "kind": "scatter", "size": "w2_h2", "averages": false, "total": false, "x": "ball_speed", "y": "carry", "camera": "tee" },
+          { "kind": "details", "size": "page", "averages": false, "total": false, "x": "hla", "y": "spin_axis", "camera": "side" }
+        ]
+      }
+    ]
+  },
+  "tile_overlays": [
+    {
+      "pos": "bottom_left",
+      "spot": null,
+      "tile": { "kind": "flight", "size": "w2_h2", "averages": false, "total": false, "x": "hla", "y": "spin_axis", "camera": "side" },
+      "width": 460.0,
+      "opacity": 1.0,
+      "club_only": true
+    }
+  ],
+  "gspro_results": false
+}

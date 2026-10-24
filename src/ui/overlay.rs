@@ -1681,23 +1681,23 @@ mod tests {
     #[ignore = "writes screenshots; run on demand"]
     fn tile_overlay_states() {
         use egui_kittest::Harness;
-        use crate::settings::{Camera, Tile, TileKind};
+        use crate::settings::{Tile, TileSize};
 
         let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") { Language::German } else { Language::English };
         i18n::set(language);
         let _state = demo_state();
         state::with(|s| s.session = engine::demo_range());
-        let tile = |kind| Tile { kind, ..Tile::default() };
+        let tile = |kind, config| Tile::new(kind, TileSize::W2H2).with(&config);
         for (name, cfg) in [
             ("tile-overlay-dispersion.png", TileOverlay { pos: OverlayPos::TopRight, ..TileOverlay::default() }),
             (
                 "tile-overlay-flight.png",
-                TileOverlay { pos: OverlayPos::BottomLeft, tile: Tile { camera: Camera::Above, ..tile(TileKind::Flight) }, club_only: true, ..TileOverlay::default() },
+                TileOverlay { pos: OverlayPos::BottomLeft, tile: tile("flight", serde_json::json!({ "camera": "above" })), club_only: true, ..TileOverlay::default() },
             ),
             ("tile-overlay-moving.png", TileOverlay { pos: OverlayPos::Left, spot: Some([0.0, 0.45]), ..TileOverlay::default() }),
             ("tile-overlay-status.png", TileOverlay::default()),
             ("tile-overlay-play.png", TileOverlay::default()),
-            ("tile-overlay-table.png", TileOverlay { pos: OverlayPos::Right, tile: Tile { averages: true, ..tile(TileKind::Table) }, width: 460.0, ..TileOverlay::default() }),
+            ("tile-overlay-table.png", TileOverlay { pos: OverlayPos::Right, tile: tile("table", serde_json::json!({ "averages": true })), width: 460.0, ..TileOverlay::default() }),
         ] {
             let mut settings = Settings { tile_overlays: vec![cfg, TileOverlay::default()], ..Settings::default() };
             settings.keep_arrangement();

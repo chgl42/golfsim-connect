@@ -1,7 +1,7 @@
 # ADR-006: Settings tolerate values they don't know
 
 **Date:** 2026-10-23
-**Status:** Accepted
+**Status:** Accepted (tiles of an unknown kind: kept since [ADR-009](adr-009-tile-kinds-as-modules.md))
 
 ## Context
 

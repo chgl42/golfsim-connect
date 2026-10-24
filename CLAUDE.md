@@ -70,13 +70,19 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
   `OverlayContent` builds what both the overlay window and the preview draw. The *Shots* page is the explorer
-  (`src/ui/explorer.rs`, the 3D flight tile in `explorer/flight3d.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
-  near-square cells (`grid`, `place`), shared filter and selection (`ExplorerState`, not saved). Window size is saved in the settings (`window_size`).
+  (`src/ui/explorer.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
+  near-square cells (`grid`, `place`), shared filter and selection (`ExplorerState`, not saved). Tile kinds are
+  modules behind the public trait `explorer::TileKind` (ADR-009): `explorer/table.rs`, `details.rs`, `dispersion.rs`,
+  `scatter.rs` (correlation), `flight3d.rs`, listed in `CORE_KINDS`; other crates add kinds with
+  `explorer::register_tile_kind`. A tile in the settings is `{kind, size, …the kind's fields}` (`Tile::config::<T>()`,
+  `change_config`); unknown kinds are kept and show a placeholder. Window size is saved in the settings (`window_size`).
   Text in DIN Condensed (`cond()`) inside boxes/buttons always via `caps_text()`: the capitals sit ~¼ of the font size
   above the middle of the text box; `caps_text` centres the capitals on `pos.y` (measured).
   Controls (buttons, toggles, segments, stepper, cards, the confirm dialog) are drawn with the painter, in the public
   module `ui::kit` (`src/ui/kit.rs`) with the palette – see `button()`, `card()`, `toggle()`, `confirm()`. Only `ui::run`,
-  `ui::run_with`, `ui::Page`, `ui::AppCtx`, `ui::kit` and the re-exported `ui::egui`/`ui::eframe` are public; everything else stays `pub(super)`/private.
+  `ui::run_with`, `ui::Page`, `ui::AppCtx`, `ui::kit`, the tile kind interface in `ui::explorer` (`TileKind`, `TileCtx`,
+  `Units`, `FlightSummary`, `register_tile_kind`) and the re-exported `ui::egui`/`ui::eframe` are public; everything else
+  stays `pub(super)`/private.
 - `src/main.rs` – CLI `openlaunch` (`t` + Enter = test shot, `--test-shot`, `--debug`)
 - `vendor/tenover/` – R10 protocol library [divotmaker/10over](https://github.com/divotmaker/10over)
   (MIT/Apache, alpha) with **local patches**, documented in `vendor/tenover/PATCHES.md`: bundled protoc, battery level
