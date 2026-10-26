@@ -43,7 +43,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `settings.rs` – `~/Library/Application Support/OpenLaunch Connect/settings.json` (reads old GSProR10Connect/R10 Bridge settings as a fallback);
     `migrate_data_dir_in` moves the old "OpenR10 Connect" folder in while the data folder has no `shots.jsonl`
     or a move is pending (`migration.pending`; entry by entry, `shots.jsonl` last, a clash keeps ours as
-    `<name>.before-move`, going on keeps newer entries and joins the histories)
+    `<name>.before-move`, going on keeps entries changed after the marker and joins the histories once)
   - `instance.rs` – one instance per data folder (ADR-012): `Settings::claim_data_dir()` at start (app and CLI, not
     `--test-shot`) locks `instance.lock`, then runs the migration in `settings.rs`; a second instance gets
     `AlreadyRunning` and writes nothing (`tests/instance_lock.rs` runs the CLI against a held lock)

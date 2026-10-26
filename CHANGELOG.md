@@ -78,8 +78,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   history; a data folder with a history is never changed. Where both folders held a file of the same name, the one
   from the earlier folder is used and the data folder's own copy is kept as `<name>.before-move` (for example
   `settings.json.before-move`); it can be deleted once everything looks right. A move that could not finish
-  (`migration.pending` in the data folder) goes on at the next start, keeps settings changed since and adds the
-  earlier shots in front of the newer ones.
+  (`migration.pending` in the data folder) goes on at the next start, keeps settings changed since it began and
+  adds the earlier shots in front of the newer ones, once.
 - **GSPro replies:** the player info GSPro sends after a shot (the club in use) is no longer taken as the reply to
   the next shot, which logged that shot as "No direct reply" and could show the GSPro Connect hint for nothing.
 - **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile

@@ -33,10 +33,12 @@ migrate, read settings.
 - Before the first entry moves, a marker `migration.pending` is written into the data folder; it
   is removed only once every entry is in. While it is there, the move goes on at every start,
   whether it was cut short by a crash or stopped by an error (a name it can't take), and also when
-  the data folder has a `shots.jsonl` by then. Going on, an entry the data folder got in the
-  meantime and changed later than the earlier one stays, and the earlier one is kept as
-  `<name>.before-move`; two histories are joined, the earlier lines first. So no shot is left
-  behind and no newer setting is undone.
+  the data folder has a `shots.jsonl` by then. Going on, an entry of the data folder changed after
+  the move began (later than the marker) stays, and the earlier one is kept as
+  `<name>.before-move`; any other clash goes as on a move that never stopped. Two histories are
+  joined, the earlier lines first, written to disk before the earlier file goes, and only once (a
+  history that already starts with the earlier lines isn't joined again). So no shot is left
+  behind or doubled and no setting changed since is undone.
 - Without the marker, a data folder with a `shots.jsonl` is never changed (an earlier folder that
   turns up later is left as it is).
 

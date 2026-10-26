@@ -1,7 +1,8 @@
-//! One instance per data folder (ADR-012), end to end: the real `openlaunch` binary, its own
-//! process-wide claim, against a data folder whose lock another process holds.
+//! One instance per data folder (ADR-012), end to end: the real `openlaunch` binary and its own
+//! process-wide claim, as the second instance and as the first.
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -43,6 +44,11 @@ fn names(dir: &Path) -> Vec<String> {
     names
 }
 
+/// The lock file in the data folder `dir`, opened as the app opens it.
+fn open_lock(dir: &Path) -> File {
+    OpenOptions::new().read(true).write(true).create(true).truncate(false).open(dir.join(LOCK_FILE)).unwrap()
+}
+
 /// While another process holds the data folder, the CLI says "already running", exits with 1 and
 /// writes nothing.
 #[test]
@@ -50,7 +56,7 @@ fn second_cli_is_turned_away() {
     let home = TempHome::new("second-cli");
     let dir = data_dir(&home.0);
     std::fs::create_dir_all(&dir).unwrap();
-    let lock = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(dir.join(LOCK_FILE)).unwrap();
+    let lock = open_lock(&dir);
     lock.try_lock().unwrap();
     let before = names(&dir);
 
@@ -77,4 +83,45 @@ fn second_cli_is_turned_away() {
     assert!(stderr.contains("already running"), "stderr: {stderr}");
     assert_eq!(names(&dir), before, "the second instance writes nothing");
     drop(lock);
+}
+
+/// The first instance holds the data folder for its whole run, not only while it claims: once it
+/// has started (its start line comes after the claim), the lock is taken from outside, still a
+/// while later, and free again once it has ended.
+#[test]
+fn first_cli_holds_the_lock_while_it_runs() {
+    let home = TempHome::new("first-cli");
+    let dir = data_dir(&home.0);
+    // stdin stays open: the CLI reads commands from it and would end at its end.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_openlaunch"))
+        .env("HOME", &home.0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if line.contains("R10 -> GSPro") {
+                let _ = tx.send(());
+            }
+        }
+    });
+    let taken = || match open_lock(&dir).try_lock() {
+        Ok(()) => false,
+        Err(TryLockError::WouldBlock) => true,
+        Err(TryLockError::Error(e)) => panic!("lock: {e}"),
+    };
+    let started = rx.recv_timeout(Duration::from_secs(20)).is_ok();
+    let held = started && taken();
+    std::thread::sleep(Duration::from_millis(500));
+    let still = child.try_wait().unwrap().is_none() && taken();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(started, "the first instance didn't start");
+    assert!(held, "the first instance doesn't hold the lock after its claim");
+    assert!(still, "the first instance let the lock go while running");
+    assert!(!taken(), "the lock ends with the process");
 }

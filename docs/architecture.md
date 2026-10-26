@@ -217,9 +217,9 @@ while that has no `shots.jsonl`, entry by entry by name with `shots.jsonl` last.
 earlier entry wins and the other is kept as `<name>.before-move`; lock files never move. A marker
 `migration.pending` in the data folder, written before the first entry moves and removed once every
 entry is in, makes the move go on at every start until it is complete – after a crash or an error,
-and even when the data folder has a `shots.jsonl` by then. Going on, an entry changed in the data
-folder after the earlier one stays (the earlier one is kept as `<name>.before-move`) and two
-histories are joined, the earlier lines first. Without the marker, a data folder with a
+and even when the data folder has a `shots.jsonl` by then. Going on, an entry of the data folder
+changed after the move began (later than the marker) stays (the earlier one is kept as
+`<name>.before-move`), and two histories are joined once, the earlier lines first. Without the marker, a data folder with a
 `shots.jsonl` is never changed.
 
 ## Platform
