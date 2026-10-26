@@ -121,7 +121,11 @@ pub fn set_gspro(connected: bool, detail: impl Into<String>) {
     }
 }
 
+/// Adds `line` to the log the Log page shows and COPY LOG copies, masked like every logged line
+/// (home folder → `~`, email addresses → `<email>`): no line gets in unmasked. Lines from
+/// `log::r10`/`gspro`/`info` arrive masked already; masking again changes nothing.
 pub fn push_log(line: String) {
+    let line = crate::log::mask(&line, crate::log::home().as_deref());
     with(|s| {
         if s.log.len() >= LOG_CAPACITY {
             s.log.pop_front();

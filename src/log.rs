@@ -1,8 +1,9 @@
 //! Minimal timestamped console logging.
 //!
-//! Every line is masked where it is written ([`mask`]): the home folder becomes `~` and email
-//! addresses become `<email>`, so stderr, the Log page and a copied log are safe to paste
-//! anywhere. Never log a token or a player's name; the mask is a safety net, not a licence.
+//! Every line is masked where it is written and again where it is stored (`state::push_log`):
+//! the home folder becomes `~` and email addresses become `<email>`. Nothing else is masked, so
+//! look a log over before posting it. Never log a token or a player's name; the mask is a safety
+//! net, not a licence.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -62,27 +63,32 @@ unsafe fn libc_time() -> i64 {
 }
 
 fn emit(line: String) {
-    let line = mask(&line, home().as_deref());
+    emit_with_home(line, home().as_deref());
+}
+
+/// [`emit`] with the home folder given (tests pass their own).
+fn emit_with_home(line: String, home: Option<&str>) {
+    let line = mask(&line, home);
     eprintln!("{line}");
     crate::state::push_log(line);
 }
 
 /// The home folder from `HOME`, if it is set.
-fn home() -> Option<String> {
+pub(crate) fn home() -> Option<String> {
     std::env::var("HOME").ok()
 }
 
 /// `line` as it may be logged: the home folder `home` (e.g. `/Users/jane`, often the real name)
 /// replaced by `~`, and every email-shaped word (one `@`, a dot after it) by `<email>`.
 #[must_use]
-pub fn mask(line: &str, home: Option<&str>) -> String {
+pub(crate) fn mask(line: &str, home: Option<&str>) -> String {
     mask_emails(&tilde_home(line, home))
 }
 
 /// Every `home` in `s` that is a whole path prefix (followed by `/`, the end or a non-name
 /// character) replaced by `~`. No `home`, an empty one or `/` leaves `s` as it is.
 #[must_use]
-pub fn tilde_home(s: &str, home: Option<&str>) -> String {
+pub(crate) fn tilde_home(s: &str, home: Option<&str>) -> String {
     let Some(home) = home.map(|h| h.trim_end_matches('/')).filter(|h| !h.is_empty()) else {
         return s.to_string();
     };
@@ -197,14 +203,21 @@ mod tests {
         gspro("Message: contact a.b@c.de");
         let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
         assert!(last.ends_with("[GSPro] Message: contact <email>"), "{last}");
-        if let Ok(home) = std::env::var("HOME")
-            && !home.is_empty()
-            && home != "/"
-        {
-            info(&format!("Launcher: {home}/Applications/GSPro.app"));
-            let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
-            assert!(last.ends_with("Launcher: ~/Applications/GSPro.app"), "{last}");
-        }
+        emit_with_home(format!("{} Launcher: /Users/jane/Applications/GSPro.app", stamp()), HOME);
+        let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
+        assert!(last.ends_with(" Launcher: ~/Applications/GSPro.app"), "{last}");
+    }
+
+    /// A line put into the log directly is masked as well: the Log page and COPY LOG see no
+    /// line that got past the mask.
+    #[test]
+    fn stored_lines_are_masked() {
+        let _state = crate::test_util::state_lock();
+        crate::state::push_log("extension: mail jane.doe@example.com".into());
+        let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
+        assert_eq!(last, "extension: mail <email>");
+        // Masking twice changes nothing.
+        assert_eq!(mask("~/x <email>", HOME), "~/x <email>");
     }
 
     #[test]

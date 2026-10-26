@@ -1205,7 +1205,12 @@ fn export_csv(shots: &[ShotRecord], format: ExportFormat) -> String {
 }
 
 fn short_path(p: &std::path::Path) -> String {
-    log::tilde_home(&p.display().to_string(), std::env::var("HOME").ok().as_deref())
+    short_path_in(p, log::home().as_deref())
+}
+
+/// `p` for display, with the home folder `home` shown as `~`.
+fn short_path_in(p: &std::path::Path, home: Option<&str>) -> String {
+    log::tilde_home(&p.display().to_string(), home)
 }
 
 #[cfg(test)]
@@ -1498,6 +1503,14 @@ mod tests {
         app.ctx().change_settings(|s| s.clone_from(&edit)).unwrap();
         assert_eq!(app.edit, app.saved);
         assert!(!app.saved.metric);
+    }
+
+    #[test]
+    fn short_path_shows_the_home_folder_as_a_tilde() {
+        let home = Some("/Users/jane");
+        assert_eq!(short_path_in(std::path::Path::new("/Users/jane/Applications/X"), home), "~/Applications/X");
+        assert_eq!(short_path_in(std::path::Path::new("/Applications/X"), home), "/Applications/X");
+        assert_eq!(short_path_in(std::path::Path::new("/Users/jane/Applications/X"), None), "/Users/jane/Applications/X");
     }
 
     /// COPY LOG copies the log and says so next to the button, for a short while.

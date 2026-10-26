@@ -44,8 +44,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
 ### Changed
-- **A log safe to share:** every log line (in the terminal, on the Log page and in the copy) shows your home folder
-  as `~` and email addresses as `<email>`.
+- **Home folder and email addresses masked in the log:** in the terminal, on the Log page and in the copy, the log
+  shows your home folder as `~` and email addresses as `<email>`. Nothing else is masked – look the log over before
+  you post it.
 - **One app at a time:** starting OpenLaunch Connect while it is already running (or the command-line
   `openlaunch` beside it) now shows "OpenLaunch Connect is already running." and stops, instead of a second copy
   writing the same settings and shot history. The running one carries on. The empty file `instance.lock` in the data
