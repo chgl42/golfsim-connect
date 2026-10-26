@@ -66,7 +66,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
-| `log` | Timestamped log to stderr and into `state` | Shallow |
+| `log` | Timestamped log to stderr and into `state`; every line masked where it is written (`log::mask`: home folder → `~`, email addresses → `<email>`) | Shallow; never log a token or a player's name – the mask is a safety net |
 
 ### App
 
@@ -75,6 +75,7 @@ The module `ui` (`src/ui/`):
 | File | What |
 |---|---|
 | `mod.rs` | `run()`/`run_with()`, `App`, the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
+| `help.rs` | The *Help* page: the common fixes and how to ask for help |
 | `page.rs` | The `Page` trait, `AppCtx` (what pages share), the list of pages |
 | `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
 | `overlay.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements |
@@ -83,7 +84,7 @@ The module `ui` (`src/ui/`):
 
 - **Pages** implement the trait `Page` (`id`, `label`, `ui`) and keep their own state
   ([ADR-010](adr/adr-010-pages-own-their-state.md)). `App` holds the list of pages – *Play*,
-  *Shots*, *Log*, *Overlay*, the pages given to `run_with`, *Settings* – and the window, zoom,
+  *Shots*, *Log*, *Overlay*, the pages given to `run_with`, *Help*, *Settings* – and the window, zoom,
   overlays and capture. A page reaches what pages share through `AppCtx`: the settings and
   `change_settings`, the command sender, and for the core pages the Settings page's copy, the
   explorer state and the overlay being moved.
@@ -202,7 +203,7 @@ that list isn't always the session (all time, the preview's sample shot).
 | Shot history | `…/OpenLaunch Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
-| App log | stderr + the last 400 lines in `state` | `log` | English |
+| App log | stderr + the last 400 lines in `state` | `log` | English; home folder and email addresses masked; copied by *COPY LOG*, never written to disk or sent |
 
 ### Single instance and migration
 

@@ -34,6 +34,7 @@ pub mod kit;
 #[cfg(target_os = "macos")]
 mod mac;
 mod overlay;
+mod help;
 mod page;
 
 use kit::*;
@@ -776,7 +777,14 @@ impl Page for SettingsPage {
 }
 
 /// *Log*: the app log, with copying it and the switch for GSPro's messages.
-struct LogPage;
+#[derive(Default)]
+struct LogPage {
+    /// When the log was copied last; "Copied" shows next to the button for [`COPIED_NOTE`].
+    copied: Option<Instant>,
+}
+
+/// How long "Copied" shows after COPY LOG.
+const COPIED_NOTE: Duration = Duration::from_secs(2);
 
 impl Page for LogPage {
     fn id(&self) -> &'static str {
@@ -804,11 +812,24 @@ impl Page for LogPage {
                 let _ = app.change_settings(|s| s.debug = debug);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (rect, _) = ui.allocate_exact_size(vec2(120.0, 26.0), Sense::hover());
-                // For bug reports: the whole log with version, ready to paste.
-                if button(ui, rect, tr("COPY"), Icon::None, false, !lines.is_empty(), tr("The log is empty")) {
+                let label = tr("COPY LOG");
+                let w = ui.painter().layout_no_wrap(label.to_string(), cond(19.0), WHITE).size().x + 40.0;
+                let (rect, _) = ui.allocate_exact_size(vec2(w.max(120.0), 26.0), Sense::hover());
+                // For bug reports: the whole log with version, ready to paste (masked when written).
+                if button(ui, rect, label, Icon::None, false, !lines.is_empty(), tr("The log is empty")) {
                     let header = format!("{APP_NAME} {} ({})\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
                     ui.ctx().copy_text(header + &lines.join("\n"));
+                    self.copied = Some(Instant::now());
+                }
+                // A short note that it worked, left of the button.
+                match self.copied.map(|at| at.elapsed()) {
+                    Some(shown) if shown < COPIED_NOTE => {
+                        ui.add_space(14.0);
+                        ui.label(RichText::new(tr("Copied")).size(13.0).color(MUTED));
+                        ui.ctx().request_repaint_after(COPIED_NOTE.saturating_sub(shown));
+                    }
+                    Some(_) => self.copied = None,
+                    None => {}
                 }
             });
         });
@@ -1184,11 +1205,7 @@ fn export_csv(shots: &[ShotRecord], format: ExportFormat) -> String {
 }
 
 fn short_path(p: &std::path::Path) -> String {
-    let s = p.display().to_string();
-    match std::env::var("HOME") {
-        Ok(home) if s.starts_with(&home) => format!("~{}", &s[home.len()..]),
-        _ => s,
-    }
+    log::tilde_home(&p.display().to_string(), std::env::var("HOME").ok().as_deref())
 }
 
 #[cfg(test)]
@@ -1481,6 +1498,35 @@ mod tests {
         app.ctx().change_settings(|s| s.clone_from(&edit)).unwrap();
         assert_eq!(app.edit, app.saved);
         assert!(!app.saved.metric);
+    }
+
+    /// COPY LOG copies the log and says so next to the button, for a short while.
+    #[test]
+    fn copy_log_shows_copied() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        i18n::set(&Language::new("en"));
+        let _state = demo_state();
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+        });
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_page("log");
+        harness.step();
+        assert!(harness.query_by_label("Copied").is_none());
+        harness.get_by_label("COPY LOG").click();
+        harness.step();
+        harness.step();
+        harness.get_by_label("Copied");
+        assert!(harness.state_mut().page_mut::<LogPage>().copied.is_some());
+        // Gone once the note has had its time.
+        harness.state_mut().page_mut::<LogPage>().copied = Instant::now().checked_sub(COPIED_NOTE);
+        harness.step();
+        harness.step();
+        assert!(harness.query_by_label("Copied").is_none());
     }
 
     #[test]

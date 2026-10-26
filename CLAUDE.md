@@ -63,7 +63,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `update.rs` – update check on start (ureq → GitHub releases API, `is_newer`), result in `state.update`, shown as a
     pill in the top bar; opt-out `check_updates`, skipped in demo mode.
   - `launcher.rs` – find/open the GSPro launcher in `~/Applications/CrossOver/…`
-  - `log.rs` – timestamped log to stderr + `state`
+  - `log.rs` – timestamped log to stderr + `state`; `emit` masks every line (`mask`: home folder → `~`, email
+    addresses → `<email>`), so the Log page and COPY LOG get it too. Never log a token or the player's name
   - `ui/` – **the app** (ADR-008), see below
 - `src/bin/openlaunch-connect/main.rs` – the app's binary: only `openlaunch_connect::ui::run()`
   (another crate adds pages with `ui::run_with(pages)`)
@@ -78,7 +79,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   Pages implement the trait `ui::Page` (`id`, `label`, `ui`) and keep their own state (ADR-010, `ui/page.rs`); what they
   share comes through `AppCtx` (`settings()`, `change_settings`, the one way settings change; `commands()`; for the core
   pages `edit`, `explorer`, `moving` and the arrangement operations). The list `page::pages` makes the navigation
-  (Play, Shots, Log, Overlay, extra pages, Settings); a new core page goes there. Tests open a page with
+  (Play, Shots, Log, Overlay, extra pages, Help, Settings); a new core page goes there. The *Help* page
+  (`ui/help.rs`) follows the README's *Troubleshooting* – change both together. Tests open a page with
   `App::show_page("id")` and reach its state with `App::page_mut::<P>()`.
   Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`. The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
@@ -172,7 +174,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   LLVM_PROFDATA=/opt/homebrew/opt/llvm/bin/llvm-profdata` in front).
 - `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot; `OPENLAUNCH_DEMO=range`:
   a 65-shot range session with a full bag of fourteen clubs, `engine::demo_range()`, to try the explorer; on the MacBook:
-  `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=<page id>` (`settings`, `overlay`, `log`, `shots`)
+  `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=<page id>` (`settings`, `overlay`, `log`, `shots`, `help`)
   opens another page; `OPENLAUNCH_SCREENSHOT[_OVERLAY]=<png>` saves the visible window and quits.
 
 ## Code quality
