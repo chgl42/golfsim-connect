@@ -15,7 +15,7 @@ flag and edits in feature code in several places.
 - **A language is data:** a code (lower case, `"de"`), its name in its own language (`"Deutsch"`)
   and a table (`fn(&str) -> Option<&'static str>`, one file with one `match`, e.g.
   `src/i18n/de.rs`). The core's languages are one list, `SHIPPED`; a new language is its table
-  file and one line there. English is the source language: its texts are the keys, it has no
+  file, its `mod` line in `src/i18n/mod.rs` and one line in `SHIPPED`. English is the source language: its texts are the keys, it has no
   table.
 - **Extensions register per language:** `i18n::register(code, table)` adds a table to a language.
   `tr` looks in the core's table of the active language first, then in the registered ones in
@@ -37,7 +37,7 @@ flag and edits in feature code in several places.
 
 ## Consequences
 
-- Positive: a new language is a table file and one line; the picker ("System" plus every
+- Positive: a new language is a table file, a `mod` line and one line in `SHIPPED`; the picker ("System" plus every
   language, each in its own name) and the locale follow without feature code. An extension can
   add texts to a language or a whole language.
 - Negative / trade-offs: `register` and `untranslated` take a code now, `Language` is a code

@@ -61,7 +61,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct; a tile is its kind's id, size and settings as JSON |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
-| `i18n` | `tr()` lookup, languages as data (code, native name, table; English is the source), language switch and locale resolution; tables added by other crates per language (`register`) | One file with one `match` per language (`i18n/de.rs`), one line each in `SHIPPED`, plus registered tables ([ADR-013](adr/adr-013-languages-as-registered-tables.md)) |
+| `i18n` | `tr()` lookup, languages as data (code, native name, table; English is the source), language switch and locale resolution; tables added by other crates per language (`register`) | One file with one `match` per language (`i18n/de.rs`), its `mod` line and one line in `SHIPPED`, plus registered tables ([ADR-013](adr/adr-013-languages-as-registered-tables.md)) |
 | `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `run_with`, `Page`, `AppCtx`, `kit`, the tile kind interface in `explorer`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |

@@ -3,8 +3,8 @@
 //! The log stays English on purpose (support/debugging).
 //!
 //! A language is data: a code (`"de"`), its name in its own language (`"Deutsch"`) and a table
-//! (one file with one `match`, like `de.rs`). The core's languages are listed in [`SHIPPED`];
-//! English is the source language and has no table. Code outside this crate adds texts to a
+//! (one file with one `match`, like `de.rs`). The core's languages are listed in [`SHIPPED`]; a
+//! new one is its table file, its `mod` line below and its entry there. English is the source language and has no table. Code outside this crate adds texts to a
 //! language – or a language of its own – with [`register`] and checks them in a test with
 //! [`untranslated`].
 
@@ -28,8 +28,8 @@ pub const SOURCE: &str = "en";
 pub const NATIVE_NAME: &str = "@native-name";
 
 /// The languages the core ships: code, name in its own language, table (`None`: the source
-/// language). A new language is its table file and one line here; every one is complete (a test
-/// checks each UI text).
+/// language). A new language is its table file, its `mod` line above and one line here; every
+/// one is complete (a test checks each UI text in the shipped table alone).
 const SHIPPED: &[(&str, &str, Option<Table>)] = &[(SOURCE, "English", None), ("de", "Deutsch", Some(de::table))];
 
 /// A language the app has: shipped by the core or added with [`register`].
@@ -289,7 +289,8 @@ mod tests {
         out
     }
 
-    /// Every language the core ships has every UI text.
+    /// Every language the core ships has every UI text – in its own table, not in one registered
+    /// by another test.
     #[test]
     fn every_ui_text_has_a_translation_in_every_shipped_language() {
         let sources = ui_sources();
@@ -297,11 +298,13 @@ mod tests {
         let gui = sources.concat();
         let bridge = [include_str!("../engine.rs"), include_str!("../gspro.rs")].concat();
         let mut checked = 0;
-        for &(code, _, _) in SHIPPED.iter().filter(|l| l.0 != SOURCE) {
+        for &(code, _, table) in SHIPPED.iter().filter(|l| l.0 != SOURCE) {
+            let table = table.unwrap();
             let missing_in = |texts: Vec<&str>| -> Vec<String> {
-                texts.into_iter().filter(|t| text(code, t).is_none()).map(String::from).collect()
+                texts.into_iter().filter(|t| table(t).is_none()).map(String::from).collect()
             };
-            let mut missing = untranslated(code, &sources);
+            let ui_texts: Vec<String> = sources.iter().flat_map(|src| literals(src, "tr(")).map(|t| t.replace("\\n", "\n")).collect();
+            let mut missing = missing_in(ui_texts.iter().map(String::as_str).collect());
             missing.extend(missing_in(literals(&gui, "send_now(")));
             // Status details set by the bridge threads.
             for prefix in ["R10Status::Searching, ", "R10Status::Connected, ", "R10Status::Ready, ", "set_gspro(false, "] {

@@ -50,7 +50,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `i18n/` – UI translation, gettext style: `tr("English text")`. A language is data (ADR-013): code, native name,
     table – `mod.rs` holds the API, the list `SHIPPED` and the resolution (setting code, else the macOS locale by
     prefix, else English); each language's table is one file with one `match` (`de.rs`). A new language is its table
-    file plus one line in `SHIPPED`, no feature code. `tr_detail()` translates status texts with a " (…)" suffix.
+    file plus its `mod` line and one line in `SHIPPED`, no feature code. `tr_detail()` translates status texts with a " (…)" suffix.
     New UI texts always go through `tr()` – otherwise the test `every_ui_text_has_a_translation_in_every_shipped_language`
     (scans every file under `src/ui/`) fails. Other crates add texts with `i18n::register(code, table)` (a new code
     adds a language, named by the table's `NATIVE_NAME` text) and check them with `i18n::untranslated(code, &[sources])`.
