@@ -43,7 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 - **One app at a time:** starting OpenLaunch Connect while it is already running (or the command-line
   `openlaunch` beside it) now shows "OpenLaunch Connect is already running." and stops, instead of a second copy
-  writing the same settings and shot history. The running one carries on.
+  writing the same settings and shot history. The running one carries on. The empty file `instance.lock` in the data
+  folder is what marks the running copy; leave it there.
 - **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
   (`ui::run_with` calls it).
 - **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
@@ -74,7 +75,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - **Shot history kept when the data folder moves:** if the data folder already held only settings, the history in
   the folder of the earlier name (OpenR10 Connect) stayed behind. It now moves in as long as the data folder has no
-  history; a data folder with a history is never changed.
+  history; a data folder with a history is never changed. Where both folders held a file of the same name, the one
+  from the earlier folder is used and the data folder's own copy is kept as `<name>.before-move` (for example
+  `settings.json.before-move`); it can be deleted once everything looks right. A move that could not finish
+  (`migration.pending` in the data folder) goes on at the next start, keeps settings changed since and adds the
+  earlier shots in front of the newer ones.
 - **GSPro replies:** the player info GSPro sends after a shot (the club in use) is no longer taken as the reply to
   the next shot, which logged that shot as "No direct reply" and could show the GSPro Connect hint for nothing.
 - **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile

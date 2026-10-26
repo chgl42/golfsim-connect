@@ -213,9 +213,14 @@ short message, the CLI with "already running" and exit code 1; `--test-shot` tak
 no lock is possible (no `HOME`, the folder can't be made) the app logs it and runs without one.
 
 Migration: the first earlier data folder that exists (`OpenR10 Connect`) moves into the data folder
-while that has no `shots.jsonl`, entry by entry with `shots.jsonl` last, so a move cut short goes on
-at the next start. On a name clash the earlier entry wins and the other is kept as
-`<name>.before-move`; lock files never move. A data folder with a `shots.jsonl` is never changed.
+while that has no `shots.jsonl`, entry by entry by name with `shots.jsonl` last. On a name clash the
+earlier entry wins and the other is kept as `<name>.before-move`; lock files never move. A marker
+`migration.pending` in the data folder, written before the first entry moves and removed once every
+entry is in, makes the move go on at every start until it is complete – after a crash or an error,
+and even when the data folder has a `shots.jsonl` by then. Going on, an entry changed in the data
+folder after the earlier one stays (the earlier one is kept as `<name>.before-move`) and two
+histories are joined, the earlier lines first. Without the marker, a data folder with a
+`shots.jsonl` is never changed.
 
 ## Platform
 

@@ -28,9 +28,17 @@ migrate, read settings.
 - Where there can be no lock (no `HOME`, the folder can't be made), the app logs it and runs as
   before, without one; the migration still runs then, as before the lock.
 - Migration moves the first earlier folder that exists while the data folder has no
-  `shots.jsonl`, entry by entry with `shots.jsonl` last, so a move cut short goes on at the next
-  start. On a name clash the earlier entry wins and the other is kept as `<name>.before-move`.
-  Lock files never move. A data folder with a `shots.jsonl` is never changed.
+  `shots.jsonl`, entry by entry by name with `shots.jsonl` last. On a name clash the earlier entry
+  wins and the other is kept as `<name>.before-move`. Lock files never move.
+- Before the first entry moves, a marker `migration.pending` is written into the data folder; it
+  is removed only once every entry is in. While it is there, the move goes on at every start,
+  whether it was cut short by a crash or stopped by an error (a name it can't take), and also when
+  the data folder has a `shots.jsonl` by then. Going on, an entry the data folder got in the
+  meantime and changed later than the earlier one stays, and the earlier one is kept as
+  `<name>.before-move`; two histories are joined, the earlier lines first. So no shot is left
+  behind and no newer setting is undone.
+- Without the marker, a data folder with a `shots.jsonl` is never changed (an earlier folder that
+  turns up later is left as it is).
 
 ## Consequences
 

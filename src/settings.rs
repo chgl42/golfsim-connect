@@ -19,6 +19,9 @@ const OLD_DATA_DIRS: [&str; 1] = ["OpenR10 Connect"];
 /// The shot history in the data folder; moved last, so the data folder only has it once the rest is there.
 const HISTORY_FILE: &str = "shots.jsonl";
 
+/// In the data folder while a move from an earlier one is under way (see `migrate_data_dir_in`).
+const PENDING_FILE: &str = "migration.pending";
+
 /// Off in tests that drive the app, so they never overwrite the real settings file.
 pub static SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -489,32 +492,46 @@ impl Settings {
     }
 
     /// Moves the data folder of an earlier name into the data folder, so settings and shot history
-    /// carry over. The first earlier folder that exists moves, but only while the data folder has no
-    /// `shots.jsonl`; a data folder with a history is never changed. Entries move one by one with
-    /// `shots.jsonl` last, so a move cut short goes on at the next start. Where both folders hold an
-    /// entry of the same name, the earlier one wins and the other is kept as `<name>.before-move`.
-    /// Lock files are never moved. Only call it with the data folder claimed
-    /// ([`Settings::claim_data_dir`]), so no other instance writes meanwhile.
+    /// carry over. The first earlier folder that exists moves while the data folder has no
+    /// `shots.jsonl` or a move into it is pending (`migration.pending`, written before the move and
+    /// removed once every entry is in); otherwise the data folder isn't changed. Entries move one by
+    /// one with `shots.jsonl` last. Where both folders hold an entry of the same name, the earlier
+    /// one wins and the other is kept as `<name>.before-move` – except when a pending move goes on:
+    /// then an entry the data folder got since (newer) stays and the earlier one is kept as
+    /// `<name>.before-move`, and two histories are joined, the earlier lines first. Lock files are
+    /// never moved. Only call it with the data folder claimed ([`Settings::claim_data_dir`]), so no
+    /// other instance writes meanwhile.
     pub(crate) fn migrate_data_dir_in(home: &Path) {
         let new = Self::dir_in(home, DATA_DIR);
+        let pending = new.join(PENDING_FILE);
         let Some((name, old)) =
             OLD_DATA_DIRS.iter().map(|name| (*name, Self::dir_in(home, name))).find(|(_, dir)| dir.is_dir())
         else {
+            // The earlier folder is gone (moved, or removed by hand): nothing is pending any more.
+            let _ = std::fs::remove_file(&pending);
             return;
         };
-        if new.join(HISTORY_FILE).exists() {
+        let resume = pending.exists();
+        if !resume && new.join(HISTORY_FILE).exists() {
             crate::log::info(&format!("Data folder: \"{DATA_DIR}\" has a shot history, \"{name}\" left as it is"));
             return;
         }
-        match move_entries(&old, &new) {
+        let moved = std::fs::create_dir_all(&new)
+            .and_then(|()| if resume { Ok(()) } else { std::fs::write(&pending, "") })
+            .and_then(|()| move_entries(&old, &new, resume));
+        match moved {
             Ok(n) => {
                 // A lock file was never ours to move; with it gone the old folder can go too.
                 let _ = std::fs::remove_file(old.join(crate::instance::LOCK_FILE));
                 let gone = std::fs::remove_dir(&old).is_ok();
+                let _ = std::fs::remove_file(&pending);
                 let rest = if gone { "" } else { ", the old folder is not empty" };
-                crate::log::info(&format!("Data folder: moved {n} entries from \"{name}\" to \"{DATA_DIR}\"{rest}"));
+                let again = if resume { " (a move cut short, finished)" } else { "" };
+                crate::log::info(&format!("Data folder: moved {n} entries from \"{name}\" to \"{DATA_DIR}\"{again}{rest}"));
             }
-            Err(e) => crate::log::info(&format!("Data folder: moving \"{name}\" to \"{DATA_DIR}\" stopped ({e})")),
+            Err(e) => crate::log::info(&format!(
+                "Data folder: moving \"{name}\" to \"{DATA_DIR}\" stopped ({e}), it goes on at the next start"
+            )),
         }
     }
 
@@ -619,25 +636,53 @@ mod tolerant {
     }
 }
 
-/// Moves every entry of `old` into `new` (created if missing), `shots.jsonl` last, lock files not
-/// at all. An entry of the same name in `new` is kept as `<name>.before-move`. The number moved.
-fn move_entries(old: &Path, new: &Path) -> std::io::Result<usize> {
-    std::fs::create_dir_all(new)?;
+/// Moves every entry of `old` into `new` by name, `shots.jsonl` last, lock and marker files not at all. An
+/// entry of the same name in `new` is kept as `<name>.before-move`; when a pending move goes on
+/// (`resume`), a newer entry in `new` stays and the old one is kept as `<name>.before-move`
+/// instead, and the histories are joined. The number moved.
+fn move_entries(old: &Path, new: &Path, resume: bool) -> std::io::Result<usize> {
     let mut names: Vec<std::ffi::OsString> = std::fs::read_dir(old)?
         .map(|entry| entry.map(|e| e.file_name()))
         .collect::<std::io::Result<_>>()?;
-    names.retain(|name| name != crate::instance::LOCK_FILE);
-    names.sort_by_key(|name| name == HISTORY_FILE);
+    names.retain(|name| name != crate::instance::LOCK_FILE && name != PENDING_FILE);
+    names.sort_by(|a, b| (a == HISTORY_FILE, a).cmp(&(b == HISTORY_FILE, b)));
     for name in &names {
-        let target = new.join(name);
-        if target.symlink_metadata().is_ok() {
-            let mut kept = name.clone();
-            kept.push(".before-move");
+        let (from, target) = (old.join(name), new.join(name));
+        let mut kept = name.clone();
+        kept.push(".before-move");
+        if target.symlink_metadata().is_err() {
+            std::fs::rename(&from, &target)?;
+        } else if resume && name == HISTORY_FILE {
+            join_history(&from, &target)?;
+        } else if resume && is_newer(&target, &from) {
+            std::fs::rename(&from, new.join(kept))?;
+        } else {
             std::fs::rename(&target, new.join(kept))?;
+            std::fs::rename(&from, &target)?;
         }
-        std::fs::rename(old.join(name), &target)?;
     }
     Ok(names.len())
+}
+
+/// Whether `a` was changed after `b`; `false` if either time is unknown.
+fn is_newer(a: &Path, b: &Path) -> bool {
+    let modified = |p: &Path| std::fs::symlink_metadata(p).and_then(|m| m.modified()).ok();
+    matches!((modified(a), modified(b)), (Some(a), Some(b)) if a > b)
+}
+
+/// Joins the earlier history `old` and the data folder's `target` into `target`, the earlier lines
+/// first, then removes `old`. Written next to `target` and renamed over it, so `target` is never
+/// half written; a stop between the rename and the removal would join `old` once more next time.
+fn join_history(old: &Path, target: &Path) -> std::io::Result<()> {
+    let mut joined = std::fs::read(old)?;
+    if !joined.is_empty() && !joined.ends_with(b"\n") {
+        joined.push(b'\n');
+    }
+    joined.extend(std::fs::read(target)?);
+    let tmp = target.with_extension("jsonl.joining");
+    std::fs::write(&tmp, joined)?;
+    std::fs::rename(&tmp, target)?;
+    std::fs::remove_file(old)
 }
 
 #[cfg(test)]
@@ -862,7 +907,8 @@ mod tests {
         assert!(read(home.path(), DATA_DIR, "settings.json.before-move").is_none());
     }
 
-    /// `shots.jsonl` moves last, so a data folder holding it holds the rest too.
+    /// `shots.jsonl` moves last, so a data folder holding it holds the rest too; a move stopped by
+    /// an error leaves the marker, and the next start goes on with it.
     #[test]
     fn history_moves_last() {
         let home = crate::test_util::TempDir::new("settings-migrate-order");
@@ -870,7 +916,7 @@ mod tests {
             put(home.path(), OLD, name, name);
         }
         // A data folder that can't take entries ("z" is a folder there with content) stops the move
-        // before the history: the history is still in the old folder.
+        // before the history: the history is still in the old folder, the move is pending.
         for sub in ["z.before-move", "z"] {
             std::fs::create_dir_all(Settings::dir_in(home.path(), DATA_DIR).join(sub)).unwrap();
             put(home.path(), DATA_DIR, &format!("{sub}/keep"), "");
@@ -878,12 +924,69 @@ mod tests {
         Settings::migrate_data_dir_in(home.path());
         assert_eq!(read(home.path(), OLD, "shots.jsonl").as_deref(), Some("shots.jsonl"));
         assert!(read(home.path(), DATA_DIR, "shots.jsonl").is_none());
-        // Cleared, the next start finishes it.
+        assert!(read(home.path(), DATA_DIR, PENDING_FILE).is_some(), "the move is marked pending");
+        // Cleared, the next start finishes it; the data folder's "z" is newer than the old one and stays.
         std::fs::remove_dir_all(Settings::dir_in(home.path(), DATA_DIR).join("z.before-move")).unwrap();
         Settings::migrate_data_dir_in(home.path());
         assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some("shots.jsonl"));
-        assert_eq!(read(home.path(), DATA_DIR, "z").as_deref(), Some("z"));
+        assert!(Settings::dir_in(home.path(), DATA_DIR).join("z/keep").is_file());
+        assert_eq!(read(home.path(), DATA_DIR, "z.before-move").as_deref(), Some("z"));
+        assert!(read(home.path(), DATA_DIR, PENDING_FILE).is_none(), "nothing pending any more");
         assert!(!Settings::dir_in(home.path(), OLD).exists());
+    }
+
+    /// Sets the time `name` in the data folder `dir` was last changed to an hour ago.
+    fn age(home: &Path, dir: &str, name: &str) {
+        let file = std::fs::File::options().write(true).open(Settings::dir_in(home, dir).join(name)).unwrap();
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
+    }
+
+    /// A move stopped by an error, then a run that changed the settings and recorded a shot: the
+    /// next start goes on (the history in the data folder doesn't stop it), keeps the newer settings
+    /// with the old ones as `settings.json.before-move`, and joins the histories, the old lines first.
+    #[test]
+    fn a_stopped_move_goes_on_and_keeps_newer_entries() {
+        let home = crate::test_util::TempDir::new("settings-migrate-resume");
+        for (name, text) in [("a", "a"), ("settings.json", r#"{"metric":true}"#), ("shots.jsonl", SHOTS)] {
+            put(home.path(), OLD, name, text);
+            age(home.path(), OLD, name);
+        }
+        // "a" can't move in: the data folder has a full "a" and "a.before-move".
+        for sub in ["a.before-move", "a"] {
+            std::fs::create_dir_all(Settings::dir_in(home.path(), DATA_DIR).join(sub)).unwrap();
+            put(home.path(), DATA_DIR, &format!("{sub}/keep"), "");
+        }
+        Settings::migrate_data_dir_in(home.path());
+        assert!(read(home.path(), DATA_DIR, PENDING_FILE).is_some(), "the move is marked pending");
+        assert_eq!(read(home.path(), OLD, "settings.json").as_deref(), Some(r#"{"metric":true}"#));
+
+        // The app ran on: the player changed the settings and a shot was recorded.
+        write_in(home.path(), DATA_DIR, r#"{"metric":false}"#);
+        put(home.path(), DATA_DIR, "shots.jsonl", "{\"shot\":4}\n");
+        std::fs::remove_dir_all(Settings::dir_in(home.path(), DATA_DIR).join("a.before-move")).unwrap();
+        Settings::migrate_data_dir_in(home.path());
+
+        assert!(!Settings::load_in(home.path()).metric, "the newer settings stay");
+        assert_eq!(read(home.path(), DATA_DIR, "settings.json.before-move").as_deref(), Some(r#"{"metric":true}"#));
+        let history = read(home.path(), DATA_DIR, "shots.jsonl").unwrap();
+        assert_eq!(history, format!("{SHOTS}{{\"shot\":4}}\n"), "old lines first, nothing lost");
+        assert!(read(home.path(), DATA_DIR, PENDING_FILE).is_none());
+        assert!(!Settings::dir_in(home.path(), OLD).exists());
+    }
+
+    /// Without a pending move, a data folder with a history stays as it is (the marker is what lets
+    /// a move go on, not the history's absence alone).
+    #[test]
+    fn a_finished_move_leaves_no_marker() {
+        let home = crate::test_util::TempDir::new("settings-migrate-done");
+        put(home.path(), OLD, "shots.jsonl", SHOTS);
+        Settings::migrate_data_dir_in(home.path());
+        assert!(read(home.path(), DATA_DIR, PENDING_FILE).is_none());
+        // An earlier folder that turns up again later is left alone.
+        put(home.path(), OLD, "shots.jsonl", "{\"shot\":9}\n");
+        Settings::migrate_data_dir_in(home.path());
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some(SHOTS));
+        assert_eq!(read(home.path(), OLD, "shots.jsonl").as_deref(), Some("{\"shot\":9}\n"));
     }
 
     /// One value this version doesn't know (a tile kind or overlay item of a newer version, or a
