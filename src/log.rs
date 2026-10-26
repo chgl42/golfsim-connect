@@ -197,6 +197,14 @@ mod tests {
         gspro("Message: contact a.b@c.de");
         let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
         assert!(last.ends_with("[GSPro] Message: contact <email>"), "{last}");
+        if let Ok(home) = std::env::var("HOME")
+            && !home.is_empty()
+            && home != "/"
+        {
+            info(&format!("Launcher: {home}/Applications/GSPro.app"));
+            let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
+            assert!(last.ends_with("Launcher: ~/Applications/GSPro.app"), "{last}");
+        }
     }
 
     #[test]

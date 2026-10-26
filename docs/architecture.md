@@ -203,7 +203,7 @@ that list isn't always the session (all time, the preview's sample shot).
 | Shot history | `…/OpenLaunch Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
-| App log | stderr + the last 400 lines in `state` | `log` | English; home folder and email addresses masked; copied by *COPY LOG*, never written to disk or sent |
+| App log | stderr + the last 400 lines in `state` | `log` | English; home folder and email addresses masked; copied by *COPY LOG*; the app writes no log file and sends it nowhere |
 
 ### Single instance and migration
 

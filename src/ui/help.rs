@@ -10,7 +10,7 @@ use super::kit::{ICON, LABEL, MUTED, SOFT, TILE, cond};
 use super::page::{AppCtx, Page};
 
 /// Where to ask for help: the public repository's issues.
-pub(super) const ISSUES_URL: &str = "https://github.com/chgl42/openlaunch-connect/issues";
+pub(super) const ISSUES_URL: &str = concat!(env!("CARGO_PKG_REPOSITORY"), "/issues");
 
 /// *Help*: the four common fixes and how to ask for help. It has no state of its own.
 pub(super) struct HelpPage;
@@ -98,6 +98,7 @@ mod tests {
     use super::super::{App, BASE_SIZE, setup_style};
     use crate::i18n::{self, Language, tr};
     use crate::settings::{OverlayPos, Settings};
+    use eframe::egui;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
 
@@ -129,6 +130,14 @@ mod tests {
                 tr("Open the issues on GitHub"),
             ] {
                 harness.get_by_label(heading);
+            }
+            if code == "en" {
+                harness.get_by_label("Open the issues on GitHub").click();
+                harness.step();
+                let opened = harness.output().platform_output.commands.iter().any(|c| {
+                    matches!(c, egui::OutputCommand::OpenUrl(open) if open.url == super::ISSUES_URL)
+                });
+                assert!(opened, "the link opens the issues");
             }
             let ids: Vec<&str> = harness.state().pages.iter().map(|p| p.id()).collect();
             assert_eq!(ids[ids.len() - 2..], ["help", "settings"]);

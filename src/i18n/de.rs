@@ -69,7 +69,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "Shot sent but no ball flight: GSPro must be the active window with a ball teed up." => "Schlag gesendet, aber kein Ballflug: GSPro muss das aktive Fenster sein und ein Ball aufgeteet.",
         "CROSSOVER SETUP" => "CROSSOVER EINRICHTEN",
         "GSPro runs in CrossOver and needs a licence for the R10. {app} does the Bluetooth part on the Mac and hands the shots to GSPro over 127.0.0.1:921." => "GSPro läuft in CrossOver und braucht eine Lizenz für den R10. {app} übernimmt Bluetooth auf dem Mac und gibt die Schläge über 127.0.0.1:921 an GSPro.",
-        "To start GSPro from the app, set its launcher in the settings: Find searches ~/Applications/CrossOver/…, Choose … picks it by hand." => "Um GSPro aus der App zu starten, wähle seinen Launcher in den Einstellungen: Suchen durchsucht ~/Applications/CrossOver/…, Auswählen … wählt ihn von Hand.",
+        "To start GSPro from the app, set its launcher in the settings: Find searches ~/Applications/CrossOver/…, Choose … picks it by hand." => "Um GSPro aus der App zu starten, wähle den GSPro-Starter in den Einstellungen: Suchen durchsucht ~/Applications/CrossOver/…, Auswählen … wählt ihn von Hand.",
         "OVERLAY NOT VISIBLE" => "OVERLAY NICHT SICHTBAR",
         "On the Overlay page, give the overlay a place – OFF hides it." => "Gib dem Overlay auf der Overlay-Seite einen Platz – AUS blendet es aus.",
         "Tile overlays step aside while GSPro shows its menus and come back on the range or a course; the status overlay stays." => "Kachel-Overlays treten zur Seite, solange GSPro seine Menüs zeigt, und kommen auf der Range oder einem Platz zurück; das Status-Overlay bleibt.",
