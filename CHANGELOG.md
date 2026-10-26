@@ -47,6 +47,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   folder is what marks the running copy; leave it there.
 - **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
   (`ui::run_with` calls it).
+- **Languages:** the language choice in the settings lists *System* and every language the app has, each in its own
+  language; a new language comes as one translation table. The settings file now stores the language as a code
+  (`"de"`, `"en"`, `"system"`); older files still load, and a code this version doesn't know is kept and follows the
+  system language. Club names (*7-Iron*, *Eisen 7*) are translated like every other text.
+- **For extensions:** `i18n::register` takes a language code with the table (`register("de", table)`), and a table for
+  a code the core doesn't ship adds that language; `i18n::untranslated` takes the code to check. The settings'
+  `Language` is a code instead of an enum, and `i18n::german()` is replaced by `i18n::active()` (the code in use).
 - **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
   pages and tiles since.
 - **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash

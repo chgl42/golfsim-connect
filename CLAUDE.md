@@ -9,7 +9,7 @@ During private development (0.x) the project was called **OpenR10 Connect**; ren
 monitors are planned. The public repo starts at 1.0.0 with a single commit. R10-specific is essentially `engine.rs`; device names ("R10") stay in the UI where the device is meant.
 
 Open-source project (MIT OR Apache-2.0), repo `chgl42/openlaunch-connect`. The maintainer communicates in **German**;
-UI source texts, logs, README, code comments and this file are **English**; the UI is also available in German (`i18n.rs`).
+UI source texts, logs, README, code comments and this file are **English**; the UI is also available in German (`i18n/`).
 Not affiliated with Garmin or GSPro – use trademarks descriptively only.
 
 ## Structure
@@ -47,10 +47,15 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `instance.rs` – one instance per data folder (ADR-012): `Settings::claim_data_dir()` at start (app and CLI, not
     `--test-shot`) locks `instance.lock`, then runs the migration in `settings.rs`; a second instance gets
     `AlreadyRunning` and writes nothing (`tests/instance_lock.rs` runs the CLI against a held lock)
-  - `i18n.rs` – UI translation DE/EN, gettext style: `tr("English text")`, German table in `de()`;
-    `tr_detail()` translates status texts with a " (…)" suffix. New UI texts always go through `tr()` – otherwise the
-    test `every_ui_text_has_a_german_translation` (scans every file under `src/ui/`) fails. Other crates add their
-    German texts with `i18n::register(table)` and check them with `i18n::untranslated(&[sources])`. The log stays English. Language: Settings (System/English/Deutsch).
+  - `i18n/` – UI translation, gettext style: `tr("English text")`. A language is data (ADR-013): code, native name,
+    table – `mod.rs` holds the API, the list `SHIPPED` and the resolution (setting code, else the macOS locale by
+    prefix, else English); each language's table is one file with one `match` (`de.rs`). A new language is its table
+    file plus one line in `SHIPPED`, no feature code. `tr_detail()` translates status texts with a " (…)" suffix.
+    New UI texts always go through `tr()` – otherwise the test `every_ui_text_has_a_translation_in_every_shipped_language`
+    (scans every file under `src/ui/`) fails. Other crates add texts with `i18n::register(code, table)` (a new code
+    adds a language, named by the table's `NATIVE_NAME` text) and check them with `i18n::untranslated(code, &[sources])`.
+    Missing texts fall back to English. The log stays English. Language: Settings (System plus every language; stored as
+    a code, old names `english`/`german` still read).
   - `notify.rs` – macOS notifications (mac-notification-sys, NSUserNotification – works ad-hoc signed):
     `notify::alert(Alert::…, "English text")`, at most once per kind and minute, `ENABLED` from the settings (CLI: off).
     Not testable from a sandboxed shell (no LaunchServices start, "NSNotificationCenter connection invalid") – use the
@@ -149,7 +154,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - README screenshots are rendered offscreen with egui_kittest (no window, no screen recording permission):
   `cargo test --lib readme_screenshots -- --ignored` writes `docs/images/screenshot-*.png`
   (1000×470 @2x, demo status from `demo_state()`), then `python3 tools/banner.py .` for the banner.
-  `OPENLAUNCH_SCREENSHOT_LANG=de OPENLAUNCH_SCREENSHOT_DIR=<dir>` renders the German UI (check that texts fit).
+  `OPENLAUNCH_SCREENSHOT_LANG=<code> OPENLAUNCH_SCREENSHOT_DIR=<dir>` renders the UI in that language, e.g. `de`
+  (check that texts fit).
   Capturing a real window with `screencapture` often fails: wgpu doesn't render occluded windows ("Skipping frame due to occlusion").
 - The UI tests (kittest) are lib tests now and run beside the others: they must not write the real settings
   (`settings::SAVE` off; `demo_state()` does it, set it yourself in tests that don't call it), and those that set up
@@ -182,7 +188,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   `clippy.toml` lets tests use `unwrap`/`expect`.
 - **No formatter:** the code is formatted by hand – never run `cargo fmt`/rustfmt; match the surrounding style.
 - **Definition of Done** for a PR: clippy clean; `cargo test --all-targets` green; new logic has tests; user-visible
-  changes in the CHANGELOG; new UI texts through `tr()` with a German translation; for UI changes the screenshots
+  changes in the CHANGELOG; new UI texts through `tr()` with a text in every shipped language; for UI changes the screenshots
   rendered (`readme_screenshots`) and looked at; Bluetooth, GSPro and overlay paths tested on the MacBook with
   the real setup (checklist: `docs/testing.md`); a decision that shapes the code gets an ADR in `docs/adr/`.
 

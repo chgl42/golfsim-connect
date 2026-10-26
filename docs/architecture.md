@@ -61,7 +61,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct; a tile is its kind's id, size and settings as JSON |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
-| `i18n` | `tr()` lookup, German table, language switch; tables added by other crates (`register`) | One `match`, plus registered tables |
+| `i18n` | `tr()` lookup, languages as data (code, native name, table; English is the source), language switch and locale resolution; tables added by other crates per language (`register`) | One file with one `match` per language (`i18n/de.rs`), one line each in `SHIPPED`, plus registered tables ([ADR-013](adr/adr-013-languages-as-registered-tables.md)) |
 | `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `run_with`, `Page`, `AppCtx`, `kit`, the tile kind interface in `explorer`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |
@@ -189,8 +189,8 @@ that list isn't always the session (all time, the preview's sample shot).
 | `history::PERSIST` | `engine::start` (off in demo mode) | history writes |
 | `settings::SAVE` | tests (off) | `Settings::save` |
 | `gspro::DEBUG` | GUI, CLI | `Link` |
-| `i18n` language | GUI, tests (per thread in unit tests) | `tr` |
-| `i18n` registered tables | `i18n::register` (other crates) | `tr`, `tr_detail`, `untranslated` |
+| `i18n` active language (an index into `languages()`) | GUI, tests (per thread in unit tests) | `tr` |
+| `i18n` registered tables (by language code) | `i18n::register` (other crates) | `tr`, `tr_detail`, `untranslated`, `languages` |
 | `notify::ENABLED` | GUI | `notify::alert` |
 
 ## Data
@@ -264,7 +264,8 @@ can be added without editing the core in many places.
   page sees only the settings and the command sender; no premium marker yet.
 - **UI in the library**: the UI is the module `ui` behind the feature `gui`, its building blocks
   are public (`ui::kit`), and other crates add translations with `i18n::register`
-  ([ADR-008](adr/adr-008-ui-in-the-library.md)), tile kinds with `explorer::register_tile_kind`
+  ([ADR-008](adr/adr-008-ui-in-the-library.md), per language since
+  [ADR-013](adr/adr-013-languages-as-registered-tables.md)), tile kinds with `explorer::register_tile_kind`
   and pages with `ui::run_with`.
 - **Launch monitors**: R10 code and generic code are mixed in `engine` and `mapping`; names like
   `R10Status` are used for generic status. Left until a second device is added (issue #1).

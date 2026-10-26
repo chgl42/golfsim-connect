@@ -1369,8 +1369,8 @@ mod tests {
     fn explorer_states() {
         use egui_kittest::Harness;
 
-        let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") { Language::German } else { Language::English };
-        i18n::set(language);
+        let language = super::super::tests::screenshot_language();
+        i18n::set(&language);
         let _state = super::super::tests::demo_state();
         let keys: Vec<Key> = state::with(|s| s.session.iter().rev().take(2).map(key).collect());
         state::with(|s| s.session.iter_mut().rev().nth(1).unwrap().excluded = true);
@@ -1444,7 +1444,7 @@ mod tests {
             }),
         ];
         for (name, setup) in states {
-            let settings = Settings { overlay: OverlayPos::Off, language, ..Settings::default() };
+            let settings = Settings { overlay: OverlayPos::Off, language: language.clone(), ..Settings::default() };
             let (tx, _rx) = std::sync::mpsc::channel();
             let mut harness = Harness::builder()
                 .with_size(BASE_SIZE)

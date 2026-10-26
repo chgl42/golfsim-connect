@@ -1670,7 +1670,7 @@ mod tests {
     fn impact_shapes() {
         use egui_kittest::Harness;
 
-        i18n::set(Language::English);
+        i18n::set(&Language::new("en"));
         // (HLA, spin axis, path): straight, push-draw, pull-fade, hook, slice.
         let shots = [(0.3, 1.0, 0.5), (4.0, -6.0, 5.0), (-3.5, 7.0, -4.0), (-1.0, -14.0, 3.0), (1.0, 16.0, -6.0)];
         let w = impact_panel_width(false);
@@ -1703,8 +1703,7 @@ mod tests {
         use egui_kittest::Harness;
         use crate::settings::{Tile, TileSize};
 
-        let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") { Language::German } else { Language::English };
-        i18n::set(language);
+        i18n::set(&super::super::tests::screenshot_language());
         let _state = demo_state();
         state::with(|s| s.session = engine::demo_range());
         let tile = |kind, config| Tile::new(kind, TileSize::W2H2).with(&config);
