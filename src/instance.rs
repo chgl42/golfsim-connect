@@ -31,7 +31,8 @@ static CLAIM: OnceLock<Option<File>> = OnceLock::new();
 impl Settings {
     /// Claims the data folder for this process: locks it, then moves an earlier data folder in
     /// (see `migrate_data_dir_in`). Call it at start, before the settings are read and before
-    /// anything writes to the data folder. Calling it again does nothing.
+    /// anything writes to the data folder. A call after a claim or after "no lock possible" does
+    /// nothing; after [`AlreadyRunning`] it tries again.
     ///
     /// Where there can be no lock (no `HOME`, the folder can't be created), it logs that and goes
     /// on without one, as before the lock.
@@ -47,12 +48,19 @@ impl Settings {
             let _ = CLAIM.set(None);
             return Ok(());
         };
-        let home = Path::new(&home);
-        let lock = claim_in(home)?;
+        let lock = claim_data_dir_in(Path::new(&home))?;
         let _ = CLAIM.set(lock);
-        Self::migrate_data_dir_in(home);
         Ok(())
     }
+}
+
+/// [`Settings::claim_data_dir`] under the home folder `home`: locks the data folder, then moves an
+/// earlier one in (also without a lock where there can be none, as before the lock). The lock file,
+/// to be kept open for the whole run.
+pub(crate) fn claim_data_dir_in(home: &Path) -> Result<Option<File>, AlreadyRunning> {
+    let lock = claim_in(home)?;
+    Settings::migrate_data_dir_in(home);
+    Ok(lock)
 }
 
 /// Locks the data folder under `home`, creating it and its lock file if needed. `Ok(None)` (logged)
@@ -139,21 +147,27 @@ mod tests {
         assert!(claim_in(&file_home).unwrap().is_none());
     }
 
-    /// The lock comes first and keeps the moved history from a second instance: it moves nothing.
+    /// The claim locks, then moves the history in; a second claim is turned away and moves nothing.
     #[test]
     fn the_history_moves_only_under_the_lock() {
         let home = TempDir::new("instance-migrate");
         let old = Settings::dir_in(home.path(), "OpenR10 Connect");
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("shots.jsonl"), "{\"shot\":1}\n{\"shot\":2}\n").unwrap();
-        let _first = claim_in(home.path()).unwrap();
+        // Held by another instance: the claim is turned away before it moves anything.
+        let other = claim_in(home.path()).unwrap();
         let before = snapshot(home.path());
-        assert_eq!(claim_in(home.path()).unwrap_err(), AlreadyRunning);
-        assert_eq!(snapshot(home.path()), before, "a second instance moves nothing");
-        Settings::migrate_data_dir_in(home.path());
+        assert_eq!(claim_data_dir_in(home.path()).unwrap_err(), AlreadyRunning);
+        assert_eq!(snapshot(home.path()), before, "no move without the lock");
+        drop(other);
+        let first = claim_data_dir_in(home.path()).unwrap();
+        assert!(first.is_some(), "the first claim holds the lock");
         let new = Settings::dir_in(home.path(), DATA_DIR);
         assert_eq!(std::fs::read_to_string(new.join("shots.jsonl")).unwrap().lines().count(), 2);
         assert!(new.join(LOCK_FILE).is_file());
         assert!(!old.exists());
+        let before = snapshot(home.path());
+        assert_eq!(claim_data_dir_in(home.path()).unwrap_err(), AlreadyRunning);
+        assert_eq!(snapshot(home.path()), before, "a second claim changes nothing");
     }
 }

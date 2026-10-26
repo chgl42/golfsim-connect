@@ -13,7 +13,7 @@ use crate::i18n::Language;
 /// Name of the data folder (settings and shot history).
 pub(crate) const DATA_DIR: &str = "OpenLaunch Connect";
 
-/// Earlier names of the data folder, the one to move first first (see `migrate_data_dir_in`).
+/// Earlier names of the data folder, in the order they are tried (see `migrate_data_dir_in`).
 const OLD_DATA_DIRS: [&str; 1] = ["OpenR10 Connect"];
 
 /// The shot history in the data folder; moved last, so the data folder only has it once the rest is there.

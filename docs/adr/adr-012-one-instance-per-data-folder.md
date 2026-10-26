@@ -26,7 +26,7 @@ migrate, read settings.
   exits with 1. `--test-shot` takes no lock, because it records nothing.
 - The OS releases the lock when the process ends, also on a crash, so it is never stale.
 - Where there can be no lock (no `HOME`, the folder can't be made), the app logs it and runs as
-  before, without one.
+  before, without one; the migration still runs then, as before the lock.
 - Migration moves the first earlier folder that exists while the data folder has no
   `shots.jsonl`, entry by entry with `shots.jsonl` last, so a move cut short goes on at the next
   start. On a name clash the earlier entry wins and the other is kept as `<name>.before-move`.

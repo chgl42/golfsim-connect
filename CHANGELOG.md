@@ -44,6 +44,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **One app at a time:** starting OpenLaunch Connect while it is already running (or the command-line
   `openlaunch` beside it) now shows "OpenLaunch Connect is already running." and stops, instead of a second copy
   writing the same settings and shot history. The running one carries on.
+- **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
+  (`ui::run_with` calls it).
 - **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
   pages and tiles since.
 - **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash
