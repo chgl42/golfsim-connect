@@ -20,7 +20,7 @@ pub trait Page: std::any::Any {
     /// Unique, lower case, e.g. `"sound"`; `OPENLAUNCH_PAGE=<id>` opens the page first.
     fn id(&self) -> &'static str;
     /// The entry in the navigation, in capitals and translated with `tr` (a table of its own
-    /// crate goes in with `i18n::register`).
+    /// crate goes in with `i18n::register`, one per language).
     fn label(&self) -> &'static str;
     /// Draws the page; `ui` is the room below the top bar, inside the page margins.
     fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>);
@@ -144,7 +144,7 @@ mod tests {
 
         let _state = crate::test_util::state_lock();
         crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
-        crate::i18n::set(crate::i18n::Language::English);
+        crate::i18n::set(&crate::i18n::Language::new("en"));
         let drawn = Rc::new(Cell::new(0));
         let page = SoundPage { drawn: drawn.clone() };
         let (tx, _rx) = std::sync::mpsc::channel();

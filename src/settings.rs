@@ -63,7 +63,8 @@ pub struct Settings {
     pub ui_scale: Option<f32>,
     /// macOS notifications for problems (battery, R10 errors, lost connections, undelivered shots).
     pub notifications: bool,
-    /// UI language (the log stays English).
+    /// UI language: `"system"` or a language code (the log stays English). Older builds' names
+    /// read as codes; a code this build doesn't have is kept and follows the system.
     #[serde(deserialize_with = "tolerant::or_default")]
     pub language: Language,
     /// CSV layout chosen last (unused since the export asks each time; kept so the field still loads).
@@ -1082,7 +1083,7 @@ mod tests {
     }
 
     /// An unknown tile size takes only its tile with it, in the explorer and in the tile overlays
-    /// (of the arrangements, too); an unknown overlay position or language is the default.
+    /// (of the arrangements, too); an unknown overlay position, or a language that isn't text, is the default.
     #[test]
     fn unknown_values_drop_only_their_entry() {
         let mut s = Settings { tile_overlays: vec![TileOverlay::default(), TileOverlay::default()], ..Settings::default() };
@@ -1092,13 +1093,25 @@ mod tests {
         v["tile_overlays"][0]["tile"]["size"] = "w9_h9".into();
         v["arrangements"][0]["tiles"][1]["pos"] = "center".into();
         v["overlay"] = "center".into();
-        v["language"] = "klingon".into();
+        v["language"] = 7.into();
         let loaded: Settings = serde_json::from_value(v).unwrap();
         let kinds: Vec<&str> = loaded.explorer.pages[0].tiles.iter().map(|t| t.kind.as_str()).collect();
         assert_eq!(kinds, ["table", "flight"]);
         assert_eq!(loaded.explorer.pages[1..], s.explorer.pages[1..]);
         assert_eq!((loaded.tile_overlays.len(), loaded.arrangements[0].tiles.len()), (1, 1));
         assert_eq!((loaded.overlay, loaded.language), (OverlayPos::default(), Language::default()));
+    }
+
+    /// Older builds' language names read as codes and are saved as codes; a code this build
+    /// doesn't have is kept (it resolves like System, see `i18n`).
+    #[test]
+    fn language_by_code_with_old_names() {
+        for (stored, code) in [("system", "system"), ("english", "en"), ("german", "de"), ("de", "de"), ("fr", "fr")] {
+            let loaded: Settings = serde_json::from_str(&format!(r#"{{"language":"{stored}"}}"#)).unwrap();
+            assert_eq!(loaded.language, Language::new(code), "{stored}");
+            assert_eq!(serde_json::to_value(&loaded).unwrap()["language"], code, "{stored} is saved as {code}");
+        }
+        assert_eq!(serde_json::to_value(Settings::default()).unwrap()["language"], "system");
     }
 
     /// An overlay item this version doesn't know leaves its place empty; the columns stay.

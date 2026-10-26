@@ -74,7 +74,7 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
         return Ok(());
     }
     let settings = Settings::load();
-    i18n::set(settings.language);
+    i18n::set(&settings.language);
     crate::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
     log::info(&format!("{APP_NAME} {} started", env!("CARGO_PKG_VERSION")));
     let tx = engine::start(settings.to_config());
@@ -118,7 +118,7 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
 /// Tells that the app is already running (a second instance, see `Settings::claim_data_dir`).
 /// The settings aren't read here, so the text follows the system language.
 fn show_already_running() {
-    i18n::set(Language::System);
+    i18n::set(&Language::system());
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Info)
         .set_title(APP_NAME)
@@ -613,8 +613,9 @@ impl Page for SettingsPage {
                     .width(128.0)
                     .selected_text(app.edit.language.label())
                     .show_ui(ui, |ui| {
-                        for l in Language::ALL {
-                            ui.selectable_value(&mut app.edit.language, l, l.label());
+                        for l in Language::choices() {
+                            let label = l.label();
+                            ui.selectable_value(&mut app.edit.language, l, label);
                         }
                     });
             });
@@ -731,7 +732,7 @@ impl Page for SettingsPage {
             let edit = app.edit.clone();
             match app.change_settings(|s| s.clone_from(&edit)) {
                 Ok(()) => {
-                    i18n::set(app.settings().language);
+                    i18n::set(&app.settings().language);
                     self.note = Some(if restart {
                         tr("Saved. Address and distance apply after the next start.").into()
                     } else {
@@ -1157,12 +1158,9 @@ fn club_name(code: &str) -> String {
         "SW" => "Sand Wedge".into(),
         "LW" => "Lob Wedge".into(),
         "PT" => "Putter".into(),
-        c if c.len() >= 2 && c.starts_with('W') && i18n::german() => format!("Holz {}", num(c)),
-        c if c.len() >= 2 && c.starts_with('H') && i18n::german() => format!("Hybrid {}", num(c)),
-        c if c.len() >= 2 && c.starts_with('I') && i18n::german() => format!("Eisen {}", num(c)),
-        c if c.len() >= 2 && c.starts_with('W') => format!("{}-Wood", num(c)),
-        c if c.len() >= 2 && c.starts_with('H') => format!("{}-Hybrid", num(c)),
-        c if c.len() >= 2 && c.starts_with('I') => format!("{}-Iron", num(c)),
+        c if c.len() >= 2 && c.starts_with('W') => tr("{n}-Wood").replace("{n}", &num(c)),
+        c if c.len() >= 2 && c.starts_with('H') => tr("{n}-Hybrid").replace("{n}", &num(c)),
+        c if c.len() >= 2 && c.starts_with('I') => tr("{n}-Iron").replace("{n}", &num(c)),
         c => c.to_string(),
     }
 }
@@ -1197,6 +1195,13 @@ fn short_path(p: &std::path::Path) -> String {
 mod tests {
     use super::*;
     use eframe::egui::FontFamily;
+
+    /// The language of the screenshot tests: `OPENLAUNCH_SCREENSHOT_LANG=<code>` (any language
+    /// the app has, e.g. `de`), else English.
+    pub(super) fn screenshot_language() -> Language {
+        let code = std::env::var("OPENLAUNCH_SCREENSHOT_LANG").unwrap_or_default();
+        Language::new(if i18n::languages().iter().any(|l| l.code == code) { &code } else { "en" })
+    }
 
     /// Status as during a real session, for the README screenshots. Hold the returned lock while
     /// the test runs: the lib's tests beside it record shots into the same state.
@@ -1264,18 +1269,15 @@ mod tests {
 
     /// Regenerates the README screenshots offscreen (no window, no screen recording permission):
     /// `cargo test --lib readme_screenshots -- --ignored`
-    /// (`OPENLAUNCH_SCREENSHOT_LANG=de` renders the German UI, e.g. to check that texts fit).
+    /// (`OPENLAUNCH_SCREENSHOT_LANG=<code>`, e.g. `de`, renders the UI in that language, e.g. to
+    /// check that texts fit).
     #[test]
     #[ignore = "writes docs/images; run on demand"]
     fn readme_screenshots() {
         use egui_kittest::Harness;
 
-        let language = if std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref() == Ok("de") {
-            Language::German
-        } else {
-            Language::English
-        };
-        i18n::set(language);
+        let language = screenshot_language();
+        i18n::set(&language);
         let _state = demo_state();
         // Every core page (the Shots page again with a range session below).
         for page in page::pages(Vec::new()).iter().map(|p| p.id()) {
@@ -1284,7 +1286,7 @@ mod tests {
             let settings = Settings {
                 overlay: OverlayPos::TopRight,
                 launcher_path: Some(PathBuf::from(home).join("Applications/CrossOver/GSPro/GSPro.app")),
-                language,
+                language: language.clone(),
                 ..Settings::default()
             };
             let (tx, _rx) = std::sync::mpsc::channel();
@@ -1331,7 +1333,7 @@ mod tests {
             (3, false, "screenshot-analysis.png"),
             (2, true, "screenshot-configure.png"),
         ] {
-            let mut settings = Settings { overlay: OverlayPos::Off, language, ..Settings::default() };
+            let mut settings = Settings { overlay: OverlayPos::Off, language: language.clone(), ..Settings::default() };
             settings.explorer.pages.push(analysis.clone());
             if configure {
                 // Room on the page for the empty tile that adds tiles.
@@ -1400,10 +1402,10 @@ mod tests {
     fn zoomed_window() {
         use egui_kittest::Harness;
 
-        i18n::set(Language::English);
+        i18n::set(&Language::new("en"));
         let _state = demo_state();
         for (page, name) in [("play", "zoomed-play.png"), ("shots", "zoomed-shots.png")] {
-            let settings = Settings { overlay: OverlayPos::Off, language: Language::English, ..Settings::default() };
+            let settings = Settings { overlay: OverlayPos::Off, language: Language::new("en"), ..Settings::default() };
             let (tx, _rx) = std::sync::mpsc::channel();
             let mut harness = Harness::builder()
                 .with_size(vec2(1700.0, 780.0))
@@ -1430,7 +1432,7 @@ mod tests {
     fn large_window() {
         use egui_kittest::Harness;
 
-        i18n::set(Language::English);
+        i18n::set(&Language::new("en"));
         let _state = demo_state();
         for page in page::pages(Vec::new()).iter().map(|p| p.id()) {
             let settings = Settings { overlay: OverlayPos::Off, ui_scale: Some(1.0), ..Settings::default() };
@@ -1530,5 +1532,10 @@ mod tests {
         assert_eq!(club_name("DR"), "Driver");
         assert_eq!(club_name("I7"), "7-Iron");
         assert_eq!(club_name("W3"), "3-Wood");
+        assert_eq!(club_name("H4"), "4-Hybrid");
+        i18n::set(&Language::new("de"));
+        assert_eq!((club_name("I7"), club_name("W3"), club_name("H4")), ("Eisen 7".into(), "Holz 3".into(), "Hybrid 4".into()));
+        assert_eq!(club_name("DR"), "Driver");
+        i18n::set(&Language::new("en"));
     }
 }

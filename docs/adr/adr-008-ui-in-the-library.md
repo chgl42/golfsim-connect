@@ -1,7 +1,8 @@
 # ADR-008: UI in the library
 
 **Date:** 2026-10-23
-**Status:** Accepted
+**Status:** Accepted (translations: the bullet "Translations other crates add to" is superseded by
+[ADR-013](adr-013-languages-as-registered-tables.md) – tables are registered per language)
 
 ## Context
 
