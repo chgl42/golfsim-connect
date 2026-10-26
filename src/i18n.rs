@@ -217,6 +217,7 @@ fn core(en: &str) -> Option<&'static str> {
         "Unknown" => "Unbekannt",
         "Not delivered to GSPro" => "Nicht an GSPro übergeben",
         "Export shots as CSV" => "Schläge als CSV exportieren",
+        "{app} is already running." => "{app} läuft bereits.",
         "Exported {n} shots to {path}" => "{n} Schläge exportiert nach {path}",
         "Export failed: {e}" => "Export fehlgeschlagen: {e}",
 

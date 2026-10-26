@@ -11,7 +11,13 @@ use crate::history::ExportFormat;
 use crate::i18n::Language;
 
 /// Name of the data folder (settings and shot history).
-const DATA_DIR: &str = "OpenLaunch Connect";
+pub(crate) const DATA_DIR: &str = "OpenLaunch Connect";
+
+/// Earlier names of the data folder, the one to move first first (see `migrate_data_dir_in`).
+const OLD_DATA_DIRS: [&str; 1] = ["OpenR10 Connect"];
+
+/// The shot history in the data folder; moved last, so the data folder only has it once the rest is there.
+const HISTORY_FILE: &str = "shots.jsonl";
 
 /// Off in tests that drive the app, so they never overwrite the real settings file.
 pub static SAVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -464,7 +470,7 @@ impl Settings {
     }
 
     /// The data folder `name` under the home folder `home` (a parameter so tests can use a temp dir).
-    fn dir_in(home: &Path, name: &str) -> PathBuf {
+    pub(crate) fn dir_in(home: &Path, name: &str) -> PathBuf {
         let mut p = home.to_path_buf();
         if cfg!(target_os = "macos") {
             p.push("Library/Application Support");
@@ -482,18 +488,33 @@ impl Settings {
         Self::dir(DATA_DIR)
     }
 
-    /// Move the data folder of OpenR10 Connect (the name until 0.7) to the new
-    /// name, so settings and shot history carry over. Call once at startup.
-    pub fn migrate_data_dir() {
-        if let Some(home) = std::env::var_os("HOME") {
-            Self::migrate_data_dir_in(Path::new(&home));
+    /// Moves the data folder of an earlier name into the data folder, so settings and shot history
+    /// carry over. The first earlier folder that exists moves, but only while the data folder has no
+    /// `shots.jsonl`; a data folder with a history is never changed. Entries move one by one with
+    /// `shots.jsonl` last, so a move cut short goes on at the next start. Where both folders hold an
+    /// entry of the same name, the earlier one wins and the other is kept as `<name>.before-move`.
+    /// Lock files are never moved. Only call it with the data folder claimed
+    /// ([`Settings::claim_data_dir`]), so no other instance writes meanwhile.
+    pub(crate) fn migrate_data_dir_in(home: &Path) {
+        let new = Self::dir_in(home, DATA_DIR);
+        let Some((name, old)) =
+            OLD_DATA_DIRS.iter().map(|name| (*name, Self::dir_in(home, name))).find(|(_, dir)| dir.is_dir())
+        else {
+            return;
+        };
+        if new.join(HISTORY_FILE).exists() {
+            crate::log::info(&format!("Data folder: \"{DATA_DIR}\" has a shot history, \"{name}\" left as it is"));
+            return;
         }
-    }
-
-    fn migrate_data_dir_in(home: &Path) {
-        let (new, old) = (Self::dir_in(home, DATA_DIR), Self::dir_in(home, "OpenR10 Connect"));
-        if !new.exists() && old.is_dir() {
-            let _ = std::fs::rename(&old, &new);
+        match move_entries(&old, &new) {
+            Ok(n) => {
+                // A lock file was never ours to move; with it gone the old folder can go too.
+                let _ = std::fs::remove_file(old.join(crate::instance::LOCK_FILE));
+                let gone = std::fs::remove_dir(&old).is_ok();
+                let rest = if gone { "" } else { ", the old folder is not empty" };
+                crate::log::info(&format!("Data folder: moved {n} entries from \"{name}\" to \"{DATA_DIR}\"{rest}"));
+            }
+            Err(e) => crate::log::info(&format!("Data folder: moving \"{name}\" to \"{DATA_DIR}\" stopped ({e})")),
         }
     }
 
@@ -596,6 +617,27 @@ mod tolerant {
         let columns: Vec<[Value; 2]> = list(d)?;
         Ok(columns.into_iter().map(|c| c.map(|v| read(v).flatten())).collect())
     }
+}
+
+/// Moves every entry of `old` into `new` (created if missing), `shots.jsonl` last, lock files not
+/// at all. An entry of the same name in `new` is kept as `<name>.before-move`. The number moved.
+fn move_entries(old: &Path, new: &Path) -> std::io::Result<usize> {
+    std::fs::create_dir_all(new)?;
+    let mut names: Vec<std::ffi::OsString> = std::fs::read_dir(old)?
+        .map(|entry| entry.map(|e| e.file_name()))
+        .collect::<std::io::Result<_>>()?;
+    names.retain(|name| name != crate::instance::LOCK_FILE);
+    names.sort_by_key(|name| name == HISTORY_FILE);
+    for name in &names {
+        let target = new.join(name);
+        if target.symlink_metadata().is_ok() {
+            let mut kept = name.clone();
+            kept.push(".before-move");
+            std::fs::rename(&target, new.join(kept))?;
+        }
+        std::fs::rename(old.join(name), &target)?;
+    }
+    Ok(names.len())
 }
 
 #[cfg(test)]
@@ -741,19 +783,107 @@ mod tests {
         assert_eq!(Settings::load_in(home.path()).gspro_addr, "gspror10:921");
     }
 
-    /// The OpenR10 Connect folder (the name until 0.7) is moved to the new name, unless that exists.
+    /// A file `name` with `text` in the data folder `dir` of `home`.
+    fn put(home: &Path, dir: &str, name: &str, text: &str) {
+        let dir = Settings::dir_in(home, dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+
+    fn read(home: &Path, dir: &str, name: &str) -> Option<String> {
+        std::fs::read_to_string(Settings::dir_in(home, dir).join(name)).ok()
+    }
+
+    const OLD: &str = "OpenR10 Connect";
+    const SHOTS: &str = "{\"shot\":1}\n{\"shot\":2}\n{\"shot\":3}\n";
+
+    /// Fresh move: the OpenR10 Connect folder (the name until 0.7) moves into a missing data
+    /// folder, the old folder is gone and the history keeps every line.
     #[test]
     fn data_folder_of_openr10_connect_is_moved() {
         let home = crate::test_util::TempDir::new("settings-migrate");
-        write_in(home.path(), "OpenR10 Connect", r#"{"metric":false}"#);
+        write_in(home.path(), OLD, r#"{"metric":false}"#);
+        put(home.path(), OLD, "shots.jsonl", SHOTS);
         Settings::migrate_data_dir_in(home.path());
-        assert!(!Settings::dir_in(home.path(), "OpenR10 Connect").exists());
+        assert!(!Settings::dir_in(home.path(), OLD).exists());
         assert!(!Settings::load_in(home.path()).metric);
-        // Once the new folder is there, an old one is left alone.
-        write_in(home.path(), "OpenR10 Connect", r#"{"metric":true}"#);
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").unwrap().lines().count(), 3);
+    }
+
+    /// A data folder with only settings (e.g. written by another build) doesn't strand the history
+    /// in the old folder: the old entries move in, the old one wins a clash, the new one is kept.
+    #[test]
+    fn data_folder_without_history_takes_the_old_one() {
+        let home = crate::test_util::TempDir::new("settings-migrate-partial");
+        write_in(home.path(), OLD, r#"{"metric":false}"#);
+        put(home.path(), OLD, "shots.jsonl", SHOTS);
+        write_in(home.path(), DATA_DIR, r#"{"metric":true}"#);
+        put(home.path(), DATA_DIR, crate::instance::LOCK_FILE, "");
         Settings::migrate_data_dir_in(home.path());
-        assert!(Settings::dir_in(home.path(), "OpenR10 Connect").exists());
+        assert!(!Settings::dir_in(home.path(), OLD).exists());
+        assert!(!Settings::load_in(home.path()).metric, "the old settings win");
+        assert_eq!(read(home.path(), DATA_DIR, "settings.json.before-move").as_deref(), Some(r#"{"metric":true}"#));
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some(SHOTS));
+        assert_eq!(read(home.path(), DATA_DIR, crate::instance::LOCK_FILE).as_deref(), Some(""));
+    }
+
+    /// A data folder with a history is never changed, and the old folder is left as it is.
+    #[test]
+    fn data_folder_with_history_is_left_alone() {
+        let home = crate::test_util::TempDir::new("settings-migrate-has-history");
+        write_in(home.path(), OLD, r#"{"metric":true}"#);
+        put(home.path(), OLD, "shots.jsonl", SHOTS);
+        write_in(home.path(), DATA_DIR, r#"{"metric":false}"#);
+        put(home.path(), DATA_DIR, "shots.jsonl", "{\"shot\":9}\n");
+        Settings::migrate_data_dir_in(home.path());
         assert!(!Settings::load_in(home.path()).metric);
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some("{\"shot\":9}\n"));
+        assert!(read(home.path(), DATA_DIR, "settings.json.before-move").is_none());
+        assert_eq!(read(home.path(), OLD, "shots.jsonl").as_deref(), Some(SHOTS));
+        assert_eq!(read(home.path(), OLD, "settings.json").as_deref(), Some(r#"{"metric":true}"#));
+    }
+
+    /// A move cut short (some entries in the data folder, `shots.jsonl` still in the old one) goes
+    /// on at the next start; lock files stay where they are.
+    #[test]
+    fn interrupted_move_goes_on() {
+        let home = crate::test_util::TempDir::new("settings-migrate-interrupted");
+        // Moved already: the settings. Still in the old folder: another file and the history.
+        write_in(home.path(), DATA_DIR, r#"{"metric":false}"#);
+        put(home.path(), OLD, "notes.txt", "x");
+        put(home.path(), OLD, "shots.jsonl", SHOTS);
+        put(home.path(), OLD, crate::instance::LOCK_FILE, "");
+        Settings::migrate_data_dir_in(home.path());
+        assert!(!Settings::dir_in(home.path(), OLD).exists());
+        assert!(!Settings::load_in(home.path()).metric);
+        assert_eq!(read(home.path(), DATA_DIR, "notes.txt").as_deref(), Some("x"));
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").unwrap().lines().count(), 3);
+        assert!(read(home.path(), DATA_DIR, crate::instance::LOCK_FILE).is_none(), "lock files never move");
+        assert!(read(home.path(), DATA_DIR, "settings.json.before-move").is_none());
+    }
+
+    /// `shots.jsonl` moves last, so a data folder holding it holds the rest too.
+    #[test]
+    fn history_moves_last() {
+        let home = crate::test_util::TempDir::new("settings-migrate-order");
+        for name in ["a", "shots.jsonl", "z", "settings.json"] {
+            put(home.path(), OLD, name, name);
+        }
+        // A data folder that can't take entries ("z" is a folder there with content) stops the move
+        // before the history: the history is still in the old folder.
+        for sub in ["z.before-move", "z"] {
+            std::fs::create_dir_all(Settings::dir_in(home.path(), DATA_DIR).join(sub)).unwrap();
+            put(home.path(), DATA_DIR, &format!("{sub}/keep"), "");
+        }
+        Settings::migrate_data_dir_in(home.path());
+        assert_eq!(read(home.path(), OLD, "shots.jsonl").as_deref(), Some("shots.jsonl"));
+        assert!(read(home.path(), DATA_DIR, "shots.jsonl").is_none());
+        // Cleared, the next start finishes it.
+        std::fs::remove_dir_all(Settings::dir_in(home.path(), DATA_DIR).join("z.before-move")).unwrap();
+        Settings::migrate_data_dir_in(home.path());
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some("shots.jsonl"));
+        assert_eq!(read(home.path(), DATA_DIR, "z").as_deref(), Some("z"));
+        assert!(!Settings::dir_in(home.path(), OLD).exists());
     }
 
     /// One value this version doesn't know (a tile kind or overlay item of a newer version, or a

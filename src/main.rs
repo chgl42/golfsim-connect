@@ -44,10 +44,14 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    openlaunch_connect::settings::Settings::migrate_data_dir();
 
+    // A test shot records nothing, so it runs beside a running bridge.
     if args.test_shot {
         std::process::exit(run_test_shot(&args));
+    }
+    if let Err(e) = openlaunch_connect::settings::Settings::claim_data_dir() {
+        eprintln!("openlaunch: {e}");
+        std::process::exit(1);
     }
 
     log::info(&format!("openlaunch {} – R10 -> GSPro ({})", env!("CARGO_PKG_VERSION"), args.gspro));

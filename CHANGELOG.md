@@ -41,6 +41,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
 ### Changed
+- **One app at a time:** starting OpenLaunch Connect while it is already running (or the command-line
+  `openlaunch` beside it) now shows "OpenLaunch Connect is already running." and stops, instead of a second copy
+  writing the same settings and shot history. The running one carries on.
 - **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
   pages and tiles since.
 - **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash
@@ -67,6 +70,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   shot. The status words are shorter: *No GSPro* and *Not ready*.
 
 ### Fixed
+- **Shot history kept when the data folder moves:** if the data folder already held only settings, the history in
+  the folder of the earlier name (OpenR10 Connect) stayed behind. It now moves in as long as the data folder has no
+  history; a data folder with a history is never changed.
 - **GSPro replies:** the player info GSPro sends after a shot (the club in use) is no longer taken as the reply to
   the next shot, which logged that shot as "No direct reply" and could show the GSPro Connect hint for nothing.
 - **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile
