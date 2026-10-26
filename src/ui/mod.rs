@@ -1519,6 +1519,14 @@ mod tests {
         assert!(harness.query_by_label("Copied").is_none());
         harness.get_by_label("COPY LOG").click();
         harness.step();
+        // On the clipboard: the version header, then the log's lines.
+        let copied = harness.output().platform_output.commands.iter().find_map(|c| match c {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        });
+        let lines: Vec<String> = state::with(|s| s.log.iter().cloned().collect());
+        let header = format!("{APP_NAME} {} ({})\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+        assert_eq!(copied, Some(header + &lines.join("\n")));
         harness.step();
         harness.get_by_label("Copied");
         assert!(harness.state_mut().page_mut::<LogPage>().copied.is_some());
@@ -1527,6 +1535,31 @@ mod tests {
         harness.step();
         harness.step();
         assert!(harness.query_by_label("Copied").is_none());
+    }
+
+    /// With an empty log COPY LOG can't be pressed and says why.
+    #[test]
+    fn copy_log_is_off_while_the_log_is_empty() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::{NodeT, Queryable};
+
+        i18n::set(&Language::new("en"));
+        let _state = demo_state();
+        state::with(|s| s.log.clear());
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+        });
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_page("log");
+        harness.step();
+        assert!(harness.get_by_label("COPY LOG").accesskit_node().is_disabled());
+        harness.get_by_label("COPY LOG").click();
+        harness.step();
+        harness.step();
+        assert!(harness.query_by_label("Copied").is_none());
+        assert!(harness.state_mut().page_mut::<LogPage>().copied.is_none());
     }
 
     #[test]
