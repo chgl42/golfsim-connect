@@ -1199,7 +1199,8 @@ mod tests {
     /// The language of the screenshot tests: `OPENLAUNCH_SCREENSHOT_LANG=<code>` (any language
     /// the app has, e.g. `de`), else English.
     pub(super) fn screenshot_language() -> Language {
-        Language::new(std::env::var("OPENLAUNCH_SCREENSHOT_LANG").as_deref().unwrap_or("en"))
+        let code = std::env::var("OPENLAUNCH_SCREENSHOT_LANG").unwrap_or_default();
+        Language::new(if i18n::languages().iter().any(|l| l.code == code) { &code } else { "en" })
     }
 
     /// Status as during a real session, for the README screenshots. Hold the returned lock while

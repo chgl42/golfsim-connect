@@ -43,7 +43,8 @@ flag and edits in feature code in several places.
 - Negative / trade-offs: `register` and `untranslated` take a code now, `Language` is a code
   instead of an enum and `german()` is gone – a breaking change for extensions. A build older
   than this one reads `"de"` as unknown and shows the default (System), so a German Mac still
-  sees German. A registered language's name lives in its table under a reserved key.
+  sees German; and it saves its default (`"system"`) back, so a forced `"en"` on a German Mac
+  becomes System after one save there. A registered language's name lives in its table under a reserved key.
 
 ## Alternatives considered
 

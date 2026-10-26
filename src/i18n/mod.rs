@@ -62,9 +62,11 @@ pub fn register(code: &'static str, table: Table) {
 #[must_use]
 pub fn languages() -> Vec<Lang> {
     let mut out: Vec<Lang> = SHIPPED.iter().map(|&(code, name, _)| Lang { code, name }).collect();
-    for &(code, table) in tables().iter() {
+    let tables = tables();
+    for &(code, _) in tables.iter() {
         if !out.iter().any(|l| l.code == code) {
-            out.push(Lang { code, name: table(NATIVE_NAME).unwrap_or(code) });
+            let name = tables.iter().filter(|(c, _)| *c == code).find_map(|(_, table)| table(NATIVE_NAME));
+            out.push(Lang { code, name: name.unwrap_or(code) });
         }
     }
     out
@@ -149,11 +151,13 @@ impl Language {
 
     /// The index in [`languages`] this setting means.
     fn resolve(&self) -> usize {
+        self.resolve_with(sys_locale::get_locale().as_deref())
+    }
+
+    /// [`Self::resolve`] with the macOS locale `locale`.
+    fn resolve_with(&self, locale: Option<&str>) -> usize {
         let languages = languages();
-        languages
-            .iter()
-            .position(|l| l.code == self.0)
-            .unwrap_or_else(|| locale_index(&languages, sys_locale::get_locale().as_deref()))
+        languages.iter().position(|l| l.code == self.0).unwrap_or_else(|| locale_index(&languages, locale))
     }
 }
 
@@ -387,12 +391,19 @@ mod tests {
         assert_eq!(locale_index(&languages, Some("ja-JP")), 0, "English");
         assert_eq!(locale_index(&languages, Some("dee")), 0, "a prefix of the code only before '-'");
         assert_eq!(locale_index(&languages, None), 0);
+        // The longest code wins.
+        let regional = [Lang { code: "en", name: "English" }, Lang { code: "pt", name: "Português" }, Lang { code: "pt-br", name: "Português (Brasil)" }];
+        assert_eq!(locale_index(&regional, Some("pt-BR")), 2);
+        assert_eq!(locale_index(&regional, Some("pt-PT")), 1);
     }
 
     /// A code this build doesn't have resolves like System.
     #[test]
     fn an_unknown_code_follows_the_system() {
-        assert_eq!(Language::new("fr").resolve(), Language::system().resolve());
+        let de = languages().iter().position(|l| l.code == "de").unwrap();
+        assert_eq!(Language::system().resolve_with(Some("de-AT")), de);
+        assert_eq!(Language::new("fr").resolve_with(Some("de-AT")), de);
+        assert_eq!(Language::new("en").resolve_with(Some("de-AT")), 0, "a chosen language beats the locale");
         assert_eq!(Language::new("fr").as_str(), "fr", "kept");
         assert_eq!(Language::new("german"), Language::new("de"));
         assert_eq!(Language::new("english"), Language::new("en"));
