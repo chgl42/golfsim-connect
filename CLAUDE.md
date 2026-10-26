@@ -40,8 +40,13 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `history.rs` – shot history: `shots.jsonl` (append, not in demo mode), per-club stats, CSV export
     (OpenLaunch / Garmin Golf / Awesome Golf layouts), smash factor. Test shots (`Cmd::Shot { test: true }`) go to GSPro
     but not into the history.
-  - `settings.rs` – `~/Library/Application Support/OpenLaunch Connect/settings.json` (`migrate_data_dir()` moves the old
-    "OpenR10 Connect" folder on start; reads old GSProR10Connect/R10 Bridge settings as a fallback)
+  - `settings.rs` – `~/Library/Application Support/OpenLaunch Connect/settings.json` (reads old GSProR10Connect/R10 Bridge settings as a fallback);
+    `migrate_data_dir_in` moves the old "OpenR10 Connect" folder in while the data folder has no `shots.jsonl`
+    or a move is pending (`migration.pending`; entry by entry, `shots.jsonl` last, a clash keeps ours as
+    `<name>.before-move`, going on keeps entries changed after the marker and joins the histories once)
+  - `instance.rs` – one instance per data folder (ADR-012): `Settings::claim_data_dir()` at start (app and CLI, not
+    `--test-shot`) locks `instance.lock`, then runs the migration in `settings.rs`; a second instance gets
+    `AlreadyRunning` and writes nothing (`tests/instance_lock.rs` runs the CLI against a held lock)
   - `i18n.rs` – UI translation DE/EN, gettext style: `tr("English text")`, German table in `de()`;
     `tr_detail()` translates status texts with a " (…)" suffix. New UI texts always go through `tr()` – otherwise the
     test `every_ui_text_has_a_german_translation` (scans every file under `src/ui/`) fails. Other crates add their

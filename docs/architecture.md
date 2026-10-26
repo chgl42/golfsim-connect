@@ -197,11 +197,30 @@ that list isn't always the session (all time, the preview's sample shot).
 
 | What | Where | Written by | Notes |
 |---|---|---|---|
-| Settings | `~/Library/Application Support/OpenLaunch Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; old folder names migrated on start |
+| Instance lock | `…/OpenLaunch Connect/instance.lock` | app and CLI at start (`Settings::claim_data_dir`) | Empty; an exclusive lock held for the whole run, released by the OS (ADR-012) |
+| Settings | `~/Library/Application Support/OpenLaunch Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; an earlier data folder moves in at start (see below) |
 | Shot history | `…/OpenLaunch Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
 | App log | stderr + the last 400 lines in `state` | `log` | English |
+
+### Single instance and migration
+
+The app (`ui::run_with`) and the CLI claim the data folder before anything else touches it
+(`Settings::claim_data_dir`, `instance.rs`, ADR-012): lock `instance.lock`, then migrate, then read
+the settings. A second instance doesn't get the lock and stops without writing – the app with a
+short message, the CLI with "already running" and exit code 1; `--test-shot` takes no lock. Where
+no lock is possible (no `HOME`, the folder can't be made) the app logs it and runs without one.
+
+Migration: the first earlier data folder that exists (`OpenR10 Connect`) moves into the data folder
+while that has no `shots.jsonl`, entry by entry by name with `shots.jsonl` last. On a name clash the
+earlier entry wins and the other is kept as `<name>.before-move`; lock files never move. A marker
+`migration.pending` in the data folder, written before the first entry moves and removed once every
+entry is in, makes the move go on at every start until it is complete – after a crash or an error,
+and even when the data folder has a `shots.jsonl` by then. Going on, an entry of the data folder
+changed after the move began (later than the marker) stays (the earlier one is kept as
+`<name>.before-move`), and two histories are joined once, the earlier lines first. Without the marker, a data folder with a
+`shots.jsonl` is never changed.
 
 ## Platform
 

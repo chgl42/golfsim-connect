@@ -68,7 +68,11 @@ pub fn run() -> eframe::Result {
 /// # Errors
 /// Returns eframe's error if the window can't be created.
 pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
-    Settings::migrate_data_dir();
+    if Settings::claim_data_dir().is_err() {
+        log::info(&format!("{APP_NAME} is already running; this instance stops"));
+        show_already_running();
+        return Ok(());
+    }
     let settings = Settings::load();
     i18n::set(settings.language);
     crate::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
@@ -109,6 +113,18 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
             Ok(Box::new(App::with_pages(settings, tx, pages)))
         }),
     )
+}
+
+/// Tells that the app is already running (a second instance, see `Settings::claim_data_dir`).
+/// The settings aren't read here, so the text follows the system language.
+fn show_already_running() {
+    i18n::set(Language::System);
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_title(APP_NAME)
+        .set_description(tr("{app} is already running.").replace("{app}", APP_NAME))
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 fn app_icon() -> Arc<egui::IconData> {
