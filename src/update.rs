@@ -125,12 +125,14 @@ mod tests {
     }
 
     /// Apps released before the move ask the old URL; GitHub redirects it to the renamed
-    /// repository. Needs the network.
+    /// repository. The current URL is asked too. Needs the network.
     #[test]
     #[ignore = "network: asks GitHub"]
     fn old_url_still_finds_the_release() {
-        let json = fetch_latest("https://api.github.com/repos/chgl42/openlaunch-connect/releases/latest").unwrap();
-        let release = newer_release(&json, "0.0.0").expect("a release");
-        assert!(release.url.starts_with("https://github.com/chgl42/golfsim-connect/releases/tag/v"), "{}", release.url);
+        for url in ["https://api.github.com/repos/chgl42/openlaunch-connect/releases/latest", LATEST_RELEASE_API] {
+            let json = fetch_latest(url).unwrap();
+            let release = newer_release(&json, "0.0.0").expect("a release");
+            assert!(release.url.starts_with("https://github.com/chgl42/golfsim-connect/releases/tag/v"), "{url}: {}", release.url);
+        }
     }
 }
