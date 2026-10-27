@@ -66,7 +66,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check against GitHub releases | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
-| `log` | Timestamped log to stderr and into `state`; each line masked (crate-internal `log::mask`: home folder → `~`, email addresses → `<email>`, nothing else) in `emit` and again in `state::push_log`, the one way into the Log page and COPY LOG – a line an extension pushes there is masked too (masking twice changes nothing) | Shallow; never log a token or a player's name – the mask is a safety net, so look a log over before posting it |
+| `log` | Timestamped log to stderr and into `state`; each line masked (crate-internal `log::mask`: home folder → `~`, email addresses → `<email>`, nothing else) in `emit` and again in `state::push_log`, so `log::*` and a line an extension pushes with `push_log` are masked (masking twice changes nothing); a line written straight into `State.log` is not | Shallow; never log a token or a player's name – the mask is a safety net, so look a log over before posting it |
 
 ### App
 

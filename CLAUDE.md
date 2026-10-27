@@ -65,7 +65,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `launcher.rs` – find/open the GSPro launcher in `~/Applications/CrossOver/…`
   - `log.rs` – timestamped log to stderr + `state`; `emit` and `state::push_log` mask each line (crate-internal
     `mask`: home folder → `~`, email addresses → `<email>`, nothing else – look a log over before posting it), so
-    the Log page and COPY LOG get it too. Never log a token or the player's name
+    the Log page and COPY LOG get it too; a line written straight into `State.log` is not masked. Never log a token
+    or the player's name
   - `ui/` – **the app** (ADR-008), see below
 - `src/bin/openlaunch-connect/main.rs` – the app's binary: only `openlaunch_connect::ui::run()`
   (another crate adds pages with `ui::run_with(pages)`)

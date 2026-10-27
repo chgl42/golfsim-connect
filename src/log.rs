@@ -1,9 +1,9 @@
 //! Minimal timestamped console logging.
 //!
-//! Every line is masked where it is written and again where it is stored (`state::push_log`):
-//! the home folder becomes `~` and email addresses become `<email>`. Nothing else is masked, so
-//! look a log over before posting it. Never log a token or a player's name; the mask is a safety
-//! net, not a licence.
+//! Every line written here is masked, and `state::push_log` masks the lines it stores: the home
+//! folder becomes `~` and email addresses become `<email>`. Nothing else is masked, and a line
+//! written straight into `State::log` is not masked at all, so look a log over before posting it.
+//! Never log a token or a player's name; the mask is a safety net, not a licence.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -206,6 +206,12 @@ mod tests {
         emit_with_home(format!("{} Launcher: /Users/jane/Applications/GSPro.app", stamp()), HOME);
         let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
         assert!(last.ends_with(" Launcher: ~/Applications/GSPro.app"), "{last}");
+    }
+
+    /// The home folder the masks use is `HOME`.
+    #[test]
+    fn home_is_the_home_variable() {
+        assert_eq!(home(), std::env::var("HOME").ok());
     }
 
     /// A line put into the log directly is masked as well: the Log page and COPY LOG see no

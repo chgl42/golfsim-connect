@@ -1511,6 +1511,9 @@ mod tests {
         assert_eq!(short_path_in(std::path::Path::new("/Users/jane/Applications/X"), home), "~/Applications/X");
         assert_eq!(short_path_in(std::path::Path::new("/Applications/X"), home), "/Applications/X");
         assert_eq!(short_path_in(std::path::Path::new("/Users/jane/Applications/X"), None), "/Users/jane/Applications/X");
+        // `short_path` uses the home folder from `HOME`.
+        let p = std::path::Path::new("/Applications/X");
+        assert_eq!(short_path(p), short_path_in(p, log::home().as_deref()));
     }
 
     /// COPY LOG copies the log and says so next to the button, for a short while.

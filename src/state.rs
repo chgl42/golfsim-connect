@@ -122,14 +122,32 @@ pub fn set_gspro(connected: bool, detail: impl Into<String>) {
 }
 
 /// Adds `line` to the log the Log page shows and COPY LOG copies, masked like every logged line
-/// (home folder → `~`, email addresses → `<email>`): no line gets in unmasked. Lines from
-/// `log::r10`/`gspro`/`info` arrive masked already; masking again changes nothing.
+/// (home folder → `~`, email addresses → `<email>`). Lines from `log::r10`/`gspro`/`info` arrive
+/// masked already; masking again changes nothing. A line written straight into [`State::log`]
+/// is not masked.
 pub fn push_log(line: String) {
-    let line = crate::log::mask(&line, crate::log::home().as_deref());
+    push_log_with_home(line, crate::log::home().as_deref());
+}
+
+/// [`push_log`] with the home folder given (tests pass their own).
+fn push_log_with_home(line: String, home: Option<&str>) {
+    let line = crate::log::mask(&line, home);
     with(|s| {
         if s.log.len() >= LOG_CAPACITY {
             s.log.pop_front();
         }
         s.log.push_back(line);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_lines_have_the_home_folder_masked() {
+        let _state = crate::test_util::state_lock();
+        push_log_with_home("x /Users/jane/y".into(), Some("/Users/jane"));
+        assert_eq!(with(|s| s.log.back().cloned()).as_deref(), Some("x ~/y"));
+    }
 }
