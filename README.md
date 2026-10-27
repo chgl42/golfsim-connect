@@ -128,7 +128,9 @@ cd openlaunch-connect
 | **NO GSPRO** / **NOT READY** (amber) | one side is connected, the other isn't ready yet |
 | **NO R10** (red) | searching for the R10 – also shown a few seconds after the R10 is switched off; the app reconnects on its own |
 
-Hover over the status panel for details; the **LOG** page shows everything that happens.
+Hover over the status panel for details; the **LOG** page shows everything that happens. **COPY LOG** copies
+the log with the app's version, ready to paste into an issue; your home folder shows as `~` and email addresses as
+`<email>`. The **HELP** page lists the common fixes (see *Troubleshooting*) and how to ask for help.
 
 **Swing tempo:** next to the buttons the play page shows the tempo of the last swing (backswing : downswing,
 e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none.
@@ -226,6 +228,9 @@ in `shots.jsonl` in the same folder (one JSON object per shot; test shots are no
 
 ## Troubleshooting
 
+The app's **HELP** page has the common fixes in short. Still stuck? Press **COPY LOG** on the Log page and
+[open an issue](https://github.com/chgl42/openlaunch-connect/issues) with the log pasted in.
+
 - **NO R10 stays red** – Is the R10 on? Is iPhone Bluetooth off? Check *System Settings → Privacy & Security → Bluetooth* and allow OpenLaunch Connect.
 - **R10 shows "Device error"** – usually the R10 is not level. Put it on a flat surface.
 - **"No handshake"** – a macOS pairing dialog may be hidden; otherwise switch the R10 off and on.
@@ -234,6 +239,8 @@ in `shots.jsonl` in the same folder (one JSON object per shot; test shots are no
 - **NO GSPRO** – GSPro isn't running or its connect window is closed. Only one OpenConnect client can be connected – quit other connectors (e.g. gspro-r10).
 - **Shot sent but no ball flight** – GSPro must be the active window with a ball teed up.
 - macOS does **not** list the R10 in the Bluetooth settings – that's normal for this kind of BLE device; the app connects on its own.
+- **CrossOver setup** – GSPro runs in CrossOver and needs a licence for the R10; the app does the Bluetooth part and talks to GSPro over the GSPro address (default `127.0.0.1:921`, see *Settings*). For *Start GSPro*, set the launcher in the settings (*Find* searches `~/Applications/CrossOver/…`, *Choose …* picks it by hand).
+- **Overlay not visible** – give it a place on the *Overlay* page (*Off* hides it). Tile overlays step aside while GSPro shows its menus and come back on the range or a course. Moved by hand and lost? Choosing one of the nine places brings it back.
 
 ## Command-line version
 

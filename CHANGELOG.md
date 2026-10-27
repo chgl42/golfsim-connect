@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **Help page:** *HELP* in the navigation lists the common fixes – R10 not found or lost, GSPro not connected,
+  CrossOver setup, overlay not visible – and how to ask for help: copy the log and open an issue on GitHub.
+- **"Copied":** the Log page's button is now *COPY LOG* and shows a short "Copied" note when it has copied the log.
 - **The app knows where GSPro is:** it follows GSPro's log to see whether GSPro shows its menus, the range or a
   course. In the menus the tile overlays step aside so they don't cover GSPro's buttons, and come back on the range
   or a course; the status overlay stays.
@@ -41,6 +44,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
 ### Changed
+- **Home folder and email addresses masked in the log:** in the terminal, on the Log page and in the copy, the log
+  shows your home folder as `~` and email addresses as `<email>`. Nothing else is masked – look the log over before
+  you post it.
 - **One app at a time:** starting OpenLaunch Connect while it is already running (or the command-line
   `openlaunch` beside it) now shows "OpenLaunch Connect is already running." and stops, instead of a second copy
   writing the same settings and shot history. The running one carries on. The empty file `instance.lock` in the data

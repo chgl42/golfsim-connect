@@ -14,8 +14,8 @@ use super::explorer::ExplorerState;
 /// A page of the app: an entry in the navigation and what is drawn below the top bar when it is
 /// chosen. A page keeps its own state in its fields; what pages share comes through [`AppCtx`].
 ///
-/// The core pages are *Play*, *Shots*, *Log*, *Overlay* and *Settings*; another crate adds its
-/// own with [`run_with`](super::run_with).
+/// The core pages are *Play*, *Shots*, *Log*, *Overlay*, *Help* and *Settings*; another crate
+/// adds its own with [`run_with`](super::run_with).
 pub trait Page: std::any::Any {
     /// Unique, lower case, e.g. `"sound"`; `OPENLAUNCH_PAGE=<id>` opens the page first.
     fn id(&self) -> &'static str;
@@ -76,15 +76,16 @@ impl<'a> AppCtx<'a> {
 }
 
 /// The core pages in the order of the navigation, left to right, with `extra` (pages of other
-/// crates) before *Settings*, which stays last.
+/// crates) before *Help* and *Settings*, which stay last.
 pub(super) fn pages(extra: Vec<Box<dyn Page>>) -> Vec<Box<dyn Page>> {
     let mut pages: Vec<Box<dyn Page>> = vec![
         Box::new(super::PlayPage),
         Box::new(super::explorer::ShotsPage::default()),
-        Box::new(super::LogPage),
+        Box::new(super::LogPage::default()),
         Box::new(super::overlay::OverlayPage::default()),
     ];
     pages.extend(extra);
+    pages.push(Box::new(super::help::HelpPage));
     pages.push(Box::new(super::SettingsPage::default()));
     pages
 }
@@ -125,13 +126,13 @@ mod tests {
     }
 
     #[test]
-    fn extra_pages_come_before_settings() {
+    fn extra_pages_come_before_help_and_settings() {
         let drawn = Rc::new(Cell::new(0));
         let pages = pages(vec![Box::new(SoundPage { drawn })]);
         let ids: Vec<&str> = pages.iter().map(|p| p.id()).collect();
-        assert_eq!(ids, ["play", "shots", "log", "overlay", "sound", "settings"]);
+        assert_eq!(ids, ["play", "shots", "log", "overlay", "sound", "help", "settings"]);
         assert_eq!(start_page(&pages, Some("sound")), 4);
-        assert_eq!(start_page(&pages, Some("settings")), 5);
+        assert_eq!(start_page(&pages, Some("settings")), 6);
         assert_eq!(start_page(&pages, Some("nope")), 0, "an unknown page: the first");
         assert_eq!(start_page(&pages, None), 0);
     }
