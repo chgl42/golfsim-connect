@@ -5,6 +5,7 @@
 //! written straight into `State::log` is not masked at all, so look a log over before posting it.
 //! Never log a token or a player's name; the mask is a safety net, not a licence.
 
+use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn stamp() -> String {
@@ -63,13 +64,13 @@ unsafe fn libc_time() -> i64 {
 }
 
 fn emit(line: String) {
-    emit_with_home(line, home().as_deref());
+    emit_with_home(&mut std::io::stderr(), line, home().as_deref());
 }
 
-/// [`emit`] with the home folder given (tests pass their own).
-fn emit_with_home(line: String, home: Option<&str>) {
+/// [`emit`] with the terminal `out` and the home folder given (tests pass their own).
+fn emit_with_home(out: &mut impl Write, line: String, home: Option<&str>) {
     let line = mask(&line, home);
-    eprintln!("{line}");
+    let _ = writeln!(out, "{line}");
     crate::state::push_log(line);
 }
 
@@ -203,9 +204,12 @@ mod tests {
         gspro("Message: contact a.b@c.de");
         let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
         assert!(last.ends_with("[GSPro] Message: contact <email>"), "{last}");
-        emit_with_home(format!("{} Launcher: /Users/jane/Applications/GSPro.app", stamp()), HOME);
+        let mut terminal = Vec::new();
+        emit_with_home(&mut terminal, format!("{} Launcher: /Users/jane/Applications/GSPro.app", stamp()), HOME);
         let last = crate::state::with(|s| s.log.back().cloned()).unwrap();
         assert!(last.ends_with(" Launcher: ~/Applications/GSPro.app"), "{last}");
+        // The terminal gets the masked line too, not only the stored copy.
+        assert_eq!(String::from_utf8(terminal).unwrap(), format!("{last}\n"));
     }
 
     /// The home folder the masks use is `HOME`.

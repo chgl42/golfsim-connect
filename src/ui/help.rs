@@ -42,7 +42,7 @@ impl Page for HelpPage {
                     app(tr("Shot sent but no ball flight: GSPro must be the active window with a ball teed up.")),
                 ]);
                 section(&mut cols[1], tr("CROSSOVER SETUP"), &[
-                    app(tr("GSPro runs in CrossOver and needs a licence for the R10. {app} does the Bluetooth part on the Mac and hands the shots to GSPro over 127.0.0.1:921.")),
+                    app(tr("GSPro runs in CrossOver and needs a licence for the R10. {app} does the Bluetooth part on the Mac and hands the shots to GSPro over the GSPro address (default 127.0.0.1:921).")),
                     app(tr("To start GSPro from the app, set its launcher in the settings: Find searches ~/Applications/CrossOver/…, Choose … picks it by hand.")),
                 ]);
                 section(&mut cols[1], tr("OVERLAY NOT VISIBLE"), &[
@@ -53,7 +53,7 @@ impl Page for HelpPage {
                 let ui = &mut cols[1];
                 tile(ui, tr("ASKING FOR HELP"), |ui| {
                     bullet(ui, &app(tr("Copy the log (COPY LOG on the Log page) and open an issue on GitHub; paste the log into it.")));
-                    bullet(ui, &app(tr("The copied log shows ~ for your home folder and <email> for email addresses.")));
+                    bullet(ui, &app(tr("The copied log shows ~ for your home folder and <email> for email addresses. Nothing else is masked – look the log over before you post it.")));
                     let link = ui.link(RichText::new(tr("Open the issues on GitHub")).size(12.5).color(ICON).underline());
                     if link.on_hover_text(ISSUES_URL).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(ISSUES_URL));

@@ -239,7 +239,7 @@ The app's **HELP** page has the common fixes in short. Still stuck? Press **COPY
 - **NO GSPRO** – GSPro isn't running or its connect window is closed. Only one OpenConnect client can be connected – quit other connectors (e.g. gspro-r10).
 - **Shot sent but no ball flight** – GSPro must be the active window with a ball teed up.
 - macOS does **not** list the R10 in the Bluetooth settings – that's normal for this kind of BLE device; the app connects on its own.
-- **CrossOver setup** – GSPro runs in CrossOver and needs a licence for the R10; the app does the Bluetooth part and talks to GSPro over `127.0.0.1:921`. For *Start GSPro*, set the launcher in the settings (*Find* searches `~/Applications/CrossOver/…`, *Choose …* picks it by hand).
+- **CrossOver setup** – GSPro runs in CrossOver and needs a licence for the R10; the app does the Bluetooth part and talks to GSPro over the GSPro address (default `127.0.0.1:921`, see *Settings*). For *Start GSPro*, set the launcher in the settings (*Find* searches `~/Applications/CrossOver/…`, *Choose …* picks it by hand).
 - **Overlay not visible** – give it a place on the *Overlay* page (*Off* hides it). Tile overlays step aside while GSPro shows its menus and come back on the range or a course. Moved by hand and lost? Choosing one of the nine places brings it back.
 
 ## Command-line version

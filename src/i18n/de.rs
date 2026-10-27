@@ -68,7 +68,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "The address is in the settings (default 127.0.0.1:921) and applies after a restart." => "Die Adresse steht in den Einstellungen (Standard 127.0.0.1:921) und gilt nach einem Neustart.",
         "Shot sent but no ball flight: GSPro must be the active window with a ball teed up." => "Schlag gesendet, aber kein Ballflug: GSPro muss das aktive Fenster sein und ein Ball aufgeteet.",
         "CROSSOVER SETUP" => "CROSSOVER EINRICHTEN",
-        "GSPro runs in CrossOver and needs a licence for the R10. {app} does the Bluetooth part on the Mac and hands the shots to GSPro over 127.0.0.1:921." => "GSPro läuft in CrossOver und braucht eine Lizenz für den R10. {app} übernimmt Bluetooth auf dem Mac und gibt die Schläge über 127.0.0.1:921 an GSPro.",
+        "GSPro runs in CrossOver and needs a licence for the R10. {app} does the Bluetooth part on the Mac and hands the shots to GSPro over the GSPro address (default 127.0.0.1:921)." => "GSPro läuft in CrossOver und braucht eine Lizenz für den R10. {app} übernimmt Bluetooth auf dem Mac und gibt die Schläge über die GSPro-Adresse (Standard 127.0.0.1:921) an GSPro.",
         "To start GSPro from the app, set its launcher in the settings: Find searches ~/Applications/CrossOver/…, Choose … picks it by hand." => "Um GSPro aus der App zu starten, wähle den GSPro-Starter in den Einstellungen: Suchen durchsucht ~/Applications/CrossOver/…, Auswählen … wählt ihn von Hand.",
         "OVERLAY NOT VISIBLE" => "OVERLAY NICHT SICHTBAR",
         "On the Overlay page, give the overlay a place – OFF hides it." => "Gib dem Overlay auf der Overlay-Seite einen Platz – AUS blendet es aus.",
@@ -76,7 +76,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "Moved by hand and lost? Choosing one of the nine places brings it back." => "Von Hand verschoben und verloren? Einer der neun Plätze holt es zurück.",
         "ASKING FOR HELP" => "HILFE BEKOMMEN",
         "Copy the log (COPY LOG on the Log page) and open an issue on GitHub; paste the log into it." => "Kopiere das Log (LOG KOPIEREN auf der Log-Seite) und eröffne ein Issue auf GitHub; füge das Log dort ein.",
-        "The copied log shows ~ for your home folder and <email> for email addresses." => "Im kopierten Log steht ~ für deinen Benutzerordner und <email> für E-Mail-Adressen.",
+        "The copied log shows ~ for your home folder and <email> for email addresses. Nothing else is masked – look the log over before you post it." => "Im kopierten Log steht ~ für deinen Benutzerordner und <email> für E-Mail-Adressen. Sonst wird nichts verborgen – sieh das Log durch, bevor du es veröffentlichst.",
         "Open the issues on GitHub" => "Issues auf GitHub öffnen",
 
         // Shots page
