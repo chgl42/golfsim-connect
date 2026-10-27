@@ -6,42 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.0] – 2026-10-27
+
 ### Added
-- **Help page:** *HELP* in the navigation lists the common fixes – R10 not found or lost, GSPro not connected,
-  CrossOver setup, overlay not visible – and how to ask for help: copy the log and open an issue on GitHub.
-- **"Copied":** the Log page's button is now *COPY LOG* and shows a short "Copied" note when it has copied the log.
-- **The app knows where GSPro is:** it follows GSPro's log to see whether GSPro shows its menus, the range or a
-  course. In the menus the tile overlays step aside so they don't cover GSPro's buttons, and come back on the range
-  or a course; the status overlay stays.
 - **Tile overlay:** a second overlay with one tile of the shots page – dispersion, 3D flight, table, details or
   correlation – on top of GSPro, also in full screen, and click-through like the status overlay. On the Overlay page
   (tab *Tile*) choose its place, size (small, medium, large), background, the tile and its options, and whether it
   shows the whole session or only the shots with the club chosen in GSPro. Where it shares its place with the status
   overlay it sits right under it (above it at the bottom of the screen). A new shot flies in the 3D tile.
-- **Overlays placed by hand:** *Move on screen* on the Overlay page makes the status or the tile overlay grabbable;
-  drag it in GSPro into a gap of its display and let go – it stays there (also on another screen size) and lets clicks
-  through again. Choosing one of the nine places brings it back to that place.
 - **Several tile overlays and saved arrangements:** *+* in the head of the Overlay page adds another tile overlay
   (tabs *Status*, *Tile 1*, *Tile 2*, …; *Remove tile* takes one away); overlays at the same place stack. The name
   in the head is the arrangement in use – click it to switch, rename, save the overlays as a new arrangement (e.g.
   *Range* with dispersion and 3D flight, *Course* with only the status) or delete one. Every change is kept in the
   arrangement in use. With more than one, the Play page shows *Overlay: …* to switch quickly.
-- **Misreads are caught:** a shot with a reading no real shot gives – no spin measured, a launch angle above 60°,
-  a start direction or spin axis far off, a smash factor no club reaches – still goes to GSPro, but is left out of
-  the stats and exports right away (*excluded* on the shots page, *Count* takes it back). The overlay shows the
-  doubtful value in amber, the Play page says *Misread? (spin)*.
-- **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
-  the pin, from GSPro's results (in m or yd).
+- **3D flight tile, interactive:** drag to turn the camera, scroll to zoom, double-click to go back; switching between
+  *Tee*, *Side view* and *Above* glides there. A new shot flies in real time with a tracer, bounces and rolls out, and ▶
+  plays the selected (or latest) shot again.
 - **GSPro's own flight results:** after each shot the app reads GSPro's carry, total, apex, offline and landing angle
   from GSPro's database in the CrossOver bottle (read-only) and keeps them with the shot. The chip *GSPro results*
   on the shots page shows them in the tables, details, dispersion and 3D tiles instead of the estimate, where GSPro
   sent them; the details say *from GSPro*.
-- **3D flight tile, interactive:** drag to turn the camera, scroll to zoom, double-click to go back; switching between
-  *Tee*, *Side view* and *Above* glides there. A new shot flies in real time with a tracer, bounces and rolls out, and ▶
-  plays the selected (or latest) shot again.
+- **Misreads are caught:** a shot with a reading no real shot gives – no spin measured, a launch angle above 60°,
+  a start direction or spin axis far off, a smash factor no club reaches – still goes to GSPro, but is left out of
+  the stats and exports right away (*excluded* on the shots page, *Count* takes it back). The overlay shows the
+  doubtful value in amber, the Play page says *Misread? (spin)*.
+- **The app knows where GSPro is:** it follows GSPro's log to see whether GSPro shows its menus, the range or a
+  course. In the menus the tile overlays step aside so they don't cover GSPro's buttons, and come back on the range
+  or a course; the status overlay stays.
+- **Distance to the pin in the overlay:** after a shot on a course, the overlay shows how far the ball is left from
+  the pin, from GSPro's results (in m or yd).
+- **Overlays placed by hand:** *Move on screen* on the Overlay page makes the status or the tile overlay grabbable;
+  drag it in GSPro into a gap of its display and let go – it stays there (also on another screen size) and lets clicks
+  through again. Choosing one of the nine places brings it back to that place.
 - **Left/right in the tables:** the shots table shows where each ball landed left or right of the target line
   (*Side\**, e.g. *8 R*), the averages per club the mean side ± spread and the *Width\** of the dispersion
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
+- **Help page:** *HELP* in the navigation lists the common fixes – R10 not found or lost, GSPro not connected,
+  CrossOver setup, overlay not visible – and how to ask for help: copy the log and open an issue on GitHub.
+- **"Copied":** the Log page's button is now *COPY LOG* and shows a short "Copied" note when it has copied the log.
 
 ### Changed
 - **OpenLaunch Connect is now GolfSim Connect:** the window, the top bar (a new wordmark), notifications, the
@@ -54,28 +56,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The overlay windows are called *GolfSim Overlay* and *GolfSim Tile Overlay* now: a window capture that picks
   them by title (e.g. in OBS) has to be chosen again once.
 - The own CSV layout is called *GolfSim Connect*, its file `golfsim-connect-shots-<date>.csv`; the columns stay.
-- **Home folder and email addresses masked in the log:** in the terminal, on the Log page and in the copy, the log
-  shows your home folder as `~` and email addresses as `<email>`. Nothing else is masked – look the log over before
-  you post it.
-- **One app at a time:** starting GolfSim Connect while it is already running (or the command-line
-  `openlaunch` beside it) now shows "GolfSim Connect is already running." and stops, instead of a second copy
-  writing the same settings and shot history. The running one carries on. The empty file `instance.lock` in the data
-  folder is what marks the running copy; leave it there.
-- **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
-  (`ui::run_with` calls it); its error `AlreadyRunning` names in `earlier` an app of an earlier name still
-  running. `history::ExportFormat::OpenLaunch` is now `ExportFormat::GolfSimConnect`; settings that store it as
-  `"open_launch"` still load.
-- **Languages:** the language choice in the settings lists *System* and every language the app has, each in its own
-  language; a new language comes as its translation table and two lines in the code. The settings file now stores the language as a code
-  (`"de"`, `"en"`, `"system"`); older files still load, and a code this version doesn't know is kept and follows the
-  system language. Club names (*7-Iron*, *Eisen 7*) are translated like every other text.
-- **For extensions (breaking):** extensions built against the earlier API must be changed. `i18n::register` takes a
-  language code with the table (`register("de", table)`), and a table for a code the core doesn't ship adds that
-  language; `i18n::untranslated` takes the code to check. The settings' `Language` is a code instead of an enum and
-  no longer `Copy`: `Language::ALL` and `Language::is_german` are gone, `Language::choices()` lists the picker's
-  choices, and `i18n::set` takes `&Language`. `i18n::german()` is replaced by `i18n::active()` (the code in use).
-- **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
-  pages and tiles since.
 - **Overlay in tiles:** the overlay shows its values in columns of two – status and club, ball and club speed, smash
   factor and spin, VLA and HLA, distance to the pin and battery – followed by the impact graphics, with symbols
   instead of words (a golf ball with speed lines, a driver, club face and ball, a ball with an arrow around it, a
@@ -91,26 +71,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   per club. *Above* looks diagonally from the top right at 45° (turned more to the side in wide tiles) zoomed onto
   the landing area over a range as wide as a real one, so it fills the tile; the tee view has height lines where the
   flights peak.
-- **Shot shapes:** a shot counts as *push* or *pull* from 3° off the target line (was 2°, about 5 m at 150 m),
-  and the overlay's top view bends the flight only when the shape is named with a curve (from 3° of spin axis), so
-  graphic and name always agree.
 - **Overlay keeps its size:** a message (no R10, no GSPro, shot not delivered) now lies on a band over the values,
   and the last shot's values stay dimmed underneath instead of disappearing; before the first shot each value
   shows a dash. Every column is as wide as its widest value, so the overlay no longer changes width from shot to
   shot. The status words are shorter: *No GSPro* and *Not ready*.
+- **One app at a time:** starting GolfSim Connect while it is already running (or the command-line
+  `openlaunch` beside it) now shows "GolfSim Connect is already running." and stops, instead of a second copy
+  writing the same settings and shot history. The running one carries on. The empty file `instance.lock` in the data
+  folder is what marks the running copy; leave it there.
+- **Shot shapes:** a shot counts as *push* or *pull* from 3° off the target line (was 2°, about 5 m at 150 m),
+  and the overlay's top view bends the flight only when the shape is named with a curve (from 3° of spin axis), so
+  graphic and name always agree.
+- **Shots page:** *CONFIGURE* is now called *CUSTOMIZE*, and *CANCEL* next to *DONE* undoes the changes made to the
+  pages and tiles since.
+- **Languages:** the language choice in the settings lists *System* and every language the app has, each in its own
+  language; a new language comes as its translation table and two lines in the code. The settings file now stores the language as a code
+  (`"de"`, `"en"`, `"system"`); older files still load, and a code this version doesn't know is kept and follows the
+  system language. Club names (*7-Iron*, *Eisen 7*) are translated like every other text.
+- **Home folder and email addresses masked in the log:** in the terminal, on the Log page and in the copy, the log
+  shows your home folder as `~` and email addresses as `<email>`. Nothing else is masked – look the log over before
+  you post it.
+- **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
+  (`ui::run_with` calls it); its error `AlreadyRunning` names in `earlier` an app of an earlier name still
+  running. `history::ExportFormat::OpenLaunch` is now `ExportFormat::GolfSimConnect`; settings that store it as
+  `"open_launch"` still load.
+- **For extensions (breaking):** extensions built against the earlier API must be changed. `i18n::register` takes a
+  language code with the table (`register("de", table)`), and a table for a code the core doesn't ship adds that
+  language; `i18n::untranslated` takes the code to check. The settings' `Language` is a code instead of an enum and
+  no longer `Copy`: `Language::ALL` and `Language::is_german` are gone, `Language::choices()` lists the picker's
+  choices, and `i18n::set` takes `&Language`. `i18n::german()` is replaced by `i18n::active()` (the code in use).
 
 ### Fixed
-- **Shot history kept when the data folder moves:** if the data folder already held only settings, the history in
-  the folder of the earlier name (OpenR10 Connect) stayed behind. It now moves in as long as the data folder has no
-  history; a data folder with a history is never changed. Where both folders held a file of the same name, the one
-  from the earlier folder is used and the data folder's own copy is kept as `<name>.before-move` (for example
-  `settings.json.before-move`); it can be deleted once everything looks right. A move that could not finish
-  (`migration.pending` in the data folder) goes on at the next start, keeps settings changed since it began and
-  adds the earlier shots in front of the newer ones, once.
-- **GSPro replies:** the player info GSPro sends after a shot (the club in use) is no longer taken as the reply to
-  the next shot, which logged that shot as "No direct reply" and could show the GSPro Connect hint for nothing.
-- **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile
-  overlays than the tab shown, and no longer copies the overlay being edited into the arrangement switched to.
 - The overlays covered every window: they now sit right above GSPro – on top while GSPro is in front or the top window
   on its screen (also in full screen), else right under the windows in front of GSPro, GolfSim Connect's own
   too, and hidden while GSPro isn't running. With two screens (e.g. a projector) they stay on GSPro's
@@ -122,12 +113,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - When GSPro Connect got stuck (e.g. still holding the connection of an earlier run), the app said *connected*
   while no shot arrived. After two shots without any answer from GSPro it now shows *No GSPro* with the hint to
   press *Reset GSPro Connect* in GSPro's settings; the hint goes away as soon as GSPro answers again.
-- The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
-  window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
+- **Shot history kept when the data folder moves:** if the data folder already held only settings, the history in
+  the folder of the earlier name (OpenR10 Connect) stayed behind. It now moves in as long as the data folder has no
+  history; a data folder with a history is never changed. Where both folders held a file of the same name, the one
+  from the earlier folder is used and the data folder's own copy is kept as `<name>.before-move` (for example
+  `settings.json.before-move`); it can be deleted once everything looks right. A move that could not finish
+  (`migration.pending` in the data folder) goes on at the next start, keeps settings changed since it began and
+  adds the earlier shots in front of the newer ones, once.
 - Settings no longer reset to the defaults when they contain a value this version doesn't know (e.g. written by a
   newer version): only that tile or overlay item is left out, everything else is kept, and settings this version
   doesn't know at all are saved back unchanged. A settings file that can't be read at all is kept as
   `settings.json.bad` next to it instead of being overwritten.
+- The overlay was cut off at 75 % and 100 % when the main window was zoomed (e.g. *Auto* interface size in a larger
+  window); it now keeps its size whatever the main window's zoom, and stays clear of the menu bar and the Dock.
+- **GSPro replies:** the player info GSPro sends after a shot (the club in use) is no longer taken as the reply to
+  the next shot, which logged that shot as "No direct reply" and could show the GSPro Connect hint for nothing.
+- **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile
+  overlays than the tab shown, and no longer copies the overlay being edited into the arrangement switched to.
 
 ## [1.1.0] – 2026-10-21
 
@@ -200,6 +202,7 @@ First public release. The 0.x versions were developed privately; this release su
 - Metric or imperial display, English or German interface, built-in log with *Copy* for bug reports,
   command-line version `openlaunch`.
 
-[Unreleased]: https://github.com/chgl42/openlaunch-connect/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/chgl42/openlaunch-connect/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/chgl42/openlaunch-connect/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/chgl42/openlaunch-connect/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/chgl42/openlaunch-connect/releases/tag/v1.0.0
