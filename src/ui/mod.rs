@@ -70,7 +70,10 @@ pub fn run() -> eframe::Result {
 /// Returns eframe's error if the window can't be created.
 pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     if let Err(e) = Settings::claim_data_dir() {
-        log::info(&format!("{} is already running; this instance stops", e.earlier.unwrap_or(APP_NAME)));
+        match e.earlier {
+            None => log::info(&format!("{APP_NAME} is already running; this instance stops")),
+            Some(name) => log::info(&format!("{name} is still running; this instance stops")),
+        }
         show_already_running(e);
         return Ok(());
     }

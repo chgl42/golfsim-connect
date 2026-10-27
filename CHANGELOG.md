@@ -47,8 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **OpenLaunch Connect is now GolfSim Connect:** the window, the top bar (a new wordmark), notifications, the
   app (`GolfSim Connect.app`) and the release download (`GolfSim-Connect-macos-arm64.zip`) carry the new name. On
   the first start your settings and shot history move from `OpenLaunch Connect` to the folder `GolfSim Connect`
-  by themselves – quit OpenLaunch Connect before the first start (the install script does that for you). The
-  command-line version stays `openlaunch`.
+  by themselves; while OpenLaunch Connect is still running, the app says so and stops without moving anything (quit
+  it first; the install script does that for you). The command-line version stays `openlaunch`.
 - macOS asks **once more for Bluetooth and notifications** after the update, because the app has a new identity
   (`com.golfsimconnect.app`): allow both again.
 - The overlay windows are called *GolfSim Overlay* and *GolfSim Tile Overlay* now: a window capture that picks

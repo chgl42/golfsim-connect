@@ -62,12 +62,13 @@ if [[ "${1:-}" == "--install" ]]; then
 elif [[ "${1:-}" == "--deploy" ]]; then
   HOST="${2:?usage: ./make-app.sh --deploy <ssh-host>}"
   echo "▸ Deploying to ${HOST}:/Applications …"
-  # Quit a running copy first (same as --install); tar keeps the bundle and its ad-hoc signature intact
-  # and, unlike a download, adds no quarantine flag.
-  for name in "${APP_NAME}" "OpenLaunch Connect"; do
-    ssh "$HOST" "osascript -e 'if application \"${name}\" is running then tell application \"${name}\" to quit' >/dev/null 2>&1 || pkill -x ${BIN} || true"
+  # Quit a running copy first, also one of an earlier name, and remove those bundles (same as --install), in
+  # one ssh; tar keeps the bundle and its ad-hoc signature intact and, unlike a download, adds no quarantine flag.
+  QUIT=""
+  for name in "${APP_NAME}" "OpenLaunch Connect" "OpenR10 Connect"; do
+    QUIT+="osascript -e 'if application \"${name}\" is running then tell application \"${name}\" to quit' >/dev/null 2>&1; "
   done
-  ssh "$HOST" "sleep 1; rm -rf '/Applications/OpenLaunch Connect.app'"
+  ssh "$HOST" "${QUIT}sleep 1; pkill -f 'Connect.app/Contents/MacOS/open(launch|r10)-connect' || true; rm -rf '/Applications/OpenLaunch Connect.app' '/Applications/OpenR10 Connect.app'"
   tar -C target -cf - "${APP_NAME}.app" \
     | ssh "$HOST" "rm -rf '/Applications/${APP_NAME}.app' && tar -C /Applications -xf - && open '/Applications/${APP_NAME}.app'"
   echo "✓ Done: ${HOST}:/Applications/${APP_NAME}.app (started)"

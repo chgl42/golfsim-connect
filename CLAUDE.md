@@ -48,7 +48,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
     `<name>.before-move`, going on keeps entries changed after the marker and joins the histories once)
   - `instance.rs` – one instance per data folder (ADR-012): `Settings::claim_data_dir()` at start (app and CLI, not
     `--test-shot`) locks `instance.lock`, then runs the migration in `settings.rs`; a second instance gets
-    `AlreadyRunning` and writes nothing (also while a build of an earlier name holds its old folder's lock) (`tests/instance_lock.rs` runs the CLI against a held lock)
+    `AlreadyRunning` and writes nothing (also while an app of an earlier name runs: its old folder's lock held, or a pre-lock build's process seen, injectable check) (`tests/instance_lock.rs` runs the CLI against a held lock)
   - `i18n/` – UI translation, gettext style: `tr("English text")`. A language is data (ADR-013): code, native name,
     table – `mod.rs` holds the API, the list `SHIPPED` and the resolution (setting code, else the macOS locale by
     prefix, else English); each language's table is one file with one `match` (`de.rs`). A new language is its table

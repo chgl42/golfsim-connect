@@ -212,9 +212,11 @@ The app (`ui::run_with`) and the CLI claim the data folder before anything else 
 the settings. A second instance doesn't get the lock and stops without writing – the app with a
 short message, the CLI with "already running" and exit code 1; `--test-shot` takes no lock. Where
 no lock is possible (no `HOME`, the folder can't be made) the app logs it and runs without one.
-Before that, the lock of each earlier data folder that has an `instance.lock` is tried: held, a
-build of the earlier name is still running, so nothing moves and the app says that this one is
-still running; taken, it is held until the move is done.
+Before that, an app of an earlier name whose data folder is there is looked for: a process started
+from its bundle (`pgrep -f "<name>.app/Contents/MacOS/"`, the builds from before the lock), then
+the lock of each earlier data folder that has an `instance.lock` is tried. Seen or held, that app
+is still running, so nothing moves and the app says that one is still running; a lock taken is
+held until the move is done.
 
 Migration: the first earlier data folder that exists (`OpenLaunch Connect`, then `OpenR10 Connect`) moves into the data folder
 while that has no `shots.jsonl`, entry by entry by name with `shots.jsonl` last. On a name clash the
