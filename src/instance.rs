@@ -318,4 +318,27 @@ mod tests {
     fn no_process_of_an_unknown_app_is_seen() {
         assert!(!app_running("No Such App 7f3e9a"));
     }
+
+    /// The real check sees a process started from an app's bundle while it runs, and not after it
+    /// ends. A shell script stands in for the app (a copied system binary is killed by macOS).
+    #[cfg(unix)]
+    #[test]
+    fn a_process_started_from_an_app_bundle_is_seen() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("instance-app-running");
+        let bin = dir.path().join("Fake Old 5d2b.app/Contents/MacOS");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = bin.join("fake-old");
+        std::fs::write(&script, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut child = std::process::Command::new(&script).spawn().unwrap();
+        let seen = (0..50).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            app_running("Fake Old 5d2b")
+        });
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(seen, "the running fake app is seen");
+        assert!(!app_running("Fake Old 5d2b"), "the ended fake app is not seen");
+    }
 }

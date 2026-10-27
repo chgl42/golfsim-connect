@@ -63,7 +63,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   folder is what marks the running copy; leave it there.
 - **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
   (`ui::run_with` calls it); its error `AlreadyRunning` names in `earlier` an app of an earlier name still
-  running.
+  running. `history::ExportFormat::OpenLaunch` is now `ExportFormat::GolfSimConnect`; settings that store it as
+  `"open_launch"` still load.
 - **Languages:** the language choice in the settings lists *System* and every language the app has, each in its own
   language; a new language comes as its translation table and two lines in the code. The settings file now stores the language as a code
   (`"de"`, `"en"`, `"system"`); older files still load, and a code this version doesn't know is kept and follows the
