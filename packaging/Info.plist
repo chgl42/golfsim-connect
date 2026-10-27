@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>OpenLaunch Connect</string>
+    <string>GolfSim Connect</string>
     <key>CFBundleDisplayName</key>
-    <string>OpenLaunch Connect</string>
+    <string>GolfSim Connect</string>
     <key>CFBundleIdentifier</key>
-    <string>io.github.chgl42.openlaunchconnect</string>
+    <string>com.golfsimconnect.app</string>
     <key>CFBundleExecutable</key>
     <string>openlaunch-connect</string>
     <key>CFBundleIconFile</key>
@@ -25,6 +25,6 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>OpenLaunch Connect uses Bluetooth to connect to your Garmin Approach R10 and forward shot data to GSPro.</string>
+    <string>GolfSim Connect uses Bluetooth to connect to your Garmin Approach R10 and forward shot data to GSPro.</string>
 </dict>
 </plist>

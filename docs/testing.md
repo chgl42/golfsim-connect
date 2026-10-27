@@ -7,7 +7,7 @@ Done* in `CLAUDE.md`).
 
 **Setup for all of them:** the build under test installed (`./make-app.sh --deploy <host>` or the PR artifact),
 iPhone Bluetooth off, R10 on its stand, GSPro installed in its CrossOver bottle. Follow the log on the *Log* page,
-or start the app with `open -n --stderr /tmp/olc.log "/Applications/OpenLaunch Connect.app"` and `tail -f /tmp/olc.log`.
+or start the app with `open -n --stderr /tmp/olc.log "/Applications/GolfSim Connect.app"` and `tail -f /tmp/olc.log`.
 Each item: setup → action → what you should see (log line or screen). Lines in the log start with the time and
 `[R10]` or `[GSPro]`.
 

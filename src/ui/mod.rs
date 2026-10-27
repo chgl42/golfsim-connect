@@ -41,11 +41,11 @@ use kit::*;
 pub use page::{AppCtx, Page};
 use overlay::*;
 
-const APP_NAME: &str = "OpenLaunch Connect";
+const APP_NAME: &str = "GolfSim Connect";
 const MPH_TO_KMH: f64 = 1.609_344;
 const M_TO_YD: f64 = 1.093_613;
-const OVERLAY_TITLE: &str = "OpenLaunch Overlay";
-const TILE_OVERLAY_TITLE: &str = "OpenLaunch Tile Overlay";
+const OVERLAY_TITLE: &str = "GolfSim Overlay";
+const TILE_OVERLAY_TITLE: &str = "GolfSim Tile Overlay";
 /// Size the layout is designed for. Larger windows zoom the whole UI uniformly, or, with a fixed
 /// interface size, give the pages more room.
 const BASE_SIZE: egui::Vec2 = vec2(1000.0, 470.0);
@@ -69,9 +69,9 @@ pub fn run() -> eframe::Result {
 /// # Errors
 /// Returns eframe's error if the window can't be created.
 pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
-    if Settings::claim_data_dir().is_err() {
-        log::info(&format!("{APP_NAME} is already running; this instance stops"));
-        show_already_running();
+    if let Err(e) = Settings::claim_data_dir() {
+        log::info(&format!("{} is already running; this instance stops", e.earlier.unwrap_or(APP_NAME)));
+        show_already_running(e);
         return Ok(());
     }
     let settings = Settings::load();
@@ -116,14 +116,19 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     )
 }
 
-/// Tells that the app is already running (a second instance, see `Settings::claim_data_dir`).
-/// The settings aren't read here, so the text follows the system language.
-fn show_already_running() {
+/// Tells that the app is already running (a second instance, see `Settings::claim_data_dir`), or
+/// that the app of an earlier name still is. The settings aren't read here, so the text follows
+/// the system language.
+fn show_already_running(e: crate::instance::AlreadyRunning) {
     i18n::set(&Language::system());
+    let text = match e.earlier {
+        None => tr("{app} is already running.").replace("{app}", APP_NAME),
+        Some(name) => tr("{app} is still running.").replace("{app}", name),
+    };
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Info)
         .set_title(APP_NAME)
-        .set_description(tr("{app} is already running.").replace("{app}", APP_NAME))
+        .set_description(text)
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
 }
@@ -269,15 +274,22 @@ impl App {
         p.rect_filled(rect, 0.0, BAR);
         p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, LINE));
 
-        // Wordmark: muted "OPEN" + "LAUNCH" + blue "CONNECT" pill, capitals on the bar's centre line.
+        // Wordmark: white "GOLFSIM" + amber "CONNECT" under a white tracer arc ending in an amber
+        // ball; the capitals a little below the bar's centre line to leave room for the arc.
         let y = rect.center().y;
-        let open = caps_text(p, pos2(rect.left() + 18.0, y), egui::Align::Min, "OPEN", 28.0, MUTED);
-        let launch = caps_text(p, pos2(open.right() + 1.0, y), egui::Align::Min, "LAUNCH", 28.0, WHITE);
-        let galley = p.layout_no_wrap("CONNECT".into(), cond(22.0), WHITE);
-        let pill = Rect::from_min_size(pos2(launch.right() + 6.0, y - 15.0), vec2(galley.size().x + 18.0, 30.0));
-        p.rect_filled(pill, 8.0, ACCENT);
-        let caps_y = pill.center().y - galley.size().y / 2.0 + 22.0 * CAPS_OFFSET;
-        p.galley(pos2(pill.left() + 9.0, caps_y), galley, WHITE);
+        let caps_y = y + 6.0;
+        let golfsim = caps_text(p, pos2(rect.left() + 18.0, caps_y), egui::Align::Min, "GOLFSIM", 28.0, WHITE);
+        let connect = caps_text(p, pos2(golfsim.right() + 6.0, caps_y), egui::Align::Min, "CONNECT", 28.0, AMBER);
+        let (x0, w) = (golfsim.left(), connect.right() - golfsim.left());
+        let base = caps_y - 28.0 * 0.36 - 2.0;
+        let (start, end) = (pos2(x0 + 2.0, base), pos2(x0 + 0.7 * w, base - 4.0));
+        p.add(egui::epaint::QuadraticBezierShape::from_points_stroke(
+            [start, pos2(x0 + 0.35 * w, base - 15.0), end],
+            false,
+            Color32::TRANSPARENT,
+            Stroke::new(1.5, WHITE),
+        ));
+        p.circle_filled(end, 2.8, AMBER);
 
         // Navigation, right-aligned: the last page rightmost.
         let mut x = rect.right() - 18.0;
@@ -678,7 +690,7 @@ impl Page for SettingsPage {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if secondary_button(ui, tr("Test"), true)
-                        .on_hover_text(tr("Sends a notification now. If none appears, allow notifications for OpenLaunch Connect in System Settings → Notifications."))
+                        .on_hover_text(tr("Sends a notification now. If none appears, allow notifications for GolfSim Connect in System Settings → Notifications."))
                         .clicked()
                     {
                         crate::notify::send_now("Notifications are working.");
@@ -1260,7 +1272,7 @@ mod tests {
             });
             s.log.clear();
         });
-        state::push_log(format!("18:09:58 OpenLaunch Connect {} started", env!("CARGO_PKG_VERSION")));
+        state::push_log(format!("18:09:58 GolfSim Connect {} started", env!("CARGO_PKG_VERSION")));
         for line in [
             "18:09:58 [R10]   Searching for R10 … (switch it on; turn off iPhone Bluetooth so it doesn't grab the R10)",
             "18:10:01 [R10]   Bluetooth connected (E4:51:2A:7C:19:0B)",

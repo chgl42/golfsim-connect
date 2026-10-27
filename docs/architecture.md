@@ -1,6 +1,6 @@
 # Architecture
 
-How OpenLaunch Connect is built: what runs where, how a shot travels from the launch monitor to
+How GolfSim Connect is built: what runs where, how a shot travels from the launch monitor to
 GSPro, where data is kept, and where the code is easy or hard to change. Decisions with their
 reasons are recorded as [architecture decision records](adr/README.md).
 
@@ -9,13 +9,13 @@ For building, testing and the workflow, see [CLAUDE.md](../CLAUDE.md) and the [R
 ## Context
 
 GSPro runs on an Apple Silicon Mac under CrossOver. CrossOver doesn't pass Bluetooth through to
-Windows programs, so GSPro can't talk to a Garmin Approach R10 itself. OpenLaunch Connect is a
+Windows programs, so GSPro can't talk to a Garmin Approach R10 itself. GolfSim Connect is a
 native macOS app that does the Bluetooth LE part and sends each shot to GSPro's OpenConnect API
 over TCP.
 
 ```mermaid
 flowchart LR
-  R10["Garmin Approach R10"] -- "Bluetooth LE (CoreBluetooth)" --> App["OpenLaunch Connect<br/>(native macOS)"]
+  R10["Garmin Approach R10"] -- "Bluetooth LE (CoreBluetooth)" --> App["GolfSim Connect<br/>(native macOS)"]
   App -- "OpenConnect JSON<br/>TCP 127.0.0.1:921" --> GSPro["GSPro<br/>(Windows, in CrossOver)"]
   GSPro -. "writes" .-> DB[("GSPro.db<br/>LastShot")]
   DB -. "read-only, polled" .-> App
@@ -198,9 +198,9 @@ that list isn't always the session (all time, the preview's sample shot).
 
 | What | Where | Written by | Notes |
 |---|---|---|---|
-| Instance lock | `…/OpenLaunch Connect/instance.lock` | app and CLI at start (`Settings::claim_data_dir`) | Empty; an exclusive lock held for the whole run, released by the OS (ADR-012) |
-| Settings | `~/Library/Application Support/OpenLaunch Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; an earlier data folder moves in at start (see below) |
-| Shot history | `…/OpenLaunch Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
+| Instance lock | `…/GolfSim Connect/instance.lock` | app and CLI at start (`Settings::claim_data_dir`) | Empty; an exclusive lock held for the whole run, released by the OS (ADR-012) |
+| Settings | `~/Library/Application Support/GolfSim Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; an earlier data folder moves in at start (see below) |
+| Shot history | `…/GolfSim Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
 | App log | stderr + the last 400 lines in `state` | `log` | English; home folder and email addresses masked; copied by *COPY LOG*; the app writes no log file and sends it nowhere |
@@ -212,8 +212,11 @@ The app (`ui::run_with`) and the CLI claim the data folder before anything else 
 the settings. A second instance doesn't get the lock and stops without writing – the app with a
 short message, the CLI with "already running" and exit code 1; `--test-shot` takes no lock. Where
 no lock is possible (no `HOME`, the folder can't be made) the app logs it and runs without one.
+Before that, the lock of each earlier data folder that has an `instance.lock` is tried: held, a
+build of the earlier name is still running, so nothing moves and the app says that this one is
+still running; taken, it is held until the move is done.
 
-Migration: the first earlier data folder that exists (`OpenR10 Connect`) moves into the data folder
+Migration: the first earlier data folder that exists (`OpenLaunch Connect`, then `OpenR10 Connect`) moves into the data folder
 while that has no `shots.jsonl`, entry by entry by name with `shots.jsonl` last. On a name clash the
 earlier entry wins and the other is kept as `<name>.before-move`; lock files never move. A marker
 `migration.pending` in the data folder, written before the first entry moves and removed once every

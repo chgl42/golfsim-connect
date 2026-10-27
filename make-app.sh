@@ -1,10 +1,10 @@
 #!/bin/bash
-# Builds "OpenLaunch Connect.app". With --install it is also copied to /Applications;
+# Builds "GolfSim Connect.app". With --install it is also copied to /Applications;
 # with --deploy <ssh-host> it replaces and starts the app on another Mac (e.g. the one running GSPro).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME="OpenLaunch Connect"
+APP_NAME="GolfSim Connect"
 BIN="openlaunch-connect"
 APP="target/${APP_NAME}.app"
 
@@ -42,12 +42,15 @@ codesign --force --deep --sign - "$APP"
 
 if [[ "${1:-}" == "--install" ]]; then
   echo "▸ Installing to /Applications …"
-  # Quit a running copy, otherwise `open` below only brings the old one to the front.
-  osascript -e "if application \"${APP_NAME}\" is running then tell application \"${APP_NAME}\" to quit" 2>/dev/null || true
+  # Quit a running copy, otherwise `open` below only brings the old one to the front; also one of the
+  # earlier name, so it doesn't write its data folder while that moves.
+  for name in "${APP_NAME}" "OpenLaunch Connect"; do
+    osascript -e "if application \"${name}\" is running then tell application \"${name}\" to quit" 2>/dev/null || true
+  done
   sleep 1
   rm -rf "/Applications/${APP_NAME}.app"
   # Remove builds installed under earlier names
-  for old in "OpenR10 Connect" "R10 Bridge" "GSProR10Connect"; do
+  for old in "OpenLaunch Connect" "OpenR10 Connect" "R10 Bridge" "GSProR10Connect"; do
     if [[ -d "/Applications/${old}.app" ]]; then
       echo "  (removing old »${old}.app«)"
       rm -rf "/Applications/${old}.app"

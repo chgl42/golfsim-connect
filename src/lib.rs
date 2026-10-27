@@ -1,4 +1,4 @@
-//! OpenLaunch Connect — open-source macOS bridge from a Garmin Approach R10 (Bluetooth LE)
+//! GolfSim Connect — open-source macOS bridge from a Garmin Approach R10 (Bluetooth LE)
 //! to GSPro's OpenConnect API (e.g. GSPro running under CrossOver).
 //!
 //! R10 ──BLE──> bridge ──TCP 127.0.0.1:921──> GSPro

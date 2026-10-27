@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to OpenLaunch Connect are documented here.
+All notable changes to GolfSim Connect (formerly OpenLaunch Connect) are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
@@ -44,15 +44,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   (left-most to right-most landing). The details' *Side\** is now also at the landing point.
 
 ### Changed
+- **OpenLaunch Connect is now GolfSim Connect:** the window, the top bar (a new wordmark), notifications, the
+  app (`GolfSim Connect.app`) and the release download (`GolfSim-Connect-macos-arm64.zip`) carry the new name. On
+  the first start your settings and shot history move from `OpenLaunch Connect` to the folder `GolfSim Connect`
+  by themselves; while OpenLaunch Connect is still running, the app says so and stops (quit the old one first). The
+  command-line version stays `openlaunch`.
+- macOS asks **once more for Bluetooth and notifications** after the update, because the app has a new identity
+  (`com.golfsimconnect.app`): allow both again.
+- The overlay windows are called *GolfSim Overlay* and *GolfSim Tile Overlay* now: a window capture that picks
+  them by title (e.g. in OBS) has to be chosen again once.
+- The own CSV layout is called *GolfSim Connect*, its file `golfsim-connect-shots-<date>.csv`; the columns stay.
 - **Home folder and email addresses masked in the log:** in the terminal, on the Log page and in the copy, the log
   shows your home folder as `~` and email addresses as `<email>`. Nothing else is masked – look the log over before
   you post it.
-- **One app at a time:** starting OpenLaunch Connect while it is already running (or the command-line
-  `openlaunch` beside it) now shows "OpenLaunch Connect is already running." and stops, instead of a second copy
+- **One app at a time:** starting GolfSim Connect while it is already running (or the command-line
+  `openlaunch` beside it) now shows "GolfSim Connect is already running." and stops, instead of a second copy
   writing the same settings and shot history. The running one carries on. The empty file `instance.lock` in the data
   folder is what marks the running copy; leave it there.
 - **For apps built on the library:** `Settings::claim_data_dir()` replaces `Settings::migrate_data_dir()`
-  (`ui::run_with` calls it).
+  (`ui::run_with` calls it); its error `AlreadyRunning` names in `earlier` an app of an earlier name still
+  running.
 - **Languages:** the language choice in the settings lists *System* and every language the app has, each in its own
   language; a new language comes as its translation table and two lines in the code. The settings file now stores the language as a code
   (`"de"`, `"en"`, `"system"`); older files still load, and a code this version doesn't know is kept and follows the
@@ -100,10 +111,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Overlay page:** switching to another arrangement in the card's head no longer crashes when it has fewer tile
   overlays than the tab shown, and no longer copies the overlay being edited into the arrangement switched to.
 - The overlays covered every window: they now sit right above GSPro – on top while GSPro is in front or the top window
-  on its screen (also in full screen), else right under the windows in front of GSPro, OpenLaunch Connect's own
+  on its screen (also in full screen), else right under the windows in front of GSPro, GolfSim Connect's own
   too, and hidden while GSPro isn't running. With two screens (e.g. a projector) they stay on GSPro's
   screen, wherever the main window is.
-- Overlays could vanish and only come back after clicking OpenLaunch Connect, when its window was on GSPro's screen
+- Overlays could vanish and only come back after clicking GolfSim Connect, when its window was on GSPro's screen
   behind GSPro.
 - A shot hit while GSPro was reconnecting (e.g. after a restart of GSPro) was dropped; it now waits up to 10 s for
   GSPro and is sent as soon as it is back.
