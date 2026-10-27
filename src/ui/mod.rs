@@ -121,16 +121,20 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
 /// the system language.
 fn show_already_running(e: crate::instance::AlreadyRunning) {
     i18n::set(&Language::system());
-    let text = match e.earlier {
-        None => tr("{app} is already running.").replace("{app}", APP_NAME),
-        Some(name) => tr("{app} is still running.").replace("{app}", name),
-    };
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Info)
         .set_title(APP_NAME)
-        .set_description(text)
+        .set_description(already_running_text(e))
         .set_buttons(rfd::MessageButtons::Ok)
         .show();
+}
+
+/// The text of [`show_already_running`]: this app, or the app of an earlier name that still runs.
+fn already_running_text(e: crate::instance::AlreadyRunning) -> String {
+    match e.earlier {
+        None => tr("{app} is already running.").replace("{app}", APP_NAME),
+        Some(name) => tr("{app} is still running.").replace("{app}", name),
+    }
 }
 
 fn app_icon() -> Arc<egui::IconData> {
@@ -1229,6 +1233,16 @@ fn short_path_in(p: &std::path::Path, home: Option<&str>) -> String {
 mod tests {
     use super::*;
     use eframe::egui::FontFamily;
+
+    /// The second-instance dialog names this app, or the app of an earlier name that still runs.
+    #[test]
+    fn already_running_text_names_the_running_app() {
+        i18n::set(&Language::new("en"));
+        let this = crate::instance::AlreadyRunning { earlier: None };
+        assert_eq!(already_running_text(this), "GolfSim Connect is already running.");
+        let earlier = crate::instance::AlreadyRunning { earlier: Some("OpenLaunch Connect") };
+        assert_eq!(already_running_text(earlier), "OpenLaunch Connect is still running.");
+    }
 
     /// The language of the screenshot tests: `OPENLAUNCH_SCREENSHOT_LANG=<code>` (any language
     /// the app has, e.g. `de`), else English.

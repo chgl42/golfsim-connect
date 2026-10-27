@@ -6,7 +6,7 @@ Windows programs. This app does BLE natively on macOS and talks TCP to GSPro in 
 Replaces the detour R10 → iPhone Garmin app → E6 → gspro-r10.
 
 During private development (0.x) the project was called **OpenR10 Connect**; renamed because more launch
-monitors are planned. The public repo starts at 1.0.0 with a single commit. Until 1.1 the app was called
+monitors are planned. The public repo starts at 1.0.0 with a single commit. Through 1.1 the app was called
 **OpenLaunch Connect**; renamed to GolfSim Connect for the player-facing name only – crate, lib, binaries,
 `OPENLAUNCH_*`, the GSPro device id and the repo keep the old identifiers. R10-specific is essentially `engine.rs`; device names ("R10") stay in the UI where the device is meant.
 

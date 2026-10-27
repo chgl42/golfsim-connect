@@ -90,7 +90,9 @@ fn earlier_locks_in(home: &Path) -> Result<Vec<File>, AlreadyRunning> {
                 crate::log::info(&format!("Data folder: \"{name}\" is in use, {name} is still running; nothing moves"));
                 return Err(AlreadyRunning { earlier: Some(name) });
             }
-            Err(TryLockError::Error(_)) => {}
+            Err(TryLockError::Error(e)) => {
+                crate::log::info(&format!("Data folder: instance lock of \"{name}\" not supported ({e}), not checked"));
+            }
         }
     }
     Ok(locks)
@@ -225,7 +227,22 @@ mod tests {
         assert!(lock.is_some());
         let new = Settings::dir_in(home.path(), DATA_DIR);
         assert_eq!(std::fs::read_to_string(new.join("shots.jsonl")).unwrap(), "{\"shot\":1}\n");
-        assert!(!old.exists(), "the earlier lock file stays behind only while it is held");
+        assert!(!old.exists(), "the earlier folder is gone once the move is done");
+    }
+
+    /// The locks of the earlier folders are held while the returned files live, and free after.
+    #[test]
+    fn earlier_locks_are_held_until_dropped() {
+        let home = TempDir::new("instance-earlier-held");
+        let old = Settings::dir_in(home.path(), "OpenLaunch Connect");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join(LOCK_FILE), "").unwrap();
+        let locks = earlier_locks_in(home.path()).unwrap();
+        assert_eq!(locks.len(), 1);
+        let other = File::open(old.join(LOCK_FILE)).unwrap();
+        assert!(matches!(other.try_lock(), Err(TryLockError::WouldBlock)));
+        drop(locks);
+        assert!(other.try_lock().is_ok(), "free once the move is done");
     }
 
     /// A fresh install: the data folder is made with its lock, and no earlier folder appears.

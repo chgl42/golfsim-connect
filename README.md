@@ -96,7 +96,8 @@ Downloads the latest release, installs it to `/Applications` and removes the dow
 ### Option B – manual download
 
 1. Download `GolfSim-Connect-macos-arm64.zip` from the [latest release](https://github.com/chgl42/openlaunch-connect/releases/latest).
-2. Unzip and move **GolfSim Connect.app** to `/Applications`.
+2. Unzip and move **GolfSim Connect.app** to `/Applications`. Upgrading from OpenLaunch Connect: quit it and delete
+   `/Applications/OpenLaunch Connect.app` first, so it can't be started again.
 3. The app is ad-hoc signed but not notarized, so Gatekeeper blocks it on first launch. Run once:
    ```bash
    xattr -dr com.apple.quarantine "/Applications/GolfSim Connect.app"

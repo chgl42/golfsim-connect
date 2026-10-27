@@ -1,4 +1,4 @@
-//! openlaunch — command-line version of OpenLaunch Connect.
+//! openlaunch — command-line version of GolfSim Connect.
 //!
 //! R10 ──BLE──> openlaunch ──TCP 127.0.0.1:921──> GSPro
 

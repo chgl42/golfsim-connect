@@ -44,7 +44,7 @@ if [[ "${1:-}" == "--install" ]]; then
   echo "▸ Installing to /Applications …"
   # Quit a running copy, otherwise `open` below only brings the old one to the front; also one of the
   # earlier name, so it doesn't write its data folder while that moves.
-  for name in "${APP_NAME}" "OpenLaunch Connect"; do
+  for name in "${APP_NAME}" "OpenLaunch Connect" "OpenR10 Connect"; do
     osascript -e "if application \"${name}\" is running then tell application \"${name}\" to quit" 2>/dev/null || true
   done
   sleep 1
@@ -64,7 +64,10 @@ elif [[ "${1:-}" == "--deploy" ]]; then
   echo "▸ Deploying to ${HOST}:/Applications …"
   # Quit a running copy first (same as --install); tar keeps the bundle and its ad-hoc signature intact
   # and, unlike a download, adds no quarantine flag.
-  ssh "$HOST" "osascript -e 'if application \"${APP_NAME}\" is running then tell application \"${APP_NAME}\" to quit' >/dev/null 2>&1 || pkill -x ${BIN} || true; sleep 1"
+  for name in "${APP_NAME}" "OpenLaunch Connect"; do
+    ssh "$HOST" "osascript -e 'if application \"${name}\" is running then tell application \"${name}\" to quit' >/dev/null 2>&1 || pkill -x ${BIN} || true"
+  done
+  ssh "$HOST" "sleep 1; rm -rf '/Applications/OpenLaunch Connect.app'"
   tar -C target -cf - "${APP_NAME}.app" \
     | ssh "$HOST" "rm -rf '/Applications/${APP_NAME}.app' && tar -C /Applications -xf - && open '/Applications/${APP_NAME}.app'"
   echo "✓ Done: ${HOST}:/Applications/${APP_NAME}.app (started)"
