@@ -900,7 +900,7 @@ fn format_choice(ui: &mut egui::Ui, format: ExportFormat) -> bool {
     let fill = if resp.hovered() { BUTTON_HOVER } else { BUTTON };
     p.rect(rect, 6.0, fill, Stroke::new(1.0, if resp.hovered() { ACCENT } else { BUTTON_LINE }), StrokeKind::Inside);
     let what = match format {
-        ExportFormat::OpenLaunch => tr("All values of this app, one row per shot"),
+        ExportFormat::GolfSimConnect => tr("All values of this app, one row per shot"),
         ExportFormat::GarminGolf => tr("Columns and units like the Garmin Golf app's export"),
         ExportFormat::AwesomeGolf => tr("Columns like Awesome Golf's export"),
     };

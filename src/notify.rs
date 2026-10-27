@@ -64,10 +64,10 @@ fn deliver(body: &str) {
         // a bundle (cargo run), fall back to the library's default sender.
         let bundled = std::env::current_exe().is_ok_and(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"));
         if bundled {
-            let _ = mac_notification_sys::set_application("io.github.chgl42.openlaunchconnect");
+            let _ = mac_notification_sys::set_application("com.golfsimconnect.app");
         }
     });
-    if let Err(e) = mac_notification_sys::send_notification("OpenLaunch Connect", None, body, None) {
+    if let Err(e) = mac_notification_sys::send_notification("GolfSim Connect", None, body, None) {
         log::info(&format!("Notification failed: {e}"));
     }
 }

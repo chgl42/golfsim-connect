@@ -1,4 +1,4 @@
-//! Persistent app settings (~/Library/Application Support/OpenLaunch Connect/settings.json).
+//! Persistent app settings (~/Library/Application Support/GolfSim Connect/settings.json).
 
 use std::path::{Path, PathBuf};
 
@@ -11,10 +11,10 @@ use crate::history::ExportFormat;
 use crate::i18n::Language;
 
 /// Name of the data folder (settings and shot history).
-pub(crate) const DATA_DIR: &str = "OpenLaunch Connect";
+pub(crate) const DATA_DIR: &str = "GolfSim Connect";
 
-/// Earlier names of the data folder, in the order they are tried (see `migrate_data_dir_in`).
-const OLD_DATA_DIRS: [&str; 1] = ["OpenR10 Connect"];
+/// Earlier names of the data folder, newest first, in the order they are tried (see `migrate_data_dir_in`).
+pub(crate) const OLD_DATA_DIRS: [&str; 2] = ["OpenLaunch Connect", "OpenR10 Connect"];
 
 /// The shot history in the data folder; moved last, so the data folder only has it once the rest is there.
 const HISTORY_FILE: &str = "shots.jsonl";
@@ -522,6 +522,9 @@ impl Settings {
             crate::log::info(&format!("Data folder: \"{DATA_DIR}\" has a shot history, \"{name}\" left as it is"));
             return;
         }
+        for other in OLD_DATA_DIRS.iter().filter(|o| **o != name && Self::dir_in(home, o).is_dir()) {
+            crate::log::info(&format!("Data folder: \"{other}\" is left as it is, \"{name}\" is the newer one"));
+        }
         let moved = std::fs::create_dir_all(&new)
             .and_then(|()| if resume { Ok(()) } else { std::fs::write(&pending, "") })
             .and_then(|()| move_entries(&old, &new, since));
@@ -852,20 +855,64 @@ mod tests {
         std::fs::read_to_string(Settings::dir_in(home, dir).join(name)).ok()
     }
 
-    const OLD: &str = "OpenR10 Connect";
+    const OLD: &str = "OpenLaunch Connect";
+    /// The name until 0.7, before OpenLaunch Connect.
+    const OLDEST: &str = "OpenR10 Connect";
     const SHOTS: &str = "{\"shot\":1}\n{\"shot\":2}\n{\"shot\":3}\n";
 
-    /// Fresh move: the OpenR10 Connect folder (the name until 0.7) moves into a missing data
-    /// folder, the old folder is gone and the history keeps every line.
+    /// Fresh move (the upgrade): the OpenLaunch Connect folder moves into a missing data folder with
+    /// every entry, the old folder is gone and the history keeps every line.
     #[test]
-    fn data_folder_of_openr10_connect_is_moved() {
+    fn data_folder_of_openlaunch_connect_is_moved() {
         let home = crate::test_util::TempDir::new("settings-migrate");
         write_in(home.path(), OLD, r#"{"metric":false}"#);
         put(home.path(), OLD, "shots.jsonl", SHOTS);
+        put(home.path(), OLD, "notes.txt", "x");
+        put(home.path(), OLD, crate::instance::LOCK_FILE, "");
         Settings::migrate_data_dir_in(home.path());
         assert!(!Settings::dir_in(home.path(), OLD).exists());
         assert!(!Settings::load_in(home.path()).metric);
+        assert_eq!(read(home.path(), DATA_DIR, "notes.txt").as_deref(), Some("x"));
         assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").unwrap().lines().count(), 3);
+    }
+
+    /// A player who never ran OpenLaunch Connect: the OpenR10 Connect folder moves in the same way.
+    #[test]
+    fn data_folder_of_openr10_connect_is_moved() {
+        let home = crate::test_util::TempDir::new("settings-migrate-oldest");
+        write_in(home.path(), OLDEST, r#"{"metric":false}"#);
+        put(home.path(), OLDEST, "shots.jsonl", SHOTS);
+        Settings::migrate_data_dir_in(home.path());
+        assert!(!Settings::dir_in(home.path(), OLDEST).exists());
+        assert!(!Settings::load_in(home.path()).metric);
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").unwrap().lines().count(), 3);
+    }
+
+    /// Both earlier folders there: the newer name (OpenLaunch Connect) moves, the other is left as it is.
+    #[test]
+    fn of_two_earlier_folders_the_newer_one_moves() {
+        let home = crate::test_util::TempDir::new("settings-migrate-both");
+        put(home.path(), OLD, "shots.jsonl", SHOTS);
+        put(home.path(), OLDEST, "shots.jsonl", "{\"shot\":9}\n");
+        Settings::migrate_data_dir_in(home.path());
+        assert!(!Settings::dir_in(home.path(), OLD).exists());
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some(SHOTS));
+        assert_eq!(read(home.path(), OLDEST, "shots.jsonl").as_deref(), Some("{\"shot\":9}\n"));
+        // At the next start the data folder has a history, so the older folder still stays.
+        Settings::migrate_data_dir_in(home.path());
+        assert_eq!(read(home.path(), DATA_DIR, "shots.jsonl").as_deref(), Some(SHOTS));
+        assert_eq!(read(home.path(), OLDEST, "shots.jsonl").as_deref(), Some("{\"shot\":9}\n"));
+    }
+
+    /// No folder yet: nothing to move, and no earlier folder is made.
+    #[test]
+    fn a_fresh_install_moves_nothing() {
+        let home = crate::test_util::TempDir::new("settings-migrate-fresh");
+        Settings::migrate_data_dir_in(home.path());
+        for name in OLD_DATA_DIRS {
+            assert!(!Settings::dir_in(home.path(), name).exists());
+        }
+        assert!(read(home.path(), DATA_DIR, PENDING_FILE).is_none());
     }
 
     /// A data folder with only settings (e.g. written by another build) doesn't strand the history

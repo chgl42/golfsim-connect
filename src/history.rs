@@ -229,9 +229,10 @@ pub fn to_csv(shots: &[ShotRecord]) -> String {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportFormat {
-    /// Our own columns (see [`to_csv`]).
+    /// Our own columns (see [`to_csv`]). Stored as `"open_launch"` before the rename; that still reads.
     #[default]
-    OpenLaunch,
+    #[serde(rename = "golfsim_connect", alias = "open_launch")]
+    GolfSimConnect,
     /// Garmin Golf app range session export (`DrivingRange-*.csv`).
     GarminGolf,
     /// Awesome Golf session export (`ags-shots-*.csv`).
@@ -239,12 +240,12 @@ pub enum ExportFormat {
 }
 
 impl ExportFormat {
-    pub const ALL: [Self; 3] = [Self::OpenLaunch, Self::GarminGolf, Self::AwesomeGolf];
+    pub const ALL: [Self; 3] = [Self::GolfSimConnect, Self::GarminGolf, Self::AwesomeGolf];
 
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::OpenLaunch => "OpenLaunch",
+            Self::GolfSimConnect => "GolfSim Connect",
             Self::GarminGolf => "Garmin Golf",
             Self::AwesomeGolf => "Awesome Golf",
         }
@@ -254,7 +255,7 @@ impl ExportFormat {
     #[must_use]
     pub fn file_name(self, now: chrono::DateTime<chrono::Local>) -> String {
         match self {
-            Self::OpenLaunch => format!("openlaunch-shots-{}.csv", now.format("%Y-%m-%d")),
+            Self::GolfSimConnect => format!("golfsim-connect-shots-{}.csv", now.format("%Y-%m-%d")),
             Self::GarminGolf => {
                 format!("DrivingRange-{}_+0000.csv", now.with_timezone(&chrono::Utc).format("%Y-%m-%d_%H-%M-%S"))
             }
@@ -267,7 +268,7 @@ impl ExportFormat {
     pub fn export(self, shots: &[ShotRecord]) -> String {
         let shots: Vec<ShotRecord> = shots.iter().filter(|s| !s.excluded).cloned().collect();
         match self {
-            Self::OpenLaunch => to_csv(&shots),
+            Self::GolfSimConnect => to_csv(&shots),
             Self::GarminGolf => to_garmin_csv(&shots),
             Self::AwesomeGolf => to_awesome_golf_csv(&shots),
         }
@@ -604,6 +605,19 @@ mod tests {
         // The flag is only written when set, and old lines read as not excluded.
         assert!(!serde_json::to_string(&shots[0]).unwrap().contains("excluded"));
         assert!(serde_json::to_string(&shots[1]).unwrap().contains("\"excluded\":true"));
+    }
+
+    /// The own layout, stored as `"open_launch"` before the rename, still loads (ADR-006).
+    #[test]
+    fn the_old_name_of_the_own_layout_still_loads() {
+        let old: ExportFormat = serde_json::from_str(r#""open_launch""#).unwrap();
+        assert_eq!(old, ExportFormat::GolfSimConnect);
+        assert_eq!(serde_json::to_string(&ExportFormat::GolfSimConnect).unwrap(), r#""golfsim_connect""#);
+        assert_eq!(serde_json::from_str::<ExportFormat>(r#""golfsim_connect""#).unwrap(), ExportFormat::GolfSimConnect);
+        let s: crate::settings::Settings = serde_json::from_str(r#"{"export_format":"open_launch"}"#).unwrap();
+        assert_eq!(s.export_format, ExportFormat::GolfSimConnect);
+        let day = chrono::Local::now();
+        assert!(ExportFormat::GolfSimConnect.file_name(day).starts_with("golfsim-connect-shots-"));
     }
 
     #[test]

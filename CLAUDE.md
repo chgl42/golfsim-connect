@@ -1,4 +1,4 @@
-# OpenLaunch Connect – project context for Claude
+# GolfSim Connect – project context for Claude
 
 Native macOS bridge: **Garmin Approach R10 (Bluetooth LE) → GSPro OpenConnect API** (TCP `127.0.0.1:921`).
 Purpose: GSPro runs on an Apple Silicon Mac under **CrossOver**; CrossOver/Wine does not pass Bluetooth through to
@@ -6,7 +6,9 @@ Windows programs. This app does BLE natively on macOS and talks TCP to GSPro in 
 Replaces the detour R10 → iPhone Garmin app → E6 → gspro-r10.
 
 During private development (0.x) the project was called **OpenR10 Connect**; renamed because more launch
-monitors are planned. The public repo starts at 1.0.0 with a single commit. R10-specific is essentially `engine.rs`; device names ("R10") stay in the UI where the device is meant.
+monitors are planned. The public repo starts at 1.0.0 with a single commit. Through 1.1 the app was called
+**OpenLaunch Connect**; renamed to GolfSim Connect for the player-facing name only – crate, lib, binaries,
+`OPENLAUNCH_*`, the GSPro device id and the repo keep the old identifiers. R10-specific is essentially `engine.rs`; device names ("R10") stay in the UI where the device is meant.
 
 Open-source project (MIT OR Apache-2.0), repo `chgl42/openlaunch-connect`. The maintainer communicates in **German**;
 UI source texts, logs, README, code comments and this file are **English**; the UI is also available in German (`i18n/`).
@@ -38,15 +40,15 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `recorder.rs` – records a shot the GSPro link handed over and GSPro's result of a shot (state, session,
     `shots.jsonl`, notification), then publishes the event; `gspro.rs` and `gspro_db.rs` only call it
   - `history.rs` – shot history: `shots.jsonl` (append, not in demo mode), per-club stats, CSV export
-    (OpenLaunch / Garmin Golf / Awesome Golf layouts), smash factor. Test shots (`Cmd::Shot { test: true }`) go to GSPro
+    (GolfSim Connect / Garmin Golf / Awesome Golf layouts), smash factor. Test shots (`Cmd::Shot { test: true }`) go to GSPro
     but not into the history.
-  - `settings.rs` – `~/Library/Application Support/OpenLaunch Connect/settings.json` (reads old GSProR10Connect/R10 Bridge settings as a fallback);
-    `migrate_data_dir_in` moves the old "OpenR10 Connect" folder in while the data folder has no `shots.jsonl`
+  - `settings.rs` – `~/Library/Application Support/GolfSim Connect/settings.json` (reads old GSProR10Connect/R10 Bridge settings as a fallback);
+    `migrate_data_dir_in` moves the old "OpenLaunch Connect" (else "OpenR10 Connect") folder in while the data folder has no `shots.jsonl`
     or a move is pending (`migration.pending`; entry by entry, `shots.jsonl` last, a clash keeps ours as
     `<name>.before-move`, going on keeps entries changed after the marker and joins the histories once)
   - `instance.rs` – one instance per data folder (ADR-012): `Settings::claim_data_dir()` at start (app and CLI, not
     `--test-shot`) locks `instance.lock`, then runs the migration in `settings.rs`; a second instance gets
-    `AlreadyRunning` and writes nothing (`tests/instance_lock.rs` runs the CLI against a held lock)
+    `AlreadyRunning` and writes nothing (also while an app of an earlier name runs: its old folder's lock held, or a pre-lock build's process seen, injectable check) (`tests/instance_lock.rs` runs the CLI against a held lock)
   - `i18n/` – UI translation, gettext style: `tr("English text")`. A language is data (ADR-013): code, native name,
     table – `mod.rs` holds the API, the list `SHIPPED` and the resolution (setting code, else the macOS locale by
     prefix, else English); each language's table is one file with one `match` (`de.rs`). A new language is its table
@@ -107,7 +109,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   probe with timeouts), re-arm after an error clears, error reason kept with the state, diagnostics hook
   (`set_diagnostics()` → "BLE: …" lines in the app log).
 - `packaging/` – `Info.plist` (incl. `NSBluetoothAlwaysUsageDescription`), `icon.png` (ball: `tools/icon_ball.py`)
-- `make-app.sh` – builds `target/OpenLaunch Connect.app` (sips/iconutil/ad-hoc codesign, licenses + cargo-about report
+- `make-app.sh` – builds `target/GolfSim Connect.app` (sips/iconutil/ad-hoc codesign, licenses + cargo-about report
   in Resources); `--install` (quits a running copy first); `--deploy <ssh-host>` replaces and starts the app on
   another Mac (test builds without CI)
 - `install.sh` – downloads the latest release via curl, quits a running copy, installs, removes the quarantine
@@ -148,7 +150,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 
 - In a cloud session there is **no macOS target** (rust-std for darwin not available). macOS builds run in GitHub
   Actions; locally on a Mac use `./make-app.sh --install`.
-- **Live test with a real R10:** `./make-app.sh`, then `open -n --stderr <log> "target/OpenLaunch Connect.app"` and
+- **Live test with a real R10:** `./make-app.sh`, then `open -n --stderr <log> "target/GolfSim Connect.app"` and
   follow the log (the Bluetooth permission belongs to the app; a CLI without a GUI parent process may get
   "Permission denied").
 - Linux build/tests work (`cargo test --all-targets`); BlueZ needs `libdbus-1-dev`.
@@ -176,7 +178,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   LLVM_PROFDATA=/opt/homebrew/opt/llvm/bin/llvm-profdata` in front).
 - `OPENLAUNCH_DEMO=1` simulates an R10 (READY, 82 % battery, sample session, one shot; `OPENLAUNCH_DEMO=range`:
   a 65-shot range session with a full bag of fourteen clubs, `engine::demo_range()`, to try the explorer; on the MacBook:
-  `open -n --env OPENLAUNCH_DEMO=range "/Applications/OpenLaunch Connect.app"`), `OPENLAUNCH_PAGE=<page id>` (`settings`, `overlay`, `log`, `shots`, `help`)
+  `open -n --env OPENLAUNCH_DEMO=range "/Applications/GolfSim Connect.app"`), `OPENLAUNCH_PAGE=<page id>` (`settings`, `overlay`, `log`, `shots`, `help`)
   opens another page; `OPENLAUNCH_SCREENSHOT[_OVERLAY]=<png>` saves the visible window and quits.
 
 ## Code quality
@@ -204,7 +206,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   commits stay traceable.
 - `main` is protected by the ruleset "Protect main": no force push/deletion, changes only via pull request, CI check
   `build` must be green (no required reviews; admin bypass as an emergency exit). Flow: feature branch → PR →
-  `gh pr merge --merge` after green CI. Test build of a PR: artifact via `gh run download <run> -n OpenLaunch-Connect-macos-arm64`.
+  `gh pr merge --merge` after green CI. Test build of a PR: artifact via `gh run download <run> -n GolfSim-Connect-macos-arm64`.
 - Every PR adds its user-visible changes to `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog: Added / Changed /
   Fixed / Removed; written for users, not a commit list).
 - Release: in a PR, bump the version in `Cargo.toml` and `packaging/Info.plist` and rename `[Unreleased]` to

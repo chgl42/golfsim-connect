@@ -96,6 +96,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "Not delivered to GSPro" => "Nicht an GSPro übergeben",
         "Export shots as CSV" => "Schläge als CSV exportieren",
         "{app} is already running." => "{app} läuft bereits.",
+        "{app} is still running." => "{app} läuft noch.",
         "Exported {n} shots to {path}" => "{n} Schläge exportiert nach {path}",
         "Export failed: {e}" => "Export fehlgeschlagen: {e}",
 
@@ -304,8 +305,8 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
             "R10-Akku schwach, R10-Fehler (z. B. schief), Verbindungsabbrüche, nicht übergebene Schläge"
         }
         "Test" => "Testen",
-        "Sends a notification now. If none appears, allow notifications for OpenLaunch Connect in System Settings → Notifications." => {
-            "Sendet jetzt eine Mitteilung. Erscheint keine, Mitteilungen für OpenLaunch Connect in Systemeinstellungen → Mitteilungen erlauben."
+        "Sends a notification now. If none appears, allow notifications for GolfSim Connect in System Settings → Notifications." => {
+            "Sendet jetzt eine Mitteilung. Erscheint keine, Mitteilungen für GolfSim Connect in Systemeinstellungen → Mitteilungen erlauben."
         }
         "Notifications are working." => "Mitteilungen funktionieren.",
         "SAVE" => "SPEICHERN",

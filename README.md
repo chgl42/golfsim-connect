@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="OpenLaunch Connect – Garmin Approach R10 to GSPro on macOS" width="100%">
+  <img src="docs/images/banner.png" alt="GolfSim Connect – Garmin Approach R10 to GSPro on macOS" width="100%">
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
   <a href="https://buymeacoffee.com/chgl42"><img alt="Buy me a coffee" src="https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd00?logo=buymeacoffee&logoColor=black"></a>
 </p>
 
-**OpenLaunch Connect** (formerly *OpenR10 Connect*) is a small, native macOS app that connects a **Garmin Approach R10** launch monitor
+**GolfSim Connect** (formerly *OpenLaunch Connect*, before that *OpenR10 Connect*) is a small, native macOS app that connects a **Garmin Approach R10** launch monitor
 directly via Bluetooth and forwards every shot to **GSPro** through its OpenConnect API – including GSPro
 running under **CrossOver** on an Apple Silicon Mac.
 
@@ -33,11 +33,11 @@ R10 ──BLE──> iPhone (Garmin Golf app) ──Wi-Fi──> "E6 Connect" em
 It works, but it is fiddly and fragile: the phone has to stay awake and in the foreground, the Garmin app
 has to be put into E6 mode every session, and any of the three hops can drop.
 
-**OpenLaunch Connect removes the detour.** It does the Bluetooth part natively on macOS, where it works, and
+**GolfSim Connect removes the detour.** It does the Bluetooth part natively on macOS, where it works, and
 hands the shots to GSPro over a local TCP connection, which CrossOver handles perfectly:
 
 ```
-R10 ──BLE──> OpenLaunch Connect (macOS) ──TCP 127.0.0.1:921──> GSPro (CrossOver)
+R10 ──BLE──> GolfSim Connect (macOS) ──TCP 127.0.0.1:921──> GSPro (CrossOver)
 ```
 
 One app, a stable connection, no phone in the loop.
@@ -52,7 +52,7 @@ One app, a stable connection, no phone in the loop.
 - **Shot explorer:** pages of tiles you arrange yourself – shots table, averages per club, details of a shot,
   dispersion of the landing points, correlation of any two values, 3D flights – with a filter by club and a
   selection shared by all tiles; **estimated carry, total, apex and side** and the **shot shape** for every shot
-- **CSV export** in three layouts: OpenLaunch, **Garmin Golf** app or **Awesome Golf** (same columns and units row as theirs)
+- **CSV export** in three layouts: GolfSim Connect, **Garmin Golf** app or **Awesome Golf** (same columns and units row as theirs)
 - **In-game overlay** on top of GSPro – also in full screen – with status, club, battery and the last shot;
   place it in any corner or at the middle of any edge, choose its size, one or two lines and which values it shows;
   **impact graphics** for angle of attack / launch angle and club path / start direction with the shot shape
@@ -95,14 +95,15 @@ Downloads the latest release, installs it to `/Applications` and removes the dow
 
 ### Option B – manual download
 
-1. Download `OpenLaunch-Connect-macos-arm64.zip` from the [latest release](https://github.com/chgl42/openlaunch-connect/releases/latest).
-2. Unzip and move **OpenLaunch Connect.app** to `/Applications`.
+1. Download `GolfSim-Connect-macos-arm64.zip` from the [latest release](https://github.com/chgl42/openlaunch-connect/releases/latest).
+2. Unzip and move **GolfSim Connect.app** to `/Applications`. Upgrading from OpenLaunch Connect: quit it and delete
+   `/Applications/OpenLaunch Connect.app` first, so it can't be started again.
 3. The app is ad-hoc signed but not notarized, so Gatekeeper blocks it on first launch. Run once:
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/OpenLaunch Connect.app"
+   xattr -dr com.apple.quarantine "/Applications/GolfSim Connect.app"
    ```
 
-On first start macOS asks **"OpenLaunch Connect would like to use Bluetooth"** → *Allow*.
+On first start macOS asks **"GolfSim Connect would like to use Bluetooth"** → *Allow*.
 
 ### Option C – build from source
 
@@ -118,7 +119,7 @@ cd openlaunch-connect
 
 1. **Turn off Bluetooth on your iPhone** (or quit the Garmin Golf app) – otherwise the phone grabs the R10.
 2. Switch on the R10. The very first time, hold the button until the LED is **solid blue** (pairing mode).
-3. Start **OpenLaunch Connect**. If macOS shows a pairing request, confirm it.
+3. Start **GolfSim Connect**. If macOS shows a pairing request, confirm it.
 4. Start GSPro (button **START GSPRO** or automatically, see settings) and click *Play* in the launcher.
 5. When the status panel shows a green **READY**, hit away.
 
@@ -199,7 +200,7 @@ undoes them. The layout is saved; *Reset shots view* in the settings brings back
   <img src="docs/images/screenshot-configure.png" alt="Customize mode: tile menus, the empty tile with + and the page's tools in its tab" width="80%">
 </p>
 
-*EXPORT CSV* writes the shots shown and asks for the layout: OpenLaunch, Garmin Golf or Awesome Golf.
+*EXPORT CSV* writes the shots shown and asks for the layout: GolfSim Connect, Garmin Golf or Awesome Golf.
 
 ## Settings
 
@@ -215,7 +216,7 @@ undoes them. The layout is saved; *Reset shots view* in the settings brings back
 | R10 | **Distance to ball** | Sent to the R10 (default 2.10 m). Applies after restart. |
 | Display | **Language** | System (follows macOS), English or Deutsch. |
 | | **Units** | Metric (km/h) or imperial (mph) – display only; GSPro always gets mph. |
-| Notifications & updates | **Notifications** | On/off. *Test* sends one right away – if none appears, allow notifications for OpenLaunch Connect in *System Settings → Notifications*. |
+| Notifications & updates | **Notifications** | On/off. *Test* sends one right away – if none appears, allow notifications for GolfSim Connect in *System Settings → Notifications*. |
 | | **Updates** | Check GitHub for a newer release on start. |
 
 *Log GSPro messages* (every message exchanged with GSPro) is switched on the log page, the overlay on its own
@@ -223,18 +224,19 @@ undoes them. The layout is saved; *Reset shots view* in the settings brings back
 
 Changes apply with **SAVE**; the notification and debug-log switches take effect immediately.
 
-Settings are stored in `~/Library/Application Support/OpenLaunch Connect/settings.json`, the shot history
-in `shots.jsonl` in the same folder (one JSON object per shot; test shots are not recorded).
+Settings are stored in `~/Library/Application Support/GolfSim Connect/settings.json`, the shot history
+in `shots.jsonl` in the same folder (one JSON object per shot; test shots are not recorded). The
+folder of the earlier name (`OpenLaunch Connect`) moves there on the first start.
 
 ## Troubleshooting
 
 The app's **HELP** page has the common fixes in short. Still stuck? Press **COPY LOG** on the Log page and
 [open an issue](https://github.com/chgl42/openlaunch-connect/issues) with the log pasted in.
 
-- **NO R10 stays red** – Is the R10 on? Is iPhone Bluetooth off? Check *System Settings → Privacy & Security → Bluetooth* and allow OpenLaunch Connect.
+- **NO R10 stays red** – Is the R10 on? Is iPhone Bluetooth off? Check *System Settings → Privacy & Security → Bluetooth* and allow GolfSim Connect.
 - **R10 shows "Device error"** – usually the R10 is not level. Put it on a flat surface.
 - **"No handshake"** – a macOS pairing dialog may be hidden; otherwise switch the R10 off and on.
-- **No notifications** – click *Test* in the settings; if nothing appears, allow notifications for OpenLaunch Connect in *System Settings → Notifications* (macOS shows them only while the app is in the background).
+- **No notifications** – click *Test* in the settings; if nothing appears, allow notifications for GolfSim Connect in *System Settings → Notifications* (macOS shows them only while the app is in the background).
 - **No tempo shown** – the R10 didn't time that swing (e.g. very slow swings, or a test shot).
 - **NO GSPRO** – GSPro isn't running or its connect window is closed. Only one OpenConnect client can be connected – quit other connectors (e.g. gspro-r10).
 - **Shot sent but no ball flight** – GSPro must be the active window with a ball teed up.
@@ -287,7 +289,7 @@ git tag v0.7.0 && git push origin v0.7.0
 
 ## Support
 
-OpenLaunch Connect is free and open source. If it saves you the iPhone-and-E6 detour and you'd like to say thanks,
+GolfSim Connect is free and open source. If it saves you the iPhone-and-E6 detour and you'd like to say thanks,
 you can [buy me a coffee](https://buymeacoffee.com/chgl42). Bug reports and ideas are just as welcome as
 [issues](https://github.com/chgl42/openlaunch-connect/issues).
 

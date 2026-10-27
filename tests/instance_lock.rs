@@ -30,9 +30,9 @@ impl Drop for TempHome {
 /// The data folder under `home`, where the app puts it (`Settings::dir_in`).
 fn data_dir(home: &Path) -> PathBuf {
     if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/OpenLaunch Connect")
+        home.join("Library/Application Support/GolfSim Connect")
     } else {
-        home.join(".config/openlaunch connect")
+        home.join(".config/golfsim connect")
     }
 }
 

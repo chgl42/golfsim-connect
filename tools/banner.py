@@ -7,7 +7,7 @@ root = sys.argv[1]
 S = 2  # render at 2x, then downscale for smooth edges
 W, H = 1600 * S, 560 * S
 PAGE = (11, 18, 32); LINE = (34, 49, 79); WHITE = (255, 255, 255); SOFT = (214, 222, 238)
-MUTED = (127, 143, 176); ACCENT = (61, 111, 230); GREEN = (61, 220, 106)
+MUTED = (127, 143, 176); ACCENT = (61, 111, 230); GREEN = (61, 220, 106); AMBER = (242, 179, 61)
 cond = lambda px: ImageFont.truetype("/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf", px * S)
 body = lambda px: ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", px * S)
 
@@ -21,15 +21,18 @@ for i in range(-12, 13):
 icon = Image.open(f"{root}/packaging/icon.png").convert("RGBA").resize((104 * S, 104 * S), Image.LANCZOS)
 img.paste(icon, (74 * S, 92 * S), icon)
 
-# wordmark
-x, y = 200 * S, 112 * S
-d.text((x, y), "OPEN", font=cond(66), fill=MUTED)
-x += d.textlength("OPEN", font=cond(66)) + 2 * S
-d.text((x, y), "LAUNCH", font=cond(66), fill=WHITE)
-x += d.textlength("LAUNCH", font=cond(66)) + 12 * S
-pw = d.textlength("CONNECT", font=cond(50)) + 28 * S
-d.rounded_rectangle([x, y + 2 * S, x + pw, y + 60 * S], radius=10 * S, fill=ACCENT)
-d.text((x + 14 * S, y + 12 * S), "CONNECT", font=cond(50), fill=WHITE)
+# wordmark: white GOLFSIM and amber CONNECT under a white tracer arc ending in an amber ball
+x0, y = 200 * S, 112 * S
+d.text((x0, y), "GOLFSIM", font=cond(66), fill=WHITE)
+x = x0 + d.textlength("GOLFSIM", font=cond(66)) + 14 * S
+d.text((x, y), "CONNECT", font=cond(66), fill=AMBER)
+w = x + d.textlength("CONNECT", font=cond(66)) - x0
+p0, p1, p2 = (x0 + 4 * S, y - 4 * S), (x0 + 0.35 * w, y - 40 * S), (x0 + 0.7 * w, y - 12 * S)
+arc = [((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0],
+        (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1]) for t in (i / 64 for i in range(65))]
+d.line(arc, fill=WHITE, width=3 * S, joint="curve")
+r = 6 * S
+d.ellipse([p2[0] - r, p2[1] - r, p2[0] + r, p2[1] + r], fill=AMBER)
 
 # tagline
 d.text((80 * S, 262 * S), "Launch monitor → GSPro on macOS.", font=body(27), fill=SOFT)
