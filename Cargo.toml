@@ -4,7 +4,7 @@ version = "1.2.0"
 edition = "2024"
 rust-version = "1.94"
 description = "Open-source macOS bridge: Garmin Approach R10 (Bluetooth LE) -> GSPro OpenConnect API"
-repository = "https://github.com/chgl42/openlaunch-connect"
+repository = "https://github.com/chgl42/golfsim-connect"
 license = "MIT OR Apache-2.0"
 publish = false
 

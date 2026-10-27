@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- The repository moved to chgl42/golfsim-connect; old links redirect.
+
 ## [1.2.0] – 2026-10-27
 
 ### Added
@@ -202,7 +205,7 @@ First public release. The 0.x versions were developed privately; this release su
 - Metric or imperial display, English or German interface, built-in log with *Copy* for bug reports,
   command-line version `openlaunch`.
 
-[Unreleased]: https://github.com/chgl42/openlaunch-connect/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/chgl42/openlaunch-connect/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/chgl42/openlaunch-connect/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/chgl42/openlaunch-connect/releases/tag/v1.0.0
+[Unreleased]: https://github.com/chgl42/golfsim-connect/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/chgl42/golfsim-connect/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/chgl42/golfsim-connect/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/chgl42/golfsim-connect/releases/tag/v1.0.0

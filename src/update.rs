@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::{log, state};
 
-const LATEST_RELEASE_API: &str = "https://api.github.com/repos/chgl42/openlaunch-connect/releases/latest";
+const LATEST_RELEASE_API: &str = "https://api.github.com/repos/chgl42/golfsim-connect/releases/latest";
 
 /// A release newer than the running version.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,9 +56,16 @@ pub fn check_in_background() {
 }
 
 fn latest_release() -> Result<Option<Release>, String> {
+    let json = fetch_latest(LATEST_RELEASE_API)?;
+    Ok(newer_release(&json, env!("CARGO_PKG_VERSION")))
+}
+
+/// The GitHub API's answer for the latest release at `url` (redirects are followed, so an
+/// app built with the repository's old name still finds it).
+fn fetch_latest(url: &str) -> Result<Value, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().into();
     let body = agent
-        .get(LATEST_RELEASE_API)
+        .get(url)
         .header("User-Agent", concat!("OpenLaunch-Connect/", env!("CARGO_PKG_VERSION")))
         .header("Accept", "application/vnd.github+json")
         .call()
@@ -66,8 +73,7 @@ fn latest_release() -> Result<Option<Release>, String> {
         .body_mut()
         .read_to_string()
         .map_err(|e| e.to_string())?;
-    let json: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
-    Ok(newer_release(&json, env!("CARGO_PKG_VERSION")))
+    serde_json::from_str(&body).map_err(|e| e.to_string())
 }
 
 /// The release described by the GitHub API `json`, if it is newer than `current`.
@@ -105,16 +111,26 @@ mod tests {
     fn release_from_github_json() {
         let json: Value = serde_json::json!({
             "tag_name": "v0.10.0",
-            "html_url": "https://github.com/chgl42/openlaunch-connect/releases/tag/v0.10.0"
+            "html_url": "https://github.com/chgl42/golfsim-connect/releases/tag/v0.10.0"
         });
         assert_eq!(
             newer_release(&json, "0.9.0"),
             Some(Release {
                 version: "0.10.0".into(),
-                url: "https://github.com/chgl42/openlaunch-connect/releases/tag/v0.10.0".into()
+                url: "https://github.com/chgl42/golfsim-connect/releases/tag/v0.10.0".into()
             })
         );
         assert_eq!(newer_release(&json, "0.10.0"), None);
         assert_eq!(newer_release(&serde_json::json!({}), "0.9.0"), None);
+    }
+
+    /// Apps released before the move ask the old URL; GitHub redirects it to the renamed
+    /// repository. Needs the network.
+    #[test]
+    #[ignore = "network: asks GitHub"]
+    fn old_url_still_finds_the_release() {
+        let json = fetch_latest("https://api.github.com/repos/chgl42/openlaunch-connect/releases/latest").unwrap();
+        let release = newer_release(&json, "0.0.0").expect("a release");
+        assert!(release.url.starts_with("https://github.com/chgl42/golfsim-connect/releases/tag/v"), "{}", release.url);
     }
 }

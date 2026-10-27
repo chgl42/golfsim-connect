@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/chgl42/openlaunch-connect/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/chgl42/openlaunch-connect?label=release"></a>
-  <a href="https://github.com/chgl42/openlaunch-connect/actions/workflows/build.yml"><img alt="Build" src="https://github.com/chgl42/openlaunch-connect/actions/workflows/build.yml/badge.svg"></a>
+  <a href="https://github.com/chgl42/golfsim-connect/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/chgl42/golfsim-connect?label=release"></a>
+  <a href="https://github.com/chgl42/golfsim-connect/actions/workflows/build.yml"><img alt="Build" src="https://github.com/chgl42/golfsim-connect/actions/workflows/build.yml/badge.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/macOS-Apple%20Silicon-blue">
   <img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green">
   <a href="https://buymeacoffee.com/chgl42"><img alt="Buy me a coffee" src="https://img.shields.io/badge/Buy%20me%20a%20coffee-ffdd00?logo=buymeacoffee&logoColor=black"></a>
@@ -88,14 +88,14 @@ One app, a stable connection, no phone in the loop.
 ### Option A – install script (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chgl42/openlaunch-connect/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chgl42/golfsim-connect/main/install.sh | bash
 ```
 
 Downloads the latest release, installs it to `/Applications` and removes the download quarantine.
 
 ### Option B – manual download
 
-1. Download `GolfSim-Connect-macos-arm64.zip` from the [latest release](https://github.com/chgl42/openlaunch-connect/releases/latest).
+1. Download `GolfSim-Connect-macos-arm64.zip` from the [latest release](https://github.com/chgl42/golfsim-connect/releases/latest).
 2. Unzip and move **GolfSim Connect.app** to `/Applications`. Upgrading from OpenLaunch Connect: quit it and delete
    `/Applications/OpenLaunch Connect.app` first, so it can't be started again.
 3. The app is ad-hoc signed but not notarized, so Gatekeeper blocks it on first launch. Run once:
@@ -110,8 +110,8 @@ On first start macOS asks **"GolfSim Connect would like to use Bluetooth"** → 
 Requires [Rust](https://rustup.rs) 1.94 or newer.
 
 ```bash
-git clone https://github.com/chgl42/openlaunch-connect.git
-cd openlaunch-connect
+git clone https://github.com/chgl42/golfsim-connect.git
+cd golfsim-connect
 ./make-app.sh --install
 ```
 
@@ -231,7 +231,7 @@ folder of the earlier name (`OpenLaunch Connect`) moves there on the first start
 ## Troubleshooting
 
 The app's **HELP** page has the common fixes in short. Still stuck? Press **COPY LOG** on the Log page and
-[open an issue](https://github.com/chgl42/openlaunch-connect/issues) with the log pasted in.
+[open an issue](https://github.com/chgl42/golfsim-connect/issues) with the log pasted in.
 
 - **NO R10 stays red** – Is the R10 on? Is iPhone Bluetooth off? Check *System Settings → Privacy & Security → Bluetooth* and allow GolfSim Connect.
 - **R10 shows "Device error"** – usually the R10 is not level. Put it on a flat surface.
@@ -291,7 +291,7 @@ git tag v0.7.0 && git push origin v0.7.0
 
 GolfSim Connect is free and open source. If it saves you the iPhone-and-E6 detour and you'd like to say thanks,
 you can [buy me a coffee](https://buymeacoffee.com/chgl42). Bug reports and ideas are just as welcome as
-[issues](https://github.com/chgl42/openlaunch-connect/issues).
+[issues](https://github.com/chgl42/golfsim-connect/issues).
 
 ## License
 
