@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// A fresh, empty folder under the system's temp dir, removed again when dropped.
 pub struct TempDir(PathBuf);
@@ -59,6 +59,21 @@ pub fn state_lock() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
+
+/// Held (shared) by the tests that start a child process. A child holds every open file of this
+/// test binary from its start until its exec, so a file lock dropped meanwhile stays held until
+/// then, even on a file opened close-on-exec.
+pub fn starting_children() -> RwLockReadGuard<'static, ()> {
+    CHILDREN.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Held by the tests that drop a file lock and expect it free right after: no child process
+/// starts meanwhile (see [`starting_children`]).
+pub fn no_children_starting() -> RwLockWriteGuard<'static, ()> {
+    CHILDREN.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+static CHILDREN: RwLock<()> = RwLock::new(());
 
 /// A fixture from `tests/fixtures/`.
 #[macro_export]

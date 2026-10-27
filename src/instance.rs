@@ -158,7 +158,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::test_util::TempDir;
+    use crate::test_util::{TempDir, no_children_starting, starting_children};
 
     /// No app of an earlier name runs (the injected process check).
     const NONE_RUNNING: fn(&str) -> bool = |_| false;
@@ -189,6 +189,7 @@ mod tests {
     /// the first one ends, the lock is free again.
     #[test]
     fn second_instance_is_turned_away_and_writes_nothing() {
+        let _children = no_children_starting();
         let home = TempDir::new("instance-second");
         let dir = Settings::dir_in(home.path(), DATA_DIR);
         let first = claim_in(home.path()).unwrap();
@@ -214,6 +215,7 @@ mod tests {
     /// The claim locks, then moves the history in; a second claim is turned away and moves nothing.
     #[test]
     fn the_history_moves_only_under_the_lock() {
+        let _children = no_children_starting();
         let home = TempDir::new("instance-migrate");
         let old = Settings::dir_in(home.path(), "OpenR10 Connect");
         std::fs::create_dir_all(&old).unwrap();
@@ -239,6 +241,7 @@ mod tests {
     /// nothing is written, and the error names that app. Once it ends, its folder moves in.
     #[test]
     fn a_running_earlier_build_stops_the_move() {
+        let _children = no_children_starting();
         let home = TempDir::new("instance-earlier-running");
         let old = Settings::dir_in(home.path(), "OpenLaunch Connect");
         std::fs::create_dir_all(&old).unwrap();
@@ -262,6 +265,7 @@ mod tests {
     /// The locks of the earlier folders are held while the returned files live, and free after.
     #[test]
     fn earlier_locks_are_held_until_dropped() {
+        let _children = no_children_starting();
         let home = TempDir::new("instance-earlier-held");
         let old = Settings::dir_in(home.path(), "OpenLaunch Connect");
         std::fs::create_dir_all(&old).unwrap();
@@ -316,6 +320,7 @@ mod tests {
     /// The real check looks for a process started from the app's bundle; none of this name runs.
     #[test]
     fn no_process_of_an_unknown_app_is_seen() {
+        let _children = starting_children();
         assert!(!app_running("No Such App 7f3e9a"));
     }
 
@@ -325,6 +330,7 @@ mod tests {
     #[test]
     fn a_process_started_from_an_app_bundle_is_seen() {
         use std::os::unix::fs::PermissionsExt;
+        let _children = starting_children();
         let dir = TempDir::new("instance-app-running");
         let bin = dir.path().join("Fake Old 5d2b.app/Contents/MacOS");
         std::fs::create_dir_all(&bin).unwrap();
