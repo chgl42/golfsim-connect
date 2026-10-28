@@ -207,7 +207,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   commits stay traceable.
 - `main` is protected by the ruleset "Protect main": no force push/deletion, changes only via pull request, CI check
   `build` must be green (no required reviews; admin bypass as an emergency exit). Flow: feature branch → PR →
-  `gh pr merge --merge` after green CI. Test build of a PR: artifact via `gh run download <run> -n GolfSim-Connect-macos-arm64`.
+  auto-merge with a merge commit (`gh pr merge --auto --merge`) once `build` is green, or `gh pr merge --merge` after
+  green CI. The head branch is deleted after the merge. Test build of a PR: artifact via `gh run download <run> -n GolfSim-Connect-macos-arm64`.
 - Every PR adds its user-visible changes to `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog: Added / Changed /
   Fixed / Removed; written for users, not a commit list).
 - Release: in a PR, bump the version in `Cargo.toml` and `packaging/Info.plist` and rename `[Unreleased]` to
