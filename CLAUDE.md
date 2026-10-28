@@ -8,9 +8,10 @@ Replaces the detour R10 → iPhone Garmin app → E6 → gspro-r10.
 During private development (0.x) the project was called **OpenR10 Connect**; renamed because more launch
 monitors are planned. The public repo starts at 1.0.0 with a single commit. Through 1.1 the app was called
 **OpenLaunch Connect**; renamed to GolfSim Connect for the player-facing name only – crate, lib, binaries,
-`OPENLAUNCH_*`, the GSPro device id and the repo keep the old identifiers. R10-specific is essentially `engine.rs`; device names ("R10") stay in the UI where the device is meant.
+`OPENLAUNCH_*` and the GSPro device id keep the old identifiers. After 1.2.0 the repo moved from the old name `openlaunch-connect`;
+GitHub redirects the old web, API and git URLs, so never create a repo under the old name again. R10-specific is essentially `engine.rs`; device names ("R10") stay in the UI where the device is meant.
 
-Open-source project (MIT OR Apache-2.0), repo `chgl42/openlaunch-connect`. The maintainer communicates in **German**;
+Open-source project (MIT OR Apache-2.0), repo `chgl42/golfsim-connect`. The maintainer communicates in **German**;
 UI source texts, logs, README, code comments and this file are **English**; the UI is also available in German (`i18n/`).
 Not affiliated with Garmin or GSPro – use trademarks descriptively only.
 

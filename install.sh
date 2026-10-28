@@ -2,7 +2,7 @@
 # Downloads the latest GolfSim Connect release and installs it to /Applications.
 set -euo pipefail
 
-REPO="${OPENLAUNCH_REPO:-chgl42/openlaunch-connect}"
+REPO="${OPENLAUNCH_REPO:-chgl42/golfsim-connect}"
 APP="GolfSim Connect.app"
 ZIP="GolfSim-Connect-macos-arm64.zip"
 TMP="$(mktemp -d)"
