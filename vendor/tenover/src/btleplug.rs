@@ -435,8 +435,8 @@ async fn discover_and_connect() -> Result<(Adapter, Peripheral, String), Btleplu
             .flatten()
             .and_then(|props| props.local_name.clone())
             .unwrap_or_default();
-        if !name.is_empty() {
-            crate::diag(&scan_line(&addr, &name));
+        if let Some(line) = scan_line(&addr, &name) {
+            crate::diag(&line);
         }
 
         if is_r10(p).await {
@@ -511,9 +511,10 @@ fn shown_name(name: &str) -> String {
     if name == R10_DEVICE_NAME { format!("{name:?}") } else { "<device>".to_string() }
 }
 
-/// The scan's line for one named peripheral: its id, and its name as `shown_name` shows it.
-fn scan_line(addr: &str, name: &str) -> String {
-    format!("  {addr}  {}", shown_name(name))
+/// The scan's line for one peripheral: its id, and its name as `shown_name` shows it; none for a
+/// peripheral without a name.
+fn scan_line(addr: &str, name: &str) -> Option<String> {
+    (!name.is_empty()).then(|| format!("  {addr}  {}", shown_name(name)))
 }
 
 /// The line for a Garmin device that is not an R10; its name masked like the scan line's.
@@ -533,14 +534,19 @@ mod tests {
 
     #[test]
     fn other_device_names_are_masked() {
-        assert_eq!(scan_line("AB12-CD34", "iPhone von Jane"), "  AB12-CD34  <device>");
+        assert_eq!(scan_line("AB12-CD34", "iPhone von Jane").as_deref(), Some("  AB12-CD34  <device>"));
         assert_eq!(shown_name("Living Room TV"), "<device>");
         assert_eq!(shown_name("approach r10"), "<device>");
     }
 
     #[test]
     fn the_r10_keeps_its_name() {
-        assert_eq!(scan_line("CD34-EF56", "Approach R10"), "  CD34-EF56  \"Approach R10\"");
+        assert_eq!(scan_line("CD34-EF56", "Approach R10").as_deref(), Some("  CD34-EF56  \"Approach R10\""));
+    }
+
+    #[test]
+    fn a_device_without_a_name_gets_no_line() {
+        assert_eq!(scan_line("EF56-AB12", ""), None);
     }
 
     #[test]
