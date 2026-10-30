@@ -436,7 +436,7 @@ async fn discover_and_connect() -> Result<(Adapter, Peripheral, String), Btleplu
             .and_then(|props| props.local_name.clone())
             .unwrap_or_default();
         if !name.is_empty() {
-            crate::diag(&format!("  {addr}  {name:?}"));
+            crate::diag(&scan_line(&addr, &name));
         }
 
         if is_r10(p).await {
@@ -499,13 +499,57 @@ async fn is_r10(peripheral: &Peripheral) -> bool {
         return true;
     }
     if props.manufacturer_data.contains_key(&GARMIN_MANUFACTURER_ID) {
-        let name = props.local_name.as_deref().unwrap_or("no name");
-        crate::diag(&format!("  skipping Garmin device ({name}) – not an R10"));
+        crate::diag(&garmin_skip_line(props.local_name.as_deref()));
     }
     false
+}
+
+/// An advertised name as the scan diagnostics show it (local change, PATCHES.md 9): the R10's
+/// own name quoted, every other name as `<device>`, so a pasted log does not tell whose phone or
+/// TV was nearby. An allow-list of one: a new kind of nearby device can never leak its name.
+fn shown_name(name: &str) -> String {
+    if name == R10_DEVICE_NAME { format!("{name:?}") } else { "<device>".to_string() }
+}
+
+/// The scan's line for one named peripheral: its id, and its name as `shown_name` shows it.
+fn scan_line(addr: &str, name: &str) -> String {
+    format!("  {addr}  {}", shown_name(name))
+}
+
+/// The line for a Garmin device that is not an R10; its name masked like the scan line's.
+fn garmin_skip_line(name: Option<&str>) -> String {
+    let name = name.map_or_else(|| "no name".to_string(), shown_name);
+    format!("  skipping Garmin device ({name}) – not an R10")
 }
 
 /// Extract a string address from a btleplug peripheral.
 fn peripheral_address(peripheral: &Peripheral) -> String {
     peripheral.id().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn other_device_names_are_masked() {
+        assert_eq!(scan_line("AB12-CD34", "iPhone von Jane"), "  AB12-CD34  <device>");
+        assert_eq!(shown_name("Living Room TV"), "<device>");
+        assert_eq!(shown_name("approach r10"), "<device>");
+    }
+
+    #[test]
+    fn the_r10_keeps_its_name() {
+        assert_eq!(scan_line("CD34-EF56", "Approach R10"), "  CD34-EF56  \"Approach R10\"");
+    }
+
+    #[test]
+    fn other_garmin_device_names_are_masked() {
+        assert_eq!(garmin_skip_line(Some("epix Pro")), "  skipping Garmin device (<device>) – not an R10");
+    }
+
+    #[test]
+    fn a_garmin_device_without_a_name_says_so() {
+        assert_eq!(garmin_skip_line(None), "  skipping Garmin device (no name) – not an R10");
+    }
 }

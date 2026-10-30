@@ -26,5 +26,9 @@ for OpenLaunch Connect (Apache-2.0 §4(b)):
    so the app connected to a Garmin watch (an epix advertises the ID without a name). Now it matches the
    name "Approach R10" only, like the BlueZ backend; other Garmin devices are logged as skipped.
 8. **Removed** – `src/bin/` (FRP server binary), `examples/`, CI config and `rust-toolchain.toml`.
+9. **Nearby device names masked** – the scan diagnostics in `src/btleplug.rs` (one line per named
+   peripheral, and the line for a skipped Garmin device) show every advertised name except
+   "Approach R10" as `<device>`; the ids stay. A log pasted into an issue no longer names the phones
+   and TVs nearby.
 
 Upstreaming of (1)–(7) is planned.
