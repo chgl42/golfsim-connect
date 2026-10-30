@@ -519,7 +519,10 @@ fn scan_line(addr: &str, name: &str) -> Option<String> {
 
 /// The line for a Garmin device that is not an R10; its name masked like the scan line's.
 fn garmin_skip_line(name: Option<&str>) -> String {
-    let name = name.map_or_else(|| "no name".to_string(), shown_name);
+    let name = match name {
+        None | Some("") => "no name".to_string(),
+        Some(name) => shown_name(name),
+    };
     format!("  skipping Garmin device ({name}) – not an R10")
 }
 
@@ -557,5 +560,6 @@ mod tests {
     #[test]
     fn a_garmin_device_without_a_name_says_so() {
         assert_eq!(garmin_skip_line(None), "  skipping Garmin device (no name) – not an R10");
+        assert_eq!(garmin_skip_line(Some("")), "  skipping Garmin device (no name) – not an R10");
     }
 }
