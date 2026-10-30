@@ -130,8 +130,8 @@ cd golfsim-connect
 | **NO R10** (red) | searching for the R10 – also shown a few seconds after the R10 is switched off; the app reconnects on its own |
 
 Hover over the status panel for details; the **LOG** page shows everything that happens. **COPY LOG** copies
-the log with the app's version, ready to paste into an issue; your home folder shows as `~` and email addresses as
-`<email>`. The **HELP** page lists the common fixes (see *Troubleshooting*) and how to ask for help.
+the log with the app's version, ready to paste into an issue; your home folder shows as `~`, email addresses as
+`<email>` and other Bluetooth devices nearby as `<device>`. The **HELP** page lists the common fixes (see *Troubleshooting*) and how to ask for help.
 
 **Swing tempo:** next to the buttons the play page shows the tempo of the last swing (backswing : downswing,
 e.g. *3.0 : 1*, with both times). It needs a real swing – test shots have none.

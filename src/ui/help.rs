@@ -53,7 +53,7 @@ impl Page for HelpPage {
                 let ui = &mut cols[1];
                 tile(ui, tr("ASKING FOR HELP"), |ui| {
                     bullet(ui, &app(tr("Copy the log (COPY LOG on the Log page) and open an issue on GitHub; paste the log into it.")));
-                    bullet(ui, &app(tr("The copied log shows ~ for your home folder and <email> for email addresses. Nothing else is masked – look the log over before you post it.")));
+                    bullet(ui, &app(tr("The copied log shows ~ for your home folder, <email> for email addresses and <device> for other Bluetooth devices nearby. Nothing else is masked – look the log over before you post it.")));
                     let link = ui.link(RichText::new(tr("Open the issues on GitHub")).size(12.5).color(ICON).underline());
                     if link.on_hover_text(ISSUES_URL).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(ISSUES_URL));
