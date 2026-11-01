@@ -32,7 +32,10 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about
+          tool: cargo-about,cargo-deny
+
+      - name: Dependency licences and advisories (deny.toml)
+        run: cargo deny --locked check
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
