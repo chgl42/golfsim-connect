@@ -116,7 +116,13 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - `install.sh` – downloads the latest release via curl, quits a running copy, installs, removes the quarantine
 - `about.toml`/`about.hbs` – cargo-about (third-party licenses); `LICENSE-*`, `NOTICE`
 - `docs/images/` – banner (`tools/banner.py`) and screenshots for the README
-- `.github/workflows/build.yml` – macOS 14 runner: tests, `make-app.sh`, artifact; tag `v*` → release
+- `.github/workflows/build.yml` – macOS 14 runner: `cargo deny --locked check` (first, fails fast), Clippy, tests,
+  `make-app.sh`, artifact; tag `v*` → release
+- `deny.toml` – cargo-deny: OSI licences only (each exception names the crate and its reason), RustSec advisories
+  with yanked crates denied, crates.io only; any error fails the `build` job, duplicate versions only warn.
+  `about.toml` stays the report.
+- `.github/dependabot.yml` – monthly `cargo` and `github-actions` updates, grouped, at most 5 open PRs, no automerge;
+  `vendor/` is excluded (vendored crates are updated by hand, see `vendor/tenover/PATCHES.md`)
 
 ## Hard-won lessons about GSPro OpenConnect
 

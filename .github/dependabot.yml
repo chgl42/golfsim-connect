@@ -1,0 +1,27 @@
+# Dependency updates: monthly, grouped, at most 5 open pull requests, no automerge. The vendored
+# crates under vendor/ are excluded; their updates are merged by hand and recorded in their
+# PATCHES.md (ADR-003).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    exclude-paths: ["vendor/**"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      # Toolkit crates that must move together.
+      gui-toolkit:
+        patterns: ["egui*", "eframe", "epaint*", "emath", "ecolor", "wgpu*", "winit"]
+      platform-bindings:
+        patterns: ["objc2*", "block2", "core-foundation*", "core-graphics*"]
+      serde:
+        patterns: ["serde*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

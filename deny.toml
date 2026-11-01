@@ -1,0 +1,39 @@
+# cargo-deny: dependency licences, RustSec advisories, bans and sources. CI runs
+# `cargo deny --locked check` in the `build` job; any error fails the build, duplicate versions
+# only warn. Every exception names the crate and the reason. about.toml stays the licence
+# report for the shipped notices.
+
+[graph]
+targets = ["aarch64-apple-darwin"]
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# OSI-approved licences only; anything else fails the build.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "OFL-1.1",
+]
+exceptions = [
+    # egui's bundled default font carries the Ubuntu Font Licence, which is not OSI-approved.
+    { crate = "epaint_default_fonts", allow = ["Ubuntu-font-1.0"] },
+    # Mozilla's root certificates, used by ureq/rustls for the update check.
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    # A float parser in the GPU stack (wgpu/naga).
+    { crate = "hexf-parse", allow = ["CC0-1.0"] },
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
