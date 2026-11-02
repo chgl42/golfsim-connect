@@ -76,7 +76,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "Moved by hand and lost? Choosing one of the nine places brings it back." => "Von Hand verschoben und verloren? Einer der neun Plätze holt es zurück.",
         "ASKING FOR HELP" => "HILFE BEKOMMEN",
         "Copy the log (COPY LOG on the Log page) and open an issue on GitHub; paste the log into it." => "Kopiere das Log (LOG KOPIEREN auf der Log-Seite) und eröffne ein Issue auf GitHub; füge das Log dort ein.",
-        "The copied log shows ~ for your home folder and <email> for email addresses. Nothing else is masked – look the log over before you post it." => "Im kopierten Log steht ~ für deinen Benutzerordner und <email> für E-Mail-Adressen. Sonst wird nichts verborgen – sieh das Log durch, bevor du es veröffentlichst.",
+        "The copied log shows ~ for your home folder, <email> for email addresses and <device> for other Bluetooth devices nearby. Nothing else is masked – look the log over before you post it." => "Im kopierten Log steht ~ für deinen Benutzerordner, <email> für E-Mail-Adressen und <device> für andere Bluetooth-Geräte in der Nähe. Sonst wird nichts verborgen – sieh das Log durch, bevor du es veröffentlichst.",
         "Open the issues on GitHub" => "Issues auf GitHub öffnen",
 
         // Shots page

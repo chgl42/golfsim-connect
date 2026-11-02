@@ -1,7 +1,9 @@
 //! Minimal timestamped console logging.
 //!
 //! Every line written here is masked, and `state::push_log` masks the lines it stores: the home
-//! folder becomes `~` and email addresses become `<email>`. Nothing else is masked, and a line
+//! folder becomes `~` and email addresses become `<email>`. The R10 scan masks the names of other
+//! Bluetooth devices nearby as `<device>` itself (only it knows which word is a device name), so
+//! they reach this log masked. Nothing else is masked, and a line
 //! written straight into `State::log` is not masked at all, so look a log over before posting it.
 //! Never log a token or a player's name; the mask is a safety net, not a licence.
 

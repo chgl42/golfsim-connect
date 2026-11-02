@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - The repository moved to chgl42/golfsim-connect; old links redirect.
+- **Nearby Bluetooth devices masked in the log:** when the app searches for the R10, the log lists the devices it
+  found with their ids, but shows every name except the R10's as `<device>` – in the terminal, on the Log page and
+  in the copy. The Help page says so.
 
 ### Removed
 - The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.

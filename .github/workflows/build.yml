@@ -46,6 +46,9 @@ jobs:
       - name: Tests
         run: cargo test --all-targets
 
+      - name: Tests of the vendored R10 library (a path dependency, not run by the step above)
+        run: cargo test -p tenover --locked
+
       - name: Build "GolfSim Connect.app"
         run: ./make-app.sh
 

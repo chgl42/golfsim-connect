@@ -65,7 +65,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check through a source another crate registers (`UpdateSource`, `register`, `is_newer`); the core has none and contacts nobody ([ADR-014](adr/adr-014-update-source-as-an-extension-point.md)) | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
-| `log` | Timestamped log to stderr and into `state`; each line masked (crate-internal `log::mask`: home folder → `~`, email addresses → `<email>`, nothing else) in `emit` and again in `state::push_log`, so `log::*` and a line an extension pushes with `push_log` are masked (masking twice changes nothing); a line written straight into `State.log` is not | Shallow; never log a token or a player's name – the mask is a safety net, so look a log over before posting it |
+| `log` | Timestamped log to stderr and into `state`; each line masked (crate-internal `log::mask`: home folder → `~`, email addresses → `<email>`, nothing else; other Bluetooth devices' names are already `<device>` from the R10 scan in `vendor/tenover`) in `emit` and again in `state::push_log`, so `log::*` and a line an extension pushes with `push_log` are masked (masking twice changes nothing); a line written straight into `State.log` is not | Shallow; never log a token or a player's name – the mask is a safety net, so look a log over before posting it |
 
 ### App
 
@@ -202,7 +202,7 @@ that list isn't always the session (all time, the preview's sample shot).
 | Shot history | `…/GolfSim Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
-| App log | stderr + the last 400 lines in `state` | `log` | English; home folder and email addresses masked; copied by *COPY LOG*; the app writes no log file and sends it nowhere |
+| App log | stderr + the last 400 lines in `state` | `log` | English; home folder, email addresses and other Bluetooth devices' names masked; copied by *COPY LOG*; the app writes no log file and sends it nowhere |
 
 ### Single instance and migration
 
