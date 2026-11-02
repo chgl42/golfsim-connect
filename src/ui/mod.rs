@@ -63,6 +63,11 @@ pub fn run() -> eframe::Result {
     run_with(Vec::new())
 }
 
+/// The log's first line: the app and its installed version (the update source's, else the core's).
+fn start_line() -> String {
+    format!("{APP_NAME} {} started", update::installed())
+}
+
 /// Like [`run`], with more pages: `pages` (e.g. of another crate) come in the navigation after
 /// the core pages, before *Settings*, in the order given.
 ///
@@ -80,7 +85,7 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     let settings = Settings::load();
     i18n::set(&settings.language);
     crate::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
-    log::info(&format!("{APP_NAME} {} started", update::installed()));
+    log::info(&start_line());
     let tx = engine::start(settings.to_config());
     crate::gspro::DEBUG.store(settings.debug, std::sync::atomic::Ordering::Relaxed);
 
@@ -1636,6 +1641,8 @@ mod tests {
         harness.step();
         harness.get_by_label(&format!("Installed: {}", env!("CARGO_PKG_VERSION")));
         harness.get_by_label("Test");
+        // The row's "Update" button stands for the row (its label and toggle carry no accesskit
+        // label); `updates_with_a_source` shows it is there with a source.
         assert!(harness.query_by_label("Update").is_none(), "no Updates row");
         assert!(harness.query_by_label("UPDATE 9.9.9").is_none());
 
@@ -1643,6 +1650,57 @@ mod tests {
         harness.step();
         harness.get_by_label("UPDATE 9.9.9");
         state::with(|s| s.update = None);
+    }
+
+    /// A registered source with its own version and nothing newer.
+    struct AppSource;
+
+    impl update::UpdateSource for AppSource {
+        fn installed(&self) -> String {
+            "7.7.7".into()
+        }
+        fn check(&self) -> Result<Option<update::Release>, String> {
+            Ok(None)
+        }
+    }
+
+    /// With a source the settings card has the Updates row and shows the source's version; the
+    /// log's start line and the copied log name it too.
+    #[test]
+    fn updates_with_a_source() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        i18n::set(&Language::new("en"));
+        let _state = demo_state();
+        state::with(|s| {
+            s.update = None;
+            s.update_check = None;
+        });
+        update::with_test_source(Box::new(AppSource), || {
+            assert_eq!(start_line(), format!("{APP_NAME} 7.7.7 started"));
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+                setup_style(&cc.egui_ctx);
+                App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+            });
+            harness.state_mut().remember_size = false;
+            harness.state_mut().show_page("settings");
+            harness.step();
+            harness.get_by_label("Installed: 7.7.7");
+            harness.get_by_label("Update");
+
+            harness.state_mut().show_page("log");
+            harness.step();
+            harness.get_by_label("COPY LOG").click();
+            harness.step();
+            let copied = harness.output().platform_output.commands.iter().find_map(|c| match c {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            });
+            let header = format!("{APP_NAME} 7.7.7 ({})\n", std::env::consts::OS);
+            assert!(copied.is_some_and(|c| c.starts_with(&header)), "the copied log names the source's version");
+        });
     }
 
     #[test]

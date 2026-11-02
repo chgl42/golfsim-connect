@@ -53,19 +53,41 @@ fn register_in(lock: &OnceLock<Box<dyn UpdateSource>>, source: Box<dyn UpdateSou
     }
 }
 
-/// The registered source, if any.
+/// The registered source, if any (in the lib's tests: the one set with [`with_test_source`] on this
+/// thread first).
 pub(crate) fn source() -> Option<&'static dyn UpdateSource> {
+    #[cfg(test)]
+    if let Some(source) = TEST_SOURCE.with(std::cell::Cell::get) {
+        return Some(source);
+    }
     SOURCE.get().map(Box::as_ref)
 }
 
 /// The installed version: the source's, else the core's.
-#[cfg_attr(not(feature = "gui"), expect(dead_code, reason = "shown by the UI"))]
+#[cfg_attr(all(not(feature = "gui"), not(test)), expect(dead_code, reason = "shown by the UI"))]
 pub(crate) fn installed() -> String {
-    installed_in(&SOURCE)
+    source().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), UpdateSource::installed)
 }
 
-fn installed_in(lock: &OnceLock<Box<dyn UpdateSource>>) -> String {
-    lock.get().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), |s| s.installed())
+#[cfg(test)]
+thread_local! {
+    /// A source for this test thread only: the global `OnceLock` is shared by the whole test binary
+    /// and can't be unset. egui_kittest renders on the test thread, so UI tests see it.
+    static TEST_SOURCE: std::cell::Cell<Option<&'static dyn UpdateSource>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with `source` as the registered source on this thread (lib tests only).
+#[cfg(test)]
+pub(crate) fn with_test_source<R>(source: Box<dyn UpdateSource>, f: impl FnOnce() -> R) -> R {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_SOURCE.with(|s| s.set(None));
+        }
+    }
+    TEST_SOURCE.with(|s| s.set(Some(Box::leak(source))));
+    let _reset = Reset;
+    f()
 }
 
 /// Check in the background (at start, or from the settings); a newer release ends up in
@@ -183,10 +205,13 @@ mod tests {
 
     #[test]
     fn the_source_gives_the_installed_version() {
-        let lock = OnceLock::new();
-        assert_eq!(installed_in(&lock), env!("CARGO_PKG_VERSION"));
-        register_in(&lock, Box::new(Fake(Ok(None))));
-        assert_eq!(installed_in(&lock), "1.0.0");
+        assert_eq!(installed(), env!("CARGO_PKG_VERSION"));
+        with_test_source(Box::new(Fake(Ok(None))), || {
+            assert!(source().is_some());
+            assert_eq!(installed(), "1.0.0");
+        });
+        assert!(source().is_none(), "the test source ends with the closure");
+        assert_eq!(installed(), env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
