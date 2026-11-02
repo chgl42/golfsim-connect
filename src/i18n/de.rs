@@ -128,18 +128,16 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "NOTIFICATIONS & UPDATES" => "MITTEILUNGEN & UPDATES",
         "Updates" => "Updates",
         "Check on start" => "Beim Start prüfen",
-        "Asks GitHub for the latest release when the app starts" => "Fragt beim Start bei GitHub nach der neuesten Version",
+        "Asks for the latest version when the app starts" => "Fragt beim Start nach der neuesten Version",
         "Installed: {v}" => "Installiert: {v}",
         "Update" => "Update",
-        "Asks GitHub for the latest release now" => "Fragt jetzt bei GitHub nach der neuesten Version",
+        "Asks for the latest version now" => "Fragt jetzt nach der neuesten Version",
         "checking …" => "prüfe …",
         "up to date" => "aktuell",
         "update {v} available" => "Update {v} verfügbar",
         "check failed" => "Prüfung fehlgeschlagen",
         "UPDATE {v}" => "UPDATE {v}",
-        "A newer version is available – click to open the release page" => {
-            "Eine neuere Version ist verfügbar – Klick öffnet die Release-Seite"
-        }
+        "A newer version is available – click to open its page" => "Eine neuere Version ist verfügbar – Klick öffnet ihre Seite",
         "Language" => "Sprache",
         "System" => "System",
         "Interface" => "Oberfläche",

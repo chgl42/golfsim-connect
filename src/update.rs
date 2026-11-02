@@ -1,20 +1,18 @@
-//! Update check: asks GitHub once at start whether a newer release exists (opt-out in the
-//! settings). Only the public releases API is queried; nothing is sent besides the request.
+//! Update check as an extension point (ADR-014): the core asks nobody on its own. Another crate
+//! registers an [`UpdateSource`] with [`register`]; the core then asks it once at start (opt-out
+//! in the settings) and from the settings, on its own `update` thread, and shows a newer release
+//! as a pill in the top bar. Without a source there is no check and no request.
 
-use std::time::Duration;
-
-use serde_json::Value;
+use std::sync::OnceLock;
 
 use crate::{log, state};
 
-const LATEST_RELEASE_API: &str = "https://api.github.com/repos/chgl42/golfsim-connect/releases/latest";
-
-/// A release newer than the running version.
+/// A release newer than the installed version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
     /// Version without the leading `v`, e.g. `0.10.0`.
     pub version: String,
-    /// Release page on GitHub.
+    /// The page that describes the release; the pill in the top bar opens it.
     pub url: String,
 }
 
@@ -28,64 +26,72 @@ pub enum Check {
     Failed(String),
 }
 
+/// Where the app learns about newer versions, registered by another crate with [`register`].
+pub trait UpdateSource: Send + Sync {
+    /// The installed version, e.g. `1.2.0` (shown as "Installed: …" in the settings).
+    fn installed(&self) -> String;
+    /// A release newer than [`installed`](Self::installed), or `None` when it is up to date.
+    /// Called on the core's `update` thread, never on the UI thread, so it may block.
+    fn check(&self) -> Result<Option<Release>, String>;
+}
+
+static SOURCE: OnceLock<Box<dyn UpdateSource>> = OnceLock::new();
+
+/// Registers the update source. Call it once, before the UI is shown (`ui::run_with`); a second
+/// call is logged and ignored, the first source stays.
+pub fn register(source: Box<dyn UpdateSource>) {
+    register_in(&SOURCE, source);
+}
+
+fn register_in(lock: &OnceLock<Box<dyn UpdateSource>>, source: Box<dyn UpdateSource>) {
+    if lock.set(source).is_err() {
+        log::info("An update source is already registered; the new one is ignored.");
+    }
+}
+
+/// The registered source, if any.
+pub(crate) fn source() -> Option<&'static dyn UpdateSource> {
+    SOURCE.get().map(Box::as_ref)
+}
+
+/// The installed version: the source's, else the core's.
+#[cfg_attr(not(feature = "gui"), expect(dead_code, reason = "shown by the UI"))]
+pub(crate) fn installed() -> String {
+    source().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), UpdateSource::installed)
+}
+
 /// Check in the background (at start, or from the settings); a newer release ends up in
-/// `state.update`, the outcome in `state.update_check`.
+/// `state.update`, the outcome in `state.update_check`. Does nothing without a registered source.
 pub fn check_in_background() {
+    let Some(source) = source() else { return };
     state::with(|s| s.update_check = Some(Check::Running));
-    std::thread::Builder::new()
-        .name("update".into())
-        .spawn(|| {
-            let check = match latest_release() {
-                Ok(Some(release)) => {
-                    log::info(&format!("Update available: {} ({})", release.version, release.url));
-                    state::with(|s| s.update = Some(release));
-                    Check::Available
-                }
-                Ok(None) => {
-                    log::info("No update available.");
-                    Check::UpToDate
-                }
-                Err(e) => {
-                    log::info(&format!("Update check failed: {e}"));
-                    Check::Failed(e)
-                }
-            };
-            state::with(|s| s.update_check = Some(check));
-        })
-        .expect("spawn update thread");
+    std::thread::Builder::new().name("update".into()).spawn(move || run_check(source)).expect("spawn update thread");
 }
 
-fn latest_release() -> Result<Option<Release>, String> {
-    let json = fetch_latest(LATEST_RELEASE_API)?;
-    Ok(newer_release(&json, env!("CARGO_PKG_VERSION")))
+/// Asks `source` and puts the outcome into the state.
+fn run_check(source: &dyn UpdateSource) {
+    let check = match source.check() {
+        Ok(Some(release)) => {
+            log::info(&format!("Update available: {} ({})", release.version, release.url));
+            state::with(|s| s.update = Some(release));
+            Check::Available
+        }
+        Ok(None) => {
+            log::info("No update available.");
+            Check::UpToDate
+        }
+        Err(e) => {
+            log::info(&format!("Update check failed: {e}"));
+            Check::Failed(e)
+        }
+    };
+    state::with(|s| s.update_check = Some(check));
 }
 
-/// The GitHub API's answer for the latest release at `url` (redirects are followed, so an
-/// app built with the repository's old name still finds it).
-fn fetch_latest(url: &str) -> Result<Value, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).build().into();
-    let body = agent
-        .get(url)
-        .header("User-Agent", concat!("OpenLaunch-Connect/", env!("CARGO_PKG_VERSION")))
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|e| e.to_string())?
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| e.to_string())?;
-    serde_json::from_str(&body).map_err(|e| e.to_string())
-}
-
-/// The release described by the GitHub API `json`, if it is newer than `current`.
-fn newer_release(json: &Value, current: &str) -> Option<Release> {
-    let tag = json.get("tag_name")?.as_str()?;
-    let url = json.get("html_url")?.as_str()?;
-    let version = tag.trim_start_matches('v');
-    is_newer(version, current).then(|| Release { version: version.to_string(), url: url.to_string() })
-}
-
-/// Compare `major.minor.patch` versions numerically (`0.10.0` > `0.9.1`); anything unparsable is not newer.
-fn is_newer(candidate: &str, current: &str) -> bool {
+/// Compare `major.minor.patch` versions numerically (`0.10.0` > `0.9.1`); anything unparsable is
+/// not newer. For sources, to compare their latest version with the installed one.
+#[must_use]
+pub fn is_newer(candidate: &str, current: &str) -> bool {
     let parse = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|p| p.parse().ok()).collect() };
     match (parse(candidate), parse(current)) {
         (Some(a), Some(b)) => a > b,
@@ -97,6 +103,25 @@ fn is_newer(candidate: &str, current: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A source that answers with a fixed result.
+    struct Fake(Result<Option<Release>, String>);
+
+    impl UpdateSource for Fake {
+        fn installed(&self) -> String {
+            "1.0.0".into()
+        }
+        fn check(&self) -> Result<Option<Release>, String> {
+            self.0.clone()
+        }
+    }
+
+    fn reset() {
+        state::with(|s| {
+            s.update = None;
+            s.update_check = None;
+        });
+    }
+
     #[test]
     fn version_order() {
         assert!(is_newer("0.10.0", "0.9.0"));
@@ -107,32 +132,50 @@ mod tests {
         assert!(!is_newer("0.10.0-beta", "0.9.0"), "pre-releases are ignored");
     }
 
+    /// The tests never register a source (the `OnceLock` is shared by the whole test binary).
     #[test]
-    fn release_from_github_json() {
-        let json: Value = serde_json::json!({
-            "tag_name": "v0.10.0",
-            "html_url": "https://github.com/chgl42/golfsim-connect/releases/tag/v0.10.0"
-        });
-        assert_eq!(
-            newer_release(&json, "0.9.0"),
-            Some(Release {
-                version: "0.10.0".into(),
-                url: "https://github.com/chgl42/golfsim-connect/releases/tag/v0.10.0".into()
-            })
-        );
-        assert_eq!(newer_release(&json, "0.10.0"), None);
-        assert_eq!(newer_release(&serde_json::json!({}), "0.9.0"), None);
+    fn no_source_no_check() {
+        let _state = crate::test_util::state_lock();
+        reset();
+        assert!(source().is_none());
+        assert_eq!(installed(), env!("CARGO_PKG_VERSION"));
+        check_in_background();
+        assert_eq!(state::with(|s| (s.update.clone(), s.update_check.clone())), (None, None), "no thread, no state");
     }
 
-    /// Apps released before the move ask the old URL; GitHub redirects it to the renamed
-    /// repository. The current URL is asked too. Needs the network.
     #[test]
-    #[ignore = "network: asks GitHub"]
-    fn old_url_still_finds_the_release() {
-        for url in ["https://api.github.com/repos/chgl42/openlaunch-connect/releases/latest", LATEST_RELEASE_API] {
-            let json = fetch_latest(url).unwrap();
-            let release = newer_release(&json, "0.0.0").expect("a release");
-            assert!(release.url.starts_with("https://github.com/chgl42/golfsim-connect/releases/tag/v"), "{url}: {}", release.url);
-        }
+    fn a_newer_release_is_kept() {
+        let _state = crate::test_util::state_lock();
+        reset();
+        let release = Release { version: "9.9.9".into(), url: "https://example.com/9.9.9".into() };
+        run_check(&Fake(Ok(Some(release.clone()))));
+        assert_eq!(state::with(|s| (s.update.clone(), s.update_check.clone())), (Some(release), Some(Check::Available)));
+        reset();
+    }
+
+    #[test]
+    fn up_to_date() {
+        let _state = crate::test_util::state_lock();
+        reset();
+        run_check(&Fake(Ok(None)));
+        assert_eq!(state::with(|s| (s.update.clone(), s.update_check.clone())), (None, Some(Check::UpToDate)));
+        reset();
+    }
+
+    #[test]
+    fn the_first_source_stays() {
+        let lock = OnceLock::new();
+        register_in(&lock, Box::new(Fake(Ok(None))));
+        register_in(&lock, Box::new(Fake(Err("second".into()))));
+        assert_eq!(lock.get().unwrap().check(), Ok(None));
+    }
+
+    #[test]
+    fn a_failed_check_keeps_its_error() {
+        let _state = crate::test_util::state_lock();
+        reset();
+        run_check(&Fake(Err("offline".into())));
+        assert_eq!(state::with(|s| (s.update.clone(), s.update_check.clone())), (None, Some(Check::Failed("offline".into()))));
+        reset();
     }
 }

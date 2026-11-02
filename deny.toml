@@ -25,8 +25,6 @@ allow = [
 exceptions = [
     # egui's bundled default font carries the Ubuntu Font Licence, which is not OSI-approved.
     { crate = "epaint_default_fonts", allow = ["Ubuntu-font-1.0"] },
-    # Mozilla's root certificates, used by ureq/rustls for the update check.
-    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
     # A float parser in the GPU stack (wgpu/naga).
     { crate = "hexf-parse", allow = ["CC0-1.0"] },
 ]

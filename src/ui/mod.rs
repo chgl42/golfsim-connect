@@ -326,11 +326,12 @@ impl App {
             let text_w = ui.painter().layout_no_wrap(label.clone(), cond(16.0), WHITE).size().x;
             let pill = Rect::from_min_max(pos2(x + 8.0 - text_w - 24.0, y - 13.0), pos2(x + 8.0, y + 13.0));
             let resp = ui.interact(pill, ui.id().with("update"), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
             let p = ui.painter();
             p.rect_filled(pill, 13.0, if resp.hovered() { ACCENT_HOVER } else { ACCENT });
             caps_text(p, pill.center(), egui::Align::Center, label, 16.0, WHITE);
             if resp
-                .on_hover_text(tr("A newer version is available – click to open the release page"))
+                .on_hover_text(tr("A newer version is available – click to open its page"))
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
@@ -704,22 +705,25 @@ impl Page for SettingsPage {
                     }
                 });
             });
-            setting_row(ui, tr("Updates"), |ui| {
-                toggle(ui, &mut app.edit.check_updates, tr("Check on start"))
-                    .on_hover_text(tr("Asks GitHub for the latest release when the app starts"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if secondary_button(ui, tr("Update"), check != Some(update::Check::Running))
-                        .on_hover_text(tr("Asks GitHub for the latest release now"))
-                        .clicked()
-                    {
-                        update::check_in_background();
-                    }
+            // Only with an update source (ADR-014); without one there is nothing to check.
+            if update::source().is_some() {
+                setting_row(ui, tr("Updates"), |ui| {
+                    toggle(ui, &mut app.edit.check_updates, tr("Check on start"))
+                        .on_hover_text(tr("Asks for the latest version when the app starts"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if secondary_button(ui, tr("Update"), check != Some(update::Check::Running))
+                            .on_hover_text(tr("Asks for the latest version now"))
+                            .clicked()
+                        {
+                            update::check_in_background();
+                        }
+                    });
                 });
-            });
+            }
         });
 
         // Installed version and the outcome of the last check, right in the card's header row.
-        let installed = tr("Installed: {v}").replace("{v}", env!("CARGO_PKG_VERSION"));
+        let installed = tr("Installed: {v}").replace("{v}", &update::installed());
         let (text, hint) = match &check {
             None => (installed, None),
             Some(update::Check::Running) => (format!("{installed} · {}", tr("checking …")), None),
@@ -733,12 +737,14 @@ impl Page for SettingsPage {
         let r = ui.painter().text(
             pos2(updates_card.right() - 16.0, updates_card.top() + 21.0),
             Align2::RIGHT_CENTER,
-            text,
+            &text,
             FontId::proportional(12.0),
             MUTED,
         );
+        let resp = ui.interact(r, ui.id().with("update-check"), Sense::hover());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
         if let Some(hint) = hint {
-            ui.interact(r, ui.id().with("update-check"), Sense::hover()).on_hover_text(hint);
+            resp.on_hover_text(hint);
         }
 
         // Footer: status note and the primary save button, right-aligned.
@@ -1605,6 +1611,38 @@ mod tests {
         harness.step();
         assert!(harness.query_by_label("Copied").is_none());
         assert!(harness.state_mut().page_mut::<LogPage>().copied.is_none());
+    }
+
+    /// Without an update source (the tests never register one) the settings card has no Updates
+    /// row; the installed version and the notifications stay. A release in the state shows the pill.
+    #[test]
+    fn updates_without_a_source_and_the_pill() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        i18n::set(&Language::new("en"));
+        let _state = demo_state();
+        state::with(|s| {
+            s.update = None;
+            s.update_check = None;
+        });
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+        });
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_page("settings");
+        harness.step();
+        harness.get_by_label(&format!("Installed: {}", env!("CARGO_PKG_VERSION")));
+        harness.get_by_label("Test");
+        assert!(harness.query_by_label("Update").is_none(), "no Updates row");
+        assert!(harness.query_by_label("UPDATE 9.9.9").is_none());
+
+        state::with(|s| s.update = Some(update::Release { version: "9.9.9".into(), url: "https://example.com/9.9.9".into() }));
+        harness.step();
+        harness.get_by_label("UPDATE 9.9.9");
+        state::with(|s| s.update = None);
     }
 
     #[test]

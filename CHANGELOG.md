@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - The repository moved to chgl42/golfsim-connect; old links redirect.
+- The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.
+  The update check is now an extension point: an extension can register where the app learns about new versions,
+  and only then does the settings card show the *Updates* row.
 
 ## [1.2.0] – 2026-10-27
 

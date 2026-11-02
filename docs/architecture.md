@@ -21,7 +21,6 @@ flowchart LR
   DB -. "read-only, polled" .-> App
   GSPro -. "writes" .-> PL[("Player.log")]
   PL -. "followed" .-> App
-  App -- "GitHub releases API<br/>(update check)" --> GH["github.com"]
 ```
 
 What GSPro does **not** send back over OpenConnect (its carry, total, apex, offline, distance to
@@ -64,7 +63,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `i18n` | `tr()` lookup, languages as data (code, native name, table; English is the source), language switch and locale resolution; tables added by other crates per language (`register`) | One file with one `match` per language (`i18n/de.rs`), its `mod` line and one line in `SHIPPED`, plus registered tables ([ADR-013](adr/adr-013-languages-as-registered-tables.md)) |
 | `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `run_with`, `Page`, `AppCtx`, `kit`, the tile kind interface in `explorer`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
-| `update` | Update check against GitHub releases | Small |
+| `update` | Update check through a source another crate registers (`UpdateSource`, `register`, `is_newer`); the core has none and contacts nobody ([ADR-014](adr/adr-014-update-source-as-an-extension-point.md)) | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
 | `log` | Timestamped log to stderr and into `state`; each line masked (crate-internal `log::mask`: home folder → `~`, email addresses → `<email>`, nothing else) in `emit` and again in `state::push_log`, so `log::*` and a line an extension pushes with `push_log` are masked (masking twice changes nothing); a line written straight into `State.log` is not | Shallow; never log a token or a player's name – the mask is a safety net, so look a log over before posting it |
 
@@ -110,8 +109,8 @@ The module `ui` (`src/ui/`):
 
 ## Runtime
 
-Three long-running threads besides the GUI, plus short-lived ones (the update check, opening the
-GSPro launcher).
+Three long-running threads besides the GUI, plus short-lived ones (the update check, when an
+extension registers an update source; opening the GSPro launcher).
 
 ```mermaid
 flowchart TB

@@ -14,8 +14,6 @@ accepted = [
     "Unlicense",
     "OFL-1.1",
     "Ubuntu-font-1.0",
-    # Mozilla's root certificates (webpki-roots, via ureq/rustls for the update check)
-    "CDLA-Permissive-2.0",
 ]
 targets = ["aarch64-apple-darwin"]
 ignore-build-dependencies = true

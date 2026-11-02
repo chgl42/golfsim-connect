@@ -52,7 +52,7 @@ pub struct State {
     /// GSPro's result of the latest shot (from its database), e.g. the distance left to the pin.
     pub gspro_result: Option<crate::gspro_db::GsproResult>,
     pub shots_sent: u32,
-    /// Newer release found by the update check.
+    /// Newer release found by the update source (ADR-014).
     pub update: Option<crate::update::Release>,
     /// Outcome of the last update check (shown in the settings).
     pub update_check: Option<crate::update::Check>,
