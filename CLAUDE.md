@@ -63,8 +63,10 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
     `notify::alert(Alert::…, "English text")`, at most once per kind and minute, `ENABLED` from the settings (CLI: off).
     Not testable from a sandboxed shell (no LaunchServices start, "NSNotificationCenter connection invalid") – use the
     "Test" button in the settings of the real app.
-  - `update.rs` – update check on start (ureq → GitHub releases API, `is_newer`), result in `state.update`, shown as a
-    pill in the top bar; opt-out `check_updates`, skipped in demo mode.
+  - `update.rs` – update check as an extension point (ADR-014): another crate registers an `UpdateSource`
+    (`update::register`, before `ui::run_with`); the core asks it on its `update` thread at start (opt-out
+    `check_updates`, skipped in demo mode) and from the settings, result in `state.update`, shown as a pill in the top
+    bar. Without a source: no check, no request, no Updates row in the settings. The core registers none.
   - `launcher.rs` – find/open the GSPro launcher in `~/Applications/CrossOver/…`
   - `log.rs` – timestamped log to stderr + `state`; `emit` and `state::push_log` mask each line (crate-internal
     `mask`: home folder → `~`, email addresses → `<email>`, nothing else – look a log over before posting it), so
@@ -221,7 +223,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   `[X.Y.Z] – date` (plus compare links); after merging, `git tag vX.Y.Z && git push origin vX.Y.Z` on the merged
   `main` commit. The workflow uses that changelog section as the GitHub release notes.
 - Release candidate: tag `vX.Y.Z-rc.N` on `main` (no version bump needed) → a GitHub pre-release with the
-  `[Unreleased]` notes for testing; the app's update check doesn't offer pre-releases.
+  `[Unreleased]` notes for testing (the app has no update check of its own, ADR-014).
 - Keep local setup notes (machines, paths, personal workflow) out of this file – they go into `CLAUDE.local.md`,
   which is git-ignored.
 

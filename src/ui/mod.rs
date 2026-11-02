@@ -63,6 +63,17 @@ pub fn run() -> eframe::Result {
     run_with(Vec::new())
 }
 
+/// The log's first line: the app and its installed version (the update source's, else the core's).
+fn start_line() -> String {
+    format!("{APP_NAME} {} started", update::installed())
+}
+
+/// Whether to check for updates at start: only when the player keeps the check on, never in demo
+/// mode (and only with a source, which `update::check_in_background` sees to).
+fn start_check_wanted(check_updates: bool, demo: bool) -> bool {
+    check_updates && !demo
+}
+
 /// Like [`run`], with more pages: `pages` (e.g. of another crate) come in the navigation after
 /// the core pages, before *Settings*, in the order given.
 ///
@@ -80,11 +91,11 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     let settings = Settings::load();
     i18n::set(&settings.language);
     crate::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
-    log::info(&format!("{APP_NAME} {} started", env!("CARGO_PKG_VERSION")));
+    log::info(&start_line());
     let tx = engine::start(settings.to_config());
     crate::gspro::DEBUG.store(settings.debug, std::sync::atomic::Ordering::Relaxed);
 
-    if settings.check_updates && std::env::var_os("OPENLAUNCH_DEMO").is_none() {
+    if start_check_wanted(settings.check_updates, std::env::var_os("OPENLAUNCH_DEMO").is_some()) {
         update::check_in_background();
     }
 
@@ -326,11 +337,12 @@ impl App {
             let text_w = ui.painter().layout_no_wrap(label.clone(), cond(16.0), WHITE).size().x;
             let pill = Rect::from_min_max(pos2(x + 8.0 - text_w - 24.0, y - 13.0), pos2(x + 8.0, y + 13.0));
             let resp = ui.interact(pill, ui.id().with("update"), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
             let p = ui.painter();
             p.rect_filled(pill, 13.0, if resp.hovered() { ACCENT_HOVER } else { ACCENT });
             caps_text(p, pill.center(), egui::Align::Center, label, 16.0, WHITE);
             if resp
-                .on_hover_text(tr("A newer version is available – click to open the release page"))
+                .on_hover_text(tr("A newer version is available – click to open its page"))
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
@@ -704,22 +716,25 @@ impl Page for SettingsPage {
                     }
                 });
             });
-            setting_row(ui, tr("Updates"), |ui| {
-                toggle(ui, &mut app.edit.check_updates, tr("Check on start"))
-                    .on_hover_text(tr("Asks GitHub for the latest release when the app starts"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if secondary_button(ui, tr("Update"), check != Some(update::Check::Running))
-                        .on_hover_text(tr("Asks GitHub for the latest release now"))
-                        .clicked()
-                    {
-                        update::check_in_background();
-                    }
+            // Only with an update source (ADR-014); without one there is nothing to check.
+            if update::source().is_some() {
+                setting_row(ui, tr("Updates"), |ui| {
+                    toggle(ui, &mut app.edit.check_updates, tr("Check on start"))
+                        .on_hover_text(tr("Asks for the latest version when the app starts"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if secondary_button(ui, tr("Update"), check != Some(update::Check::Running))
+                            .on_hover_text(tr("Asks for the latest version now"))
+                            .clicked()
+                        {
+                            update::check_in_background();
+                        }
+                    });
                 });
-            });
+            }
         });
 
         // Installed version and the outcome of the last check, right in the card's header row.
-        let installed = tr("Installed: {v}").replace("{v}", env!("CARGO_PKG_VERSION"));
+        let installed = tr("Installed: {v}").replace("{v}", &update::installed());
         let (text, hint) = match &check {
             None => (installed, None),
             Some(update::Check::Running) => (format!("{installed} · {}", tr("checking …")), None),
@@ -733,12 +748,14 @@ impl Page for SettingsPage {
         let r = ui.painter().text(
             pos2(updates_card.right() - 16.0, updates_card.top() + 21.0),
             Align2::RIGHT_CENTER,
-            text,
+            &text,
             FontId::proportional(12.0),
             MUTED,
         );
+        let resp = ui.interact(r, ui.id().with("update-check"), Sense::hover());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
         if let Some(hint) = hint {
-            ui.interact(r, ui.id().with("update-check"), Sense::hover()).on_hover_text(hint);
+            resp.on_hover_text(hint);
         }
 
         // Footer: status note and the primary save button, right-aligned.
@@ -836,7 +853,7 @@ impl Page for LogPage {
                 let (rect, _) = ui.allocate_exact_size(vec2(w.max(120.0), 26.0), Sense::hover());
                 // For bug reports: the whole log with version, ready to paste (masked when written).
                 if button(ui, rect, label, Icon::None, false, !lines.is_empty(), tr("The log is empty")) {
-                    let header = format!("{APP_NAME} {} ({})\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+                    let header = format!("{APP_NAME} {} ({})\n", update::installed(), std::env::consts::OS);
                     ui.ctx().copy_text(header + &lines.join("\n"));
                     self.copied = Some(Instant::now());
                 }
@@ -1605,6 +1622,99 @@ mod tests {
         harness.step();
         assert!(harness.query_by_label("Copied").is_none());
         assert!(harness.state_mut().page_mut::<LogPage>().copied.is_none());
+    }
+
+    /// Without an update source (the tests never register one) the settings card has no Updates
+    /// row; the installed version and the notifications stay. A release in the state shows the pill.
+    #[test]
+    fn updates_without_a_source_and_the_pill() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        i18n::set(&Language::new("en"));
+        let _state = demo_state();
+        state::with(|s| {
+            s.update = None;
+            s.update_check = None;
+        });
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+        });
+        harness.state_mut().remember_size = false;
+        harness.state_mut().show_page("settings");
+        harness.step();
+        harness.get_by_label(&format!("Installed: {}", env!("CARGO_PKG_VERSION")));
+        harness.get_by_label("Test");
+        // The row's "Update" button stands for the row (its label and toggle carry no accesskit
+        // label); `updates_with_a_source` shows it is there with a source.
+        assert!(harness.query_by_label("Update").is_none(), "no Updates row");
+        assert!(harness.query_by_label("UPDATE 9.9.9").is_none());
+
+        state::with(|s| s.update = Some(update::Release { version: "9.9.9".into(), url: "https://example.com/9.9.9".into() }));
+        harness.step();
+        harness.get_by_label("UPDATE 9.9.9");
+        state::with(|s| s.update = None);
+    }
+
+    /// A registered source with its own version and nothing newer.
+    struct AppSource;
+
+    impl update::UpdateSource for AppSource {
+        fn installed(&self) -> String {
+            "7.7.7".into()
+        }
+        fn check(&self) -> Result<Option<update::Release>, String> {
+            Ok(None)
+        }
+    }
+
+    /// With a source the settings card has the Updates row and shows the source's version; the
+    /// log's start line and the copied log name it too.
+    #[test]
+    fn updates_with_a_source() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        i18n::set(&Language::new("en"));
+        let _state = demo_state();
+        state::with(|s| {
+            s.update = None;
+            s.update_check = None;
+        });
+        update::with_test_source(Box::new(AppSource), || {
+            assert_eq!(start_line(), format!("{APP_NAME} 7.7.7 started"));
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+                setup_style(&cc.egui_ctx);
+                App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+            });
+            harness.state_mut().remember_size = false;
+            harness.state_mut().show_page("settings");
+            harness.step();
+            harness.get_by_label("Installed: 7.7.7");
+            harness.get_by_label("Update");
+
+            harness.state_mut().show_page("log");
+            harness.step();
+            harness.get_by_label("COPY LOG").click();
+            harness.step();
+            let copied = harness.output().platform_output.commands.iter().find_map(|c| match c {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            });
+            let header = format!("{APP_NAME} 7.7.7 ({})\n", std::env::consts::OS);
+            assert!(copied.is_some_and(|c| c.starts_with(&header)), "the copied log names the source's version");
+        });
+    }
+
+    #[test]
+    fn the_start_check_follows_the_opt_out_and_skips_the_demo() {
+        assert!(start_check_wanted(true, false));
+        assert!(!start_check_wanted(false, false), "opted out");
+        assert!(!start_check_wanted(true, true), "demo mode");
+        assert!(!start_check_wanted(false, true));
     }
 
     #[test]

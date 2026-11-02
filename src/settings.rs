@@ -54,7 +54,7 @@ pub struct Settings {
     #[serde(deserialize_with = "tolerant::list")]
     pub arrangements: Vec<Arrangement>,
     pub arrangement: usize,
-    /// Ask GitHub for a newer release on start.
+    /// Ask the update source for a newer release on start (no effect without one, ADR-014).
     pub check_updates: bool,
     /// Last main window size in logical points (at zoom 1), restored on start.
     pub window_size: Option<[f32; 2]>,
