@@ -68,6 +68,12 @@ fn start_line() -> String {
     format!("{APP_NAME} {} started", update::installed())
 }
 
+/// Whether to check for updates at start: only when the player keeps the check on, never in demo
+/// mode (and only with a source, which `update::check_in_background` sees to).
+fn start_check_wanted(check_updates: bool, demo: bool) -> bool {
+    check_updates && !demo
+}
+
 /// Like [`run`], with more pages: `pages` (e.g. of another crate) come in the navigation after
 /// the core pages, before *Settings*, in the order given.
 ///
@@ -89,7 +95,7 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     let tx = engine::start(settings.to_config());
     crate::gspro::DEBUG.store(settings.debug, std::sync::atomic::Ordering::Relaxed);
 
-    if settings.check_updates && std::env::var_os("OPENLAUNCH_DEMO").is_none() {
+    if start_check_wanted(settings.check_updates, std::env::var_os("OPENLAUNCH_DEMO").is_some()) {
         update::check_in_background();
     }
 
@@ -1701,6 +1707,14 @@ mod tests {
             let header = format!("{APP_NAME} 7.7.7 ({})\n", std::env::consts::OS);
             assert!(copied.is_some_and(|c| c.starts_with(&header)), "the copied log names the source's version");
         });
+    }
+
+    #[test]
+    fn the_start_check_follows_the_opt_out_and_skips_the_demo() {
+        assert!(start_check_wanted(true, false));
+        assert!(!start_check_wanted(false, false), "opted out");
+        assert!(!start_check_wanted(true, true), "demo mode");
+        assert!(!start_check_wanted(false, true));
     }
 
     #[test]

@@ -34,6 +34,10 @@ rustls and Mozilla's root certificates (an extra licence) for one request.
 - Negative / trade-offs: users of the core's own app get no update notice; the README points to the
   releases page instead. A breaking change for anyone who relied on the built-in check. A source
   is registered once per process and can't be replaced.
+- The core enforces no timeout any more (the old 10 s went with `ureq`): a `check()` that blocks
+  leaves "checking …" on screen and the *Update* button disabled, so a source bounds its own
+  request. And `installed()` is called on the UI thread every frame the settings show, so it must
+  be cheap and must not block.
 
 ## Alternatives considered
 

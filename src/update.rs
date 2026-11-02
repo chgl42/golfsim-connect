@@ -113,6 +113,7 @@ fn run_check(source: &dyn UpdateSource) {
         }
         Err(e) => {
             log::info(&format!("Update check failed: {e}"));
+            state::with(|s| s.update = None);
             Check::Failed(e)
         }
     };
@@ -218,6 +219,7 @@ mod tests {
     fn a_failed_check_keeps_its_error() {
         let _state = crate::test_util::state_lock();
         reset();
+        state::with(|s| s.update = Some(Release { version: "9.9.9".into(), url: "https://example.com/9.9.9".into() }));
         run_check(&Fake(Err("offline".into())));
         assert_eq!(state::with(|s| (s.update.clone(), s.update_check.clone())), (None, Some(Check::Failed("offline".into()))));
         reset();
