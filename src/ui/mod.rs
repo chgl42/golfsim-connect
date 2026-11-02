@@ -80,7 +80,7 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
     let settings = Settings::load();
     i18n::set(&settings.language);
     crate::notify::ENABLED.store(settings.notifications, std::sync::atomic::Ordering::Relaxed);
-    log::info(&format!("{APP_NAME} {} started", env!("CARGO_PKG_VERSION")));
+    log::info(&format!("{APP_NAME} {} started", update::installed()));
     let tx = engine::start(settings.to_config());
     crate::gspro::DEBUG.store(settings.debug, std::sync::atomic::Ordering::Relaxed);
 
@@ -842,7 +842,7 @@ impl Page for LogPage {
                 let (rect, _) = ui.allocate_exact_size(vec2(w.max(120.0), 26.0), Sense::hover());
                 // For bug reports: the whole log with version, ready to paste (masked when written).
                 if button(ui, rect, label, Icon::None, false, !lines.is_empty(), tr("The log is empty")) {
-                    let header = format!("{APP_NAME} {} ({})\n", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+                    let header = format!("{APP_NAME} {} ({})\n", update::installed(), std::env::consts::OS);
                     ui.ctx().copy_text(header + &lines.join("\n"));
                     self.copied = Some(Instant::now());
                 }

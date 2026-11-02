@@ -12,7 +12,8 @@ use crate::{log, state};
 pub struct Release {
     /// Version without the leading `v`, e.g. `0.10.0`.
     pub version: String,
-    /// The page that describes the release; the pill in the top bar opens it.
+    /// The page that describes the release, an `https://` page: the pill in the top bar opens it in
+    /// the browser.
     pub url: String,
 }
 
@@ -28,10 +29,13 @@ pub enum Check {
 
 /// Where the app learns about newer versions, registered by another crate with [`register`].
 pub trait UpdateSource: Send + Sync {
-    /// The installed version, e.g. `1.2.0` (shown as "Installed: …" in the settings).
+    /// The installed version, e.g. `1.2.0` (shown as "Installed: …" in the settings, in the log's
+    /// start line and in the copied log). Called on the UI thread, every frame the settings show,
+    /// so it must be cheap and must not block.
     fn installed(&self) -> String;
     /// A release newer than [`installed`](Self::installed), or `None` when it is up to date.
-    /// Called on the core's `update` thread, never on the UI thread, so it may block.
+    /// Called on the core's `update` thread, never on the UI thread, so it may block. The core sets
+    /// no timeout: the source bounds its own request (e.g. about 10 s).
     fn check(&self) -> Result<Option<Release>, String>;
 }
 
@@ -57,7 +61,11 @@ pub(crate) fn source() -> Option<&'static dyn UpdateSource> {
 /// The installed version: the source's, else the core's.
 #[cfg_attr(not(feature = "gui"), expect(dead_code, reason = "shown by the UI"))]
 pub(crate) fn installed() -> String {
-    source().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), UpdateSource::installed)
+    installed_in(&SOURCE)
+}
+
+fn installed_in(lock: &OnceLock<Box<dyn UpdateSource>>) -> String {
+    lock.get().map_or_else(|| env!("CARGO_PKG_VERSION").to_string(), |s| s.installed())
 }
 
 /// Check in the background (at start, or from the settings); a newer release ends up in
@@ -78,6 +86,7 @@ fn run_check(source: &dyn UpdateSource) {
         }
         Ok(None) => {
             log::info("No update available.");
+            state::with(|s| s.update = None);
             Check::UpToDate
         }
         Err(e) => {
@@ -88,8 +97,9 @@ fn run_check(source: &dyn UpdateSource) {
     state::with(|s| s.update_check = Some(check));
 }
 
-/// Compare `major.minor.patch` versions numerically (`0.10.0` > `0.9.1`); anything unparsable is
-/// not newer. For sources, to compare their latest version with the installed one.
+/// Compare `major.minor.patch` versions numerically (`0.10.0` > `0.9.1`), both without a leading
+/// `v`; anything unparsable is not newer, so a pre-release (e.g. `1.0.0-beta`) never counts as
+/// newer. For sources, to compare their latest version with the installed one.
 #[must_use]
 pub fn is_newer(candidate: &str, current: &str) -> bool {
     let parse = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|p| p.parse().ok()).collect() };
@@ -157,6 +167,7 @@ mod tests {
     fn up_to_date() {
         let _state = crate::test_util::state_lock();
         reset();
+        state::with(|s| s.update = Some(Release { version: "9.9.9".into(), url: "https://example.com/9.9.9".into() }));
         run_check(&Fake(Ok(None)));
         assert_eq!(state::with(|s| (s.update.clone(), s.update_check.clone())), (None, Some(Check::UpToDate)));
         reset();
@@ -168,6 +179,14 @@ mod tests {
         register_in(&lock, Box::new(Fake(Ok(None))));
         register_in(&lock, Box::new(Fake(Err("second".into()))));
         assert_eq!(lock.get().unwrap().check(), Ok(None));
+    }
+
+    #[test]
+    fn the_source_gives_the_installed_version() {
+        let lock = OnceLock::new();
+        assert_eq!(installed_in(&lock), env!("CARGO_PKG_VERSION"));
+        register_in(&lock, Box::new(Fake(Ok(None))));
+        assert_eq!(installed_in(&lock), "1.0.0");
     }
 
     #[test]
