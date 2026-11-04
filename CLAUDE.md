@@ -116,11 +116,11 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - `make-app.sh` – builds `target/GolfSim Connect.app` (sips/iconutil/ad-hoc codesign, licenses + cargo-about report
   in Resources); `--install` (quits a running copy first); `--deploy <ssh-host>` replaces and starts the app on
   another Mac (test builds without CI)
-- `install.sh` – downloads the latest release via curl, quits a running copy, installs, removes the quarantine
 - `about.toml`/`about.hbs` – cargo-about (third-party licenses); `LICENSE-*`, `NOTICE`
 - `docs/images/` – banner (`tools/banner.py`) and screenshots for the README
 - `.github/workflows/build.yml` – macOS 14 runner: `cargo deny --locked check` (first, fails fast), Clippy, tests,
-  `make-app.sh`, artifact; tag `v*` → release
+  `make-app.sh`, artifact (zip and licence report); tag `v*` → release with source and changelog, no app;
+  the notes name the website, where the prebuilt app comes from
 - `deny.toml` – cargo-deny: OSI licences only (each exception names the crate and its reason), RustSec advisories
   with yanked crates denied, crates.io only; any error fails the `build` job, duplicate versions only warn.
   `about.toml` stays the report.
@@ -222,9 +222,11 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   Fixed / Removed; written for users, not a commit list).
 - Release: in a PR, bump the version in `Cargo.toml` and `packaging/Info.plist` and rename `[Unreleased]` to
   `[X.Y.Z] – date` (plus compare links); after merging, `git tag vX.Y.Z && git push origin vX.Y.Z` on the merged
-  `main` commit. The workflow uses that changelog section as the GitHub release notes.
+  `main` commit. The workflow uses that changelog section plus a download line as the GitHub release notes;
+  the release has no assets.
 - Release candidate: tag `vX.Y.Z-rc.N` on `main` (no version bump needed) → a GitHub pre-release with the
-  `[Unreleased]` notes for testing (the app has no update check of its own, ADR-014).
+  `[Unreleased]` notes, no assets; the app to test is the artifact of that run (the app has no update check of its
+  own, ADR-014).
 - Keep local setup notes (machines, paths, personal workflow) out of this file – they go into `CLAUDE.local.md`,
   which is git-ignored.
 

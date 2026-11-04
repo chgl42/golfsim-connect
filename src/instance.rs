@@ -93,7 +93,7 @@ fn earlier_running_in(home: &Path, running: fn(&str) -> bool) -> Result<(), Alre
 }
 
 /// Whether the app `name` (e.g. `"OpenLaunch Connect"`) runs: a process started from its bundle,
-/// `<name>.app/Contents/MacOS/…`, as `install.sh` quits it. `false` if `pgrep` can't be run.
+/// `<name>.app/Contents/MacOS/…`, as `make-app.sh --install` quits it. `false` if `pgrep` can't be run.
 fn app_running(name: &str) -> bool {
     std::process::Command::new("pgrep")
         .args(["-f", &format!("{name}.app/Contents/MacOS/")])

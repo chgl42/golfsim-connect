@@ -11,7 +11,7 @@ changes made.
 
 Third-party Rust dependencies are listed with their licenses in
 THIRD_PARTY_LICENSES.html, which is shipped inside the app bundle
-(Contents/Resources) and attached to every release.
+(Contents/Resources) and the CI artifact.
 
 Garmin and Approach are trademarks of Garmin Ltd. or its subsidiaries.
 GSPro is a trademark of its respective owner. This project is not

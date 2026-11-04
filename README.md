@@ -18,6 +18,8 @@ running under **CrossOver** on an Apple Silicon Mac.
 
 The Garmin Approach R10 is the first supported launch monitor; the app is built so that more can follow.
 
+**[Download the signed app at golfsimconnect.com](https://golfsimconnect.com)**
+
 ## Why this exists
 
 GSPro is Windows-only. On a Mac it runs well under CrossOver – but the Garmin R10 talks Bluetooth LE,
@@ -85,27 +87,19 @@ One app, a stable connection, no phone in the loop.
 
 ## Installation
 
-### Option A – install script (recommended)
+### Download (recommended)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/chgl42/golfsim-connect/main/install.sh | bash
-```
+The signed and notarised app is a free download at [golfsimconnect.com](https://golfsimconnect.com). It is this app
+plus optional paid extensions; everything in this repository stays free and open source.
 
-Downloads the latest release, installs it to `/Applications` and removes the download quarantine.
-
-### Option B – manual download
-
-1. Download `GolfSim-Connect-macos-arm64.zip` from the [latest release](https://github.com/chgl42/golfsim-connect/releases/latest).
-2. Unzip and move **GolfSim Connect.app** to `/Applications`. Upgrading from OpenLaunch Connect: quit it and delete
-   `/Applications/OpenLaunch Connect.app` first, so it can't be started again.
-3. The app is ad-hoc signed but not notarized, so Gatekeeper blocks it on first launch. Run once:
-   ```bash
-   xattr -dr com.apple.quarantine "/Applications/GolfSim Connect.app"
-   ```
+1. Download the app from [golfsimconnect.com](https://golfsimconnect.com).
+2. Quit a running copy, then unzip and move **GolfSim Connect.app** to `/Applications`. Upgrading from OpenLaunch
+   Connect or OpenR10 Connect: quit it and delete `/Applications/OpenLaunch Connect.app` or
+   `/Applications/OpenR10 Connect.app` first, so it can't be started again.
 
 On first start macOS asks **"GolfSim Connect would like to use Bluetooth"** → *Allow*.
 
-### Option C – build from source
+### Build from source
 
 Requires [Rust](https://rustup.rs) 1.94 or newer.
 
@@ -281,7 +275,10 @@ cargo build --release --bin openlaunch
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
-GitHub Actions builds the app on an Apple Silicon runner for every push. Tagging a version creates a release:
+GitHub Actions builds the app on an Apple Silicon runner for every push; the app and its licence report are the
+artifact of each successful run. That artifact is ad-hoc signed and not notarised, so after moving the app to
+`/Applications` run `xattr -dr com.apple.quarantine "/Applications/GolfSim Connect.app"` once. Tagging a version creates a release with the source and the changelog, and a line that says
+where to download the app:
 
 ```bash
 git tag v0.7.0 && git push origin v0.7.0
@@ -296,7 +293,7 @@ you can [buy me a coffee](https://buymeacoffee.com/chgl42). Bug reports and idea
 ## License
 
 Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
-Third-party licenses are listed in `THIRD_PARTY_LICENSES.html` (inside the app bundle and attached to each release).
+Third-party licenses are listed in `THIRD_PARTY_LICENSES.html` (inside the app bundle and the CI artifact).
 See [NOTICE](NOTICE).
 
 Garmin and Approach are trademarks of Garmin Ltd. or its subsidiaries. GSPro is a trademark of its respective owner.

@@ -16,9 +16,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Nearby Bluetooth devices masked in the log:** when the app searches for the R10, the log lists the devices it
   found with their ids, but shows every name except the R10's as `<device>` – in the terminal, on the Log page and
   in the copy. The Help page says so.
+- **Download from the website:** the signed and notarised app is now a free download at
+  [golfsimconnect.com](https://golfsimconnect.com); that download needs no quarantine step. Releases here carry the
+  source and the changelog; CI builds keep the app as an artifact, and you can still build it from source.
 
 ### Removed
-- The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.
+- The app no longer checks GitHub for updates and contacts nobody on its own; new versions are at golfsimconnect.com.
+- The install script: releases no longer carry the app, so from the first release without it
+  `releases/latest/download/GolfSim-Connect-macos-arm64.zip` answers 404, and old copies of the script and saved links
+  to that file fail. Download the app from [golfsimconnect.com](https://golfsimconnect.com) instead.
 
 ## [1.2.0] – 2026-10-27
 

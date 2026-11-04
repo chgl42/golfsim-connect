@@ -55,6 +55,7 @@ jobs:
       - name: Package
         run: |
           cd target
+          test -s THIRD_PARTY_LICENSES.html
           ditto -c -k --keepParent "GolfSim Connect.app" "$ZIP"
 
       - name: Upload build artifact
@@ -70,6 +71,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A release carries the source and the changelog; the app is the artifact uploaded above, and the
+          # prebuilt download is on the website, which the notes name (an older app opens this page).
           # Release notes: this version's section of CHANGELOG.md (falls back to GitHub's generated notes).
           # A tag with a suffix (v1.2.0-rc.1) is a release candidate: published as a pre-release, which the
           # app's update check (releases/latest) doesn't offer, with the [Unreleased] notes until the
@@ -83,6 +86,12 @@ jobs:
             PRE=(--prerelease)
             [ -s notes.md ] || section "Unreleased" > notes.md
           fi
-          if [ -s notes.md ]; then NOTES=(--notes-file notes.md); else NOTES=(--generate-notes); fi
-          gh release create "${GITHUB_REF_NAME}" "target/$ZIP" target/THIRD_PARTY_LICENSES.html \
+          DOWNLOAD="Download the app: https://golfsimconnect.com"
+          if [ -s notes.md ]; then
+            printf '\n%s\n' "$DOWNLOAD" >> notes.md
+            NOTES=(--notes-file notes.md)
+          else
+            NOTES=(--notes "$DOWNLOAD" --generate-notes)
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
             --title "GolfSim Connect ${GITHUB_REF_NAME}" "${NOTES[@]}" "${PRE[@]}"

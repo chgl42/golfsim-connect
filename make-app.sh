@@ -48,7 +48,7 @@ if [[ "${1:-}" == "--install" ]]; then
     osascript -e "if application \"${name}\" is running then tell application \"${name}\" to quit" 2>/dev/null || true
   done
   sleep 1
-  # One that needs longer to quit would make the new app turn itself away (same as install.sh).
+  # One that needs longer to quit would make the new app turn itself away.
   pkill -f "Connect.app/Contents/MacOS/open(launch|r10)-connect" 2>/dev/null || true
   rm -rf "/Applications/${APP_NAME}.app"
   # Remove builds installed under earlier names
