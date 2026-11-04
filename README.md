@@ -142,8 +142,8 @@ three times larger, the shot shape's name on top.
   <img src="docs/images/screenshot-overlay-settings.png" alt="Overlay page with layout, contents and a preview" width="80%">
 </p>
 
-**Updates:** the app does not check for updates and contacts nobody on its own. New versions are on the
-[releases page](https://github.com/chgl42/golfsim-connect/releases).
+**Updates:** the app does not check for updates and contacts nobody on its own. New versions are at
+[golfsimconnect.com](https://golfsimconnect.com).
 
 **Notifications:** when GSPro is in front, macOS notifications report a low R10 battery, R10 errors (e.g. tilted),
 a lost R10 or GSPro connection and shots that didn't reach GSPro – each at most once a minute.
@@ -211,7 +211,7 @@ undoes them. The layout is saved; *Reset shots view* in the settings brings back
 | Display | **Language** | System (follows macOS), English or Deutsch. |
 | | **Units** | Metric (km/h) or imperial (mph) – display only; GSPro always gets mph. |
 | Notifications & updates | **Notifications** | On/off. *Test* sends one right away – if none appears, allow notifications for GolfSim Connect in *System Settings → Notifications*. |
-| | **Installed** | The installed version. The app does not check for updates; new versions are on the [releases page](https://github.com/chgl42/golfsim-connect/releases). |
+| | **Installed** | The installed version. The app does not check for updates; new versions are at [golfsimconnect.com](https://golfsimconnect.com). |
 
 *Log GSPro messages* (every message exchanged with GSPro) is switched on the log page, the overlay on its own
 *Overlay* page.

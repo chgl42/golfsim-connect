@@ -31,9 +31,9 @@ rustls and Mozilla's root certificates (an extra licence) for one request.
 - Positive: the open core contacts nobody on its own. An app built on it can tell its users about
   its own versions from its own place, in its own format. Fewer dependencies (no `ureq`, no TLS
   stack, no CDLA-licensed root certificates).
-- Negative / trade-offs: users of the core's own app get no update notice; the README points to the
-  releases page instead. A breaking change for anyone who relied on the built-in check. A source
-  is registered once per process and can't be replaced.
+- Negative / trade-offs: users of the core's own app get no update notice; the README says new
+  versions are at golfsimconnect.com instead. A breaking change for anyone who relied on the
+  built-in check. A source is registered once per process and can't be replaced.
 - The core enforces no timeout any more (the old 10 s went with `ureq`): a `check()` that blocks
   leaves "checking …" on screen and the *Update* button disabled, so a source bounds its own
   request. And `installed()` is called on the UI thread every frame the settings show, so it must
