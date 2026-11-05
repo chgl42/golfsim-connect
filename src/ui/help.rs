@@ -6,7 +6,7 @@ use eframe::egui::{self, Margin, RichText};
 use crate::i18n::tr;
 
 use super::APP_NAME;
-use super::kit::{ICON, LABEL, MUTED, SOFT, TILE, cond};
+use super::kit::{ICON, LABEL, MUTED, READ, READ_HEADING, SOFT, TILE, cond};
 use super::page::{AppCtx, Page};
 
 /// Where to ask for help: the public repository's issues.
@@ -54,7 +54,7 @@ impl Page for HelpPage {
                 tile(ui, tr("ASKING FOR HELP"), |ui| {
                     bullet(ui, &app(tr("Copy the log (COPY LOG on the Log page) and open an issue on GitHub; paste the log into it.")));
                     bullet(ui, &app(tr("The copied log shows ~ for your home folder, <email> for email addresses and <device> for other Bluetooth devices nearby. Nothing else is masked – look the log over before you post it.")));
-                    let link = ui.link(RichText::new(tr("Open the issues on GitHub")).size(12.5).color(ICON).underline());
+                    let link = ui.link(RichText::new(tr("Open the issues on GitHub")).size(READ).color(ICON).underline());
                     if link.on_hover_text(ISSUES_URL).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(ISSUES_URL));
                     }
@@ -77,8 +77,8 @@ fn section(ui: &mut egui::Ui, title: &str, texts: &[String]) {
 fn tile(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new().fill(TILE).corner_radius(6).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = 3.0;
-        ui.label(RichText::new(title).font(cond(15.0)).color(LABEL).extra_letter_spacing(1.5));
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.label(RichText::new(title).font(cond(READ_HEADING)).color(LABEL).extra_letter_spacing(1.5));
         add(ui);
     });
     ui.add_space(6.0);
@@ -88,19 +88,48 @@ fn tile(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
 fn bullet(ui: &mut egui::Ui, text: &str) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(RichText::new("•").size(12.5).color(MUTED));
-        ui.add(egui::Label::new(RichText::new(text).size(12.5).color(SOFT)).wrap());
+        ui.label(RichText::new("•").size(READ).color(MUTED));
+        ui.add(egui::Label::new(RichText::new(text).size(READ).color(SOFT)).wrap());
     });
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::kit::READ;
     use super::super::{App, BASE_SIZE, setup_style};
     use crate::i18n::{self, Language, tr};
     use crate::settings::{OverlayPos, Settings};
-    use eframe::egui;
+    use eframe::egui::{self, accesskit::Role};
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+
+    /// The app at its base size in the current language, on the Help page.
+    fn help_harness() -> Harness<'static, App> {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
+        });
+        harness.state_mut().remember_size = false;
+        harness.step();
+        harness.get_by_label(tr("HELP")).click();
+        harness.step();
+        harness.step();
+        harness
+    }
+
+    /// The mouse wheel, far enough for the end of the page.
+    fn scroll_to_end(harness: &mut Harness<'static, App>) {
+        harness.hover_at(egui::pos2(BASE_SIZE.x / 2.0, BASE_SIZE.y / 2.0));
+        harness.step();
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2000.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(8);
+    }
 
     /// The Help page is in the navigation before Settings and shows the four fixes and how to
     /// ask for help, in every shipped language.
@@ -110,16 +139,7 @@ mod tests {
         crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         for code in ["en", "de"] {
             i18n::set(&Language::new(code));
-            let (tx, _rx) = std::sync::mpsc::channel();
-            let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
-                setup_style(&cc.egui_ctx);
-                App::new(Settings { overlay: OverlayPos::Off, ..Settings::default() }, tx)
-            });
-            harness.state_mut().remember_size = false;
-            harness.step();
-            harness.get_by_label(tr("HELP")).click();
-            harness.step();
-            harness.step();
+            let mut harness = help_harness();
             assert_eq!(harness.state().pages[harness.state().page].id(), "help");
             for heading in [
                 tr("R10 NOT FOUND OR LOST"),
@@ -132,6 +152,7 @@ mod tests {
                 harness.get_by_label(heading);
             }
             if code == "en" {
+                scroll_to_end(&mut harness);
                 harness.get_by_label("Open the issues on GitHub").click();
                 harness.step();
                 let opened = harness.output().platform_output.commands.iter().any(|c| {
@@ -141,6 +162,66 @@ mod tests {
             }
             let ids: Vec<&str> = harness.state().pages.iter().map(|p| p.id()).collect();
             assert_eq!(ids[ids.len() - 2..], ["help", "settings"]);
+        }
+        i18n::set(&Language::new("en"));
+    }
+
+    /// The fixes are read from the simulator: at the base size, in every shipped language, the
+    /// text has the reading size, headings stand above it, the bullets wrap inside their column
+    /// with the dot on the first line, and the page scrolls down to the issues link.
+    #[test]
+    fn help_text_is_large_stays_in_its_columns_and_scrolls() {
+        const TILE_MARGIN: f32 = 12.0;
+        let _state = crate::test_util::state_lock();
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        let headings = ["R10 NOT FOUND OR LOST", "GSPRO NOT CONNECTED", "CROSSOVER SETUP", "OVERLAY NOT VISIBLE", "ASKING FOR HELP"];
+        for code in ["en", "de"] {
+            i18n::set(&Language::new(code));
+            let mut harness = help_harness();
+            let spacing = harness.ctx.global_style().spacing.item_spacing.x;
+            let left = harness.get_by_label(tr("R10 NOT FOUND OR LOST")).rect().min.x;
+            let right = harness.get_by_label(tr("CROSSOVER SETUP")).rect().min.x;
+            let inner_width = right - left - spacing - 2.0 * TILE_MARGIN;
+            assert_eq!(harness.get_by_label(tr("GSPRO NOT CONNECTED")).rect().min.x, left, "{code}: two columns");
+            assert_eq!(harness.get_by_label(tr("OVERLAY NOT VISIBLE")).rect().min.x, right, "{code}: two columns");
+
+            let labels: Vec<(String, egui::Rect)> = harness
+                .get_all_by_role(Role::Label)
+                .filter(|n| n.rect().min.y >= harness.get_by_label(tr("R10 NOT FOUND OR LOST")).rect().min.y)
+                .map(|n| (n.value().unwrap_or_default(), n.rect()))
+                .collect();
+            let dots: Vec<egui::Rect> = labels.iter().filter(|(text, _)| text == "•").map(|(_, r)| *r).collect();
+            let bullets: Vec<&(String, egui::Rect)> = labels
+                .iter()
+                .filter(|(text, _)| text != "•" && !headings.iter().any(|h| text == tr(h)))
+                .collect();
+            assert_eq!(bullets.len(), 16, "{code}: every bullet was looked at");
+            assert_eq!(dots.len(), 16, "{code}: every bullet has its dot");
+
+            let line = dots[0].height();
+            assert!(line >= READ, "{code}: a text line is {line} high, under the reading size {READ}");
+            for heading in headings {
+                let height = harness.get_by_label(tr(heading)).rect().height();
+                assert!(height > line, "{code}: {heading} is {height} high, a text line {line}");
+            }
+            for (text, rect) in bullets {
+                assert!(rect.height() >= READ, "{code}: under the reading size: {text}");
+                let column = if rect.min.x < right { left } else { right };
+                assert!(rect.min.x >= column, "{code}: starts left of its column: {text}");
+                assert!(rect.max.x <= column + inner_width, "{code}: wider than its column ({} > {}): {text}", rect.max.x, column + inner_width);
+                assert!(
+                    dots.iter().any(|dot| (dot.min.y - rect.min.y).abs() < 0.5 && dot.max.x <= rect.min.x),
+                    "{code}: no dot on the first line of: {text}"
+                );
+            }
+
+            let link = tr("Open the issues on GitHub");
+            assert!(harness.get_by_label(link).rect().max.y > BASE_SIZE.y, "{code}: the page no longer fits, it scrolls");
+            scroll_to_end(&mut harness);
+            let rect = harness.get_by_label(link).rect();
+            assert!(rect.max.y <= BASE_SIZE.y, "{code}: the issues link ends at {} after scrolling", rect.max.y);
+            assert!(rect.height() >= READ, "{code}: the issues link is under the reading size");
+            assert!(rect.max.x <= right + inner_width, "{code}: the issues link is wider than its column");
         }
         i18n::set(&Language::new("en"));
     }

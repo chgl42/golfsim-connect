@@ -60,6 +60,11 @@ pub fn cond(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("cond".into()))
 }
 
+/// Text size for pages read at a distance, like *Help* next to GSPro: body text, bullets and links.
+pub const READ: f32 = 16.0;
+/// Heading size above [`READ`], for the condensed font ([`cond`]).
+pub const READ_HEADING: f32 = 19.0;
+
 /// DIN Condensed's capitals sit about a quarter of the font size above the middle of the
 /// text box (measured in the rendered screenshots).
 pub(crate) const CAPS_OFFSET: f32 = 0.25;
