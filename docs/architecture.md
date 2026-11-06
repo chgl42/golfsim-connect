@@ -76,7 +76,7 @@ The module `ui` (`src/ui/`):
 | `mod.rs` | `run()`/`run_with()`, `App`, the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
 | `help.rs` | The *Help* page: the common fixes and how to ask for help |
 | `page.rs` | The `Page` trait, `AppCtx` (what pages share), the list of pages |
-| `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
+| `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, the reading sizes and spacing `READ`/`READ_HEADING`/`READ_LINE`/`READ_GAP`/`READ_SECTION_GAP`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
 | `overlay.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements |
 | `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |

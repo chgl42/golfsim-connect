@@ -60,6 +60,17 @@ pub fn cond(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("cond".into()))
 }
 
+/// Text size for pages read at a distance, like *Help* next to GSPro: body text, bullets and links.
+pub const READ: f32 = 16.0;
+/// Heading size above [`READ`], for the condensed font ([`cond`]).
+pub const READ_HEADING: f32 = 19.0;
+/// Line height of text at [`READ`]: room between the lines of a wrapped text.
+pub const READ_LINE: f32 = 22.0;
+/// Space between the items of a text at [`READ`]: a heading and its bullets, bullet and bullet.
+pub const READ_GAP: f32 = 10.0;
+/// Space between the tiles of a page at [`READ`].
+pub const READ_SECTION_GAP: f32 = 16.0;
+
 /// DIN Condensed's capitals sit about a quarter of the font size above the middle of the
 /// text box (measured in the rendered screenshots).
 pub(crate) const CAPS_OFFSET: f32 = 0.25;

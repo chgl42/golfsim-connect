@@ -119,7 +119,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - `install.sh` – downloads the latest release via curl, quits a running copy, installs, removes the quarantine
 - `about.toml`/`about.hbs` – cargo-about (third-party licenses); `LICENSE-*`, `NOTICE`
 - `docs/images/` – banner (`tools/banner.py`) and screenshots for the README
-- `.github/workflows/build.yml` – macOS 14 runner: `cargo deny --locked check` (first, fails fast), Clippy, tests,
+- `.github/workflows/build.yml` – macOS 15 runner: `cargo deny --locked check` (first, fails fast), Clippy, tests,
   `make-app.sh`, artifact; tag `v*` → release
 - `deny.toml` – cargo-deny: OSI licences only (each exception names the crate and its reason), RustSec advisories
   with yanked crates denied, crates.io only; any error fails the `build` job, duplicate versions only warn.
