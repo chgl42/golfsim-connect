@@ -16,8 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Nearby Bluetooth devices masked in the log:** when the app searches for the R10, the log lists the devices it
   found with their ids, but shows every name except the R10's as `<device>` – in the terminal, on the Log page and
   in the copy. The Help page says so.
-- **Larger text on the Help page:** the fixes are set at 16 pt with larger headings, so they can be read from the
-  simulator next to GSPro. The two columns stay; the page scrolls where it no longer fits.
+- **Larger text on the Help page:** the fixes are set at 16 pt with larger headings and more room between lines,
+  bullets and sections, so they can be read from the simulator next to GSPro. The two columns stay; the page scrolls
+  where it no longer fits.
 
 ### Removed
 - The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.

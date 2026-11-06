@@ -6,7 +6,7 @@ use eframe::egui::{self, Margin, RichText};
 use crate::i18n::tr;
 
 use super::APP_NAME;
-use super::kit::{ICON, LABEL, MUTED, READ, READ_HEADING, SOFT, TILE, cond};
+use super::kit::{ICON, LABEL, MUTED, READ, READ_GAP, READ_HEADING, READ_LINE, READ_SECTION_GAP, SOFT, TILE, cond};
 use super::page::{AppCtx, Page};
 
 /// Where to ask for help: the public repository's issues.
@@ -54,7 +54,7 @@ impl Page for HelpPage {
                 tile(ui, tr("ASKING FOR HELP"), |ui| {
                     bullet(ui, &app(tr("Copy the log (COPY LOG on the Log page) and open an issue on GitHub; paste the log into it.")));
                     bullet(ui, &app(tr("The copied log shows ~ for your home folder, <email> for email addresses and <device> for other Bluetooth devices nearby. Nothing else is masked – look the log over before you post it.")));
-                    let link = ui.link(RichText::new(tr("Open the issues on GitHub")).size(READ).color(ICON).underline());
+                    let link = ui.link(read(tr("Open the issues on GitHub")).color(ICON).underline());
                     if link.on_hover_text(ISSUES_URL).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(ISSUES_URL));
                     }
@@ -75,27 +75,32 @@ fn section(ui: &mut egui::Ui, title: &str, texts: &[String]) {
 
 /// A tile with a condensed heading; `add` fills it.
 fn tile(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new().fill(TILE).corner_radius(6).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+    ui.spacing_mut().item_spacing.y = READ_SECTION_GAP;
+    egui::Frame::new().fill(TILE).corner_radius(6).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().item_spacing.y = READ_GAP;
         ui.label(RichText::new(title).font(cond(READ_HEADING)).color(LABEL).extra_letter_spacing(1.5));
         add(ui);
     });
-    ui.add_space(6.0);
+}
+
+/// Text at the reading size and its line height.
+fn read(text: &str) -> RichText {
+    RichText::new(text).size(READ).line_height(Some(READ_LINE))
 }
 
 /// One fix: a muted dot, then the wrapped text.
 fn bullet(ui: &mut egui::Ui, text: &str) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(RichText::new("•").size(READ).color(MUTED));
-        ui.add(egui::Label::new(RichText::new(text).size(READ).color(SOFT)).wrap());
+        ui.label(read("•").color(MUTED));
+        ui.add(egui::Label::new(read(text).color(SOFT)).wrap());
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::kit::{READ, READ_HEADING, cond};
+    use super::super::kit::{READ, READ_GAP, READ_HEADING, READ_LINE, READ_SECTION_GAP, cond};
     use super::super::{App, BASE_SIZE, fit_zoom, setup_style};
     use crate::i18n::{self, Language, tr};
     use crate::settings::{OverlayPos, Settings};
@@ -194,6 +199,7 @@ mod tests {
         const PAGE_MARGIN_BOTTOM: f32 = 14.0;
         assert_eq!(READ, 16.0, "the reading size");
         assert_eq!(READ_HEADING, 19.0, "the reading heading size");
+        assert_eq!(READ_LINE, 22.0, "the reading line height");
         let _state = crate::test_util::state_lock();
         crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let headings = ["R10 NOT FOUND OR LOST", "GSPRO NOT CONNECTED", "CROSSOVER SETUP", "OVERLAY NOT VISIBLE", "ASKING FOR HELP"];
@@ -220,9 +226,9 @@ mod tests {
                 .filter(|(text, _)| text != "•" && text != link && !headings.iter().any(|h| text == tr(h)))
                 .collect();
 
-            let line = line_height(&harness, &egui::FontId::proportional(READ));
+            let line = READ_LINE;
             let heading_line = line_height(&harness, &cond(READ_HEADING));
-            assert!(heading_line > line, "{code}: a heading's line {heading_line} is not above a text line {line}");
+            assert!(heading_line > harness.ctx.fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(READ))).round(), "{code}: a heading's line {heading_line} is not above a text line {line}");
             for dot in &dots {
                 assert!((dot.height() - line).abs() < 0.01, "{code}: a dot is {} high, a line at the reading size {line}", dot.height());
             }
@@ -255,6 +261,49 @@ mod tests {
         i18n::set(&Language::new("en"));
     }
 
+    /// The page has air, in every shipped language: the lines of a wrapped bullet, the items of a
+    /// tile and the tiles keep their named distances, in each column from top to bottom.
+    #[test]
+    fn help_keeps_its_line_item_and_section_spacing() {
+        /// A tile's padding above and below its text (`tile`).
+        const TILE_PADDING: f32 = 10.0;
+        assert_eq!(READ_GAP, 10.0, "the space between items");
+        assert_eq!(READ_SECTION_GAP, 16.0, "the space between tiles");
+        let _state = crate::test_util::state_lock();
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        for code in ["en", "de"] {
+            i18n::set(&Language::new(code));
+            let harness = help_harness();
+            let headings = ["R10 NOT FOUND OR LOST", "GSPRO NOT CONNECTED", "CROSSOVER SETUP", "OVERLAY NOT VISIBLE", "ASKING FOR HELP"].map(tr);
+            let link = tr("Open the issues on GitHub");
+            let top = harness.get_by_label(headings[0]).rect().min.y;
+            let right = harness.get_by_label(headings[2]).rect().min.x;
+            let mut items: Vec<(String, egui::Rect)> = harness
+                .get_all_by_role(Role::Label)
+                .map(|n| (n.value().unwrap_or_default(), n.rect()))
+                .filter(|(text, rect)| rect.min.y >= top && text != "•" && text != link)
+                .collect();
+            items.push((link.to_string(), harness.get_by_label(link).rect()));
+            items.sort_by(|a, b| a.1.min.y.total_cmp(&b.1.min.y));
+
+            let wrapped = items.iter().filter(|(text, rect)| !headings.contains(&text.as_str()) && rect.height() >= 2.0 * READ_LINE).count();
+            assert!(wrapped >= 4, "{code}: wrapped bullets show their line height, only {wrapped} found");
+            let mut gaps = 0;
+            for in_right in [false, true] {
+                let column: Vec<&(String, egui::Rect)> = items.iter().filter(|(_, rect)| (rect.min.x >= right) == in_right).collect();
+                for pair in column.windows(2) {
+                    let (above, below) = (pair[0], pair[1]);
+                    let wanted = if headings.contains(&below.0.as_str()) { READ_SECTION_GAP + 2.0 * TILE_PADDING } else { READ_GAP };
+                    let gap = below.1.min.y - above.1.max.y;
+                    assert!((gap - wanted).abs() <= 1.0, "{code}: {gap} between, not {wanted}: {} / {}", above.0, below.0);
+                    gaps += 1;
+                }
+            }
+            assert_eq!(gaps, 20, "{code}: every distance was looked at");
+        }
+        i18n::set(&Language::new("en"));
+    }
+
     /// A window twice the base size with the interface size Auto zooms the page by 2: its layout
     /// and sizes in points stay those of the base size, so it shows twice as large.
     #[test]
@@ -270,7 +319,7 @@ mod tests {
             assert!((harness.ctx.zoom_factor() - fit_zoom(size)).abs() < 0.01);
             let room = harness.ctx.content_rect().size();
             assert!((room - BASE_SIZE).length() < 0.01, "{code}: the page is laid out in the base size, not {room:?}");
-            let line = line_height(&harness, &egui::FontId::proportional(READ));
+            let line = READ_LINE * harness.ctx.zoom_factor();
             let heading_line = line_height(&harness, &cond(READ_HEADING));
             let link = harness.get_by_label(tr("Open the issues on GitHub")).rect().height();
             assert!((link - line).abs() < 0.01, "{code}: the issues link is {link} high, a zoomed line {line}");
@@ -302,7 +351,7 @@ mod tests {
                 continue;
             }
             let source = std::fs::read_to_string(&path).unwrap();
-            let used = source.split(|c: char| !c.is_alphanumeric() && c != '_').any(|word| word == "READ" || word == "READ_HEADING");
+            let used = source.split(|c: char| !c.is_alphanumeric() && c != '_').any(|word| ["READ", "READ_HEADING", "READ_LINE", "READ_GAP", "READ_SECTION_GAP"].contains(&word));
             assert!(!used, "{} uses a reading size", path.display());
         }
     }
