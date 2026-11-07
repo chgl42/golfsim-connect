@@ -1,18 +1,20 @@
 //! The path to GSPro, end to end: the real `openlaunch` binary and `Link::run` against
 //! `tools/mock_gspro.py`, checked by what the mock received. Needs `python3`.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use openlaunch_connect::gspro::{Cmd, Link};
+use openlaunch_connect::gspro::{Cmd, Link, heartbeat_json};
 use serde_json::{Value, json};
 
-/// Far longer than a healthy run needs (about 4 s for the test shot, 10 s for the periodic
-/// heartbeat), far shorter than a minute.
-const DEADLINE: Duration = Duration::from_secs(30);
+/// Longer than a healthy run needs (about 4 s for the test shot, 10 s for the periodic heartbeat).
+/// A test takes it at most twice, for the mock's start and for its own run, so it fails well before
+/// a minute.
+const DEADLINE: Duration = Duration::from_secs(20);
 /// The time a periodic heartbeat has to be apart from the one before. Its interval is private to
 /// `gspro.rs`; half of it is enough to tell it from an answer to a command.
 const MIN_PERIOD: Duration = Duration::from_secs(5);
@@ -172,6 +174,8 @@ fn test_shot_of_the_binary_reaches_the_mock() {
     };
     let log = log.join().unwrap();
     let lines = mock.rest();
+    let written: Vec<_> = std::fs::read_dir(&home.0).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert!(written.is_empty(), "a test shot records nothing, but the home folder has {written:?}");
 
     for line in &lines {
         parse(line);
@@ -221,4 +225,24 @@ fn link_sends_the_periodic_heartbeat() {
     thread.join().unwrap();
     let rest = mock.rest();
     assert!(rest.is_empty(), "the mock got more than the three heartbeats: {rest:?}");
+}
+
+/// Two messages back to back reach the mock as one read: it says `BAD` and replies 501, as GSPro
+/// does. The tests above rely on this to catch merged messages.
+#[test]
+fn mock_rejects_merged_messages() {
+    let mock = Mock::start();
+    let mut client = TcpStream::connect(mock.addr()).unwrap();
+    client.set_read_timeout(Some(DEADLINE)).unwrap();
+    let merged = heartbeat_json(true).repeat(2);
+    client.write_all(merged.as_bytes()).unwrap();
+
+    // One deadline for both: the mock prints its line before it replies.
+    let deadline = Instant::now() + DEADLINE;
+    let mut reply = [0u8; 1024];
+    let n = client.read(&mut reply).unwrap();
+    let reply: Value = serde_json::from_slice(&reply[..n]).unwrap();
+    let line = mock.next_line(deadline);
+    assert!(line.starts_with("BAD"), "the mock's line: {line}");
+    assert_eq!(reply["Code"], 501, "the mock's reply: {reply}");
 }
