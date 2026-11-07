@@ -166,7 +166,10 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
 - Linux build/tests work (`cargo test --all-targets`); BlueZ needs `libdbus-1-dev`.
 - Lint like CI before committing: `cargo clippy --all-targets --locked -- -D warnings` (see *Code quality*).
 - Test the GSPro side without GSPro: `tools/mock_gspro.py [port]` expects exactly one JSON per `recv()`, answers 501
-  otherwise and 200 + 201 for shots. Use `--gspro 127.0.0.1:<port>`.
+  otherwise and 200 + 201 for shots. Use `--gspro 127.0.0.1:<port>`. Port 0 takes a free one; it prints the port, then
+  each read (`SHOT <json>`, `heartbeat <json>`, `BAD …`) and reads 50 ms late so merged messages show.
+  `tests/gspro_mock.rs` runs the `openlaunch` binary (`--test-shot`) and `Link::run` against it and checks what it
+  received, part of `cargo test`; it needs `python3` and fails without it (no skip), and takes about 10 s for the periodic heartbeat.
 - README screenshots are rendered offscreen with egui_kittest (no window, no screen recording permission):
   `cargo test --lib readme_screenshots -- --ignored` writes `docs/images/screenshot-*.png`
   (1000×470 @2x, demo status from `demo_state()`), then `python3 tools/banner.py .` for the banner.

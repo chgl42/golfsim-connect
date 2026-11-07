@@ -270,9 +270,11 @@ cargo build --release --bin openlaunch
 
 ## Development
 
-- `cargo test --all-targets` runs the unit tests (also on Linux; BlueZ needs `libdbus-1-dev`).
+- `cargo test --all-targets` runs the tests (also on Linux; BlueZ needs `libdbus-1-dev`). `tests/gspro_mock.rs`
+  runs `openlaunch` against the mock below and needs `python3`.
 - `tools/mock_gspro.py [port]` is a tiny GSPro OpenConnect stand-in; point the app at it with the
-  GSPro address setting or `openlaunch --gspro 127.0.0.1:<port>`.
+  GSPro address setting or `openlaunch --gspro 127.0.0.1:<port>`. Port 0 takes a free one. It prints the port,
+  then each message it received (`SHOT <json>`, `heartbeat <json>`, or `BAD` for merged messages).
 - `OPENLAUNCH_DEMO=1` simulates an R10 (READY, a few sample shots).
 - README screenshots are rendered offscreen (no window needed):
   `cargo test --lib readme_screenshots -- --ignored`, then `python3 tools/banner.py .` for the banner.

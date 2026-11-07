@@ -1,6 +1,7 @@
 # Manual tests with the real setup
 
-The unit tests cover the logic (mapping, flight, settings, history, the OpenConnect link against a fake GSPro).
+The unit tests cover the logic (mapping, flight, settings, history, the OpenConnect link against a fake GSPro), and
+`tests/gspro_mock.rs` runs the real `openlaunch` binary against `tools/mock_gspro.py` (needs `python3`).
 What they can't reach – Bluetooth, GSPro under CrossOver, its database, macOS windows – is checked by hand on the
 MacBook with the R10 and GSPro before a release, and for a PR that touches one of these areas (see *Definition of
 Done* in `CLAUDE.md`).
