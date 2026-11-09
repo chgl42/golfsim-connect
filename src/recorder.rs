@@ -105,15 +105,24 @@ impl ShotChange {
     }
 }
 
+/// Held across the whole of [`change_shot`], so changes from several threads write the file and
+/// publish their events in the same order.
+static CHANGES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Changes the recorded shot with this time and number – the one way to change a shot: first
 /// `shots.jsonl` (not in demo mode), then the session (if the shot is in it) and
 /// [`state::State::shot_changes`], then [`Event::ShotChanged`] with the record as it is now, which
-/// is returned. A change that makes no difference writes nothing and publishes nothing.
+/// is returned. A change that makes no difference writes nothing and publishes nothing. Changes
+/// are made one at a time, so their events come in the order the file was written.
 ///
 /// # Errors
-/// Returns a message if there is no such shot (in the history; in demo mode, in the session) or
-/// the history file cannot be read or written; then nothing has changed.
+/// Returns a message if the club code is empty, if there is no such shot (in the history; in demo
+/// mode, in the session) or the history file cannot be read or written; then nothing has changed.
 pub fn change_shot(time: &str, shot_number: u32, change: &ShotChange) -> Result<history::ShotRecord, String> {
+    if matches!(change, ShotChange::Club(code) if code.trim().is_empty()) {
+        return Err("no club given".into());
+    }
+    let _one_at_a_time = CHANGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let missing = || format!("no shot recorded at {time} with number {shot_number}");
     let (rec, changed) = if history::persist() {
         history::update(time, shot_number, |rec| change.apply(rec))?.ok_or_else(missing)?
@@ -348,6 +357,53 @@ mod tests {
         assert_eq!(changed(&rx, &[931]), [now]);
         assert!(change_shot(&rec.time, 932, &ShotChange::Excluded(true)).is_err());
         state::with(|s| s.session.retain(|r| r.shot_number != 931));
+    }
+
+    /// An empty or blank club code is refused: nothing written, no event.
+    #[test]
+    fn change_shot_refuses_an_empty_club() {
+        let _state = crate::test_util::state_lock();
+        let history = crate::test_util::TestHistory::new("change-shot-empty");
+        let rx = events::subscribe();
+        let rec = shot(971, "I6");
+        history::append(&rec).unwrap();
+        let text = history.text();
+        for code in ["", "  "] {
+            assert!(change_shot(&rec.time, 971, &ShotChange::Club(code.into())).is_err(), "{code:?}");
+        }
+        assert_eq!(history.text(), text, "not rewritten");
+        assert!(changed(&rx, &[971]).is_empty());
+    }
+
+    /// Two threads changing one shot: the last `ShotChanged` is the record in the file and the
+    /// session, so a subscriber never ends on an older one.
+    #[test]
+    fn change_shot_publishes_in_file_order_across_threads() {
+        let _state = crate::test_util::state_lock();
+        let history = crate::test_util::TestHistory::new("change-shot-threads");
+        let rx = events::subscribe();
+        let rec = shot(981, "I6");
+        history::append(&rec).unwrap();
+        state::with(|s| s.session.push(rec.clone()));
+        let threads: Vec<_> = [["I7", "I8"], ["I9", "PW"]]
+            .into_iter()
+            .map(|codes| {
+                let (file, time) = (history.file.clone(), rec.time.clone());
+                std::thread::spawn(move || {
+                    history::TEST_FILE.set(Some(file));
+                    for i in 0..40 {
+                        change_shot(&time, 981, &ShotChange::Club(codes[i % 2].into())).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let last = changed(&rx, &[981]).pop().unwrap();
+        assert_eq!(history::load_all(), std::slice::from_ref(&last));
+        assert_eq!(in_session(981), Some(last));
+        state::with(|s| s.session.retain(|r| r.shot_number != 981));
     }
 
     /// A shot GSPro sent without a club keeps that as `""`, so a second correction doesn't take

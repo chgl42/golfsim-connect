@@ -24,6 +24,9 @@ every place.
   shot with that key, nothing in memory changes and nothing is published. A change that makes no
   difference writes nothing and publishes nothing. In demo mode (`history::PERSIST` off) the
   session is the history: no file is written.
+  Changes are made one at a time (one lock across the whole function), so the events of
+  changes from several threads come in the order the file was written. An empty club code is
+  refused.
 - **Threads:** `ShotChanged` is published from the thread that made the change (the GUI, an
   extension's thread), which widens ADR-007's "published from the bridge threads".
 - **Views:** pages own their state (ADR-010): the explorer keeps its copy of the history and loads
