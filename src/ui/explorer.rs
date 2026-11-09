@@ -295,8 +295,11 @@ pub(super) struct ShotsPage {
     all_time: bool,
     /// Cached contents of the history file (loaded when "All time" is chosen).
     all_shots: Vec<ShotRecord>,
-    /// Session length when `all_shots` was loaded (new shots reload it).
-    all_shots_session: usize,
+    /// Session length and `state::State::shot_changes` when `all_shots` was loaded (a new or
+    /// changed shot reloads it).
+    all_shots_seen: (usize, u64),
+    /// The clubs of the history, in bag order, for "Correct club", and when they were read.
+    history_clubs: Option<((usize, u64), Vec<String>)>,
     export_note: Option<String>,
 }
 
@@ -310,7 +313,8 @@ impl Page for ShotsPage {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
-        let session: Vec<ShotRecord> = state::with(|s| s.session.clone());
+        let (session, shot_changes): (Vec<ShotRecord>, u64) = state::with(|s| (s.session.clone(), s.shot_changes));
+        let seen = (session.len(), shot_changes);
         // A new shot flies in the 3D tiles (not the ones there when the page first shows).
         let latest = session.last().map(key);
         if let Some(seen) = &app.explorer.last_latest
@@ -334,14 +338,9 @@ impl Page for ShotsPage {
         let before = self.all_time;
         bar_ui.radio_value(&mut self.all_time, false, tr("This session ({n})").replace("{n}", &session.len().to_string()));
         bar_ui.radio_value(&mut self.all_time, true, tr("All time"));
-        if self.all_time && (!before || self.all_shots_session != session.len()) {
-            // The demo doesn't save its shots, so its "all time" is the demo session.
-            self.all_shots = if history::PERSIST.load(std::sync::atomic::Ordering::Relaxed) {
-                history::load_all()
-            } else {
-                session.clone()
-            };
-            self.all_shots_session = session.len();
+        if self.all_time && (!before || self.all_shots_seen != seen) {
+            self.all_shots = load_history(&session);
+            self.all_shots_seen = seen;
         }
         let shots: Vec<ShotRecord> = if self.all_time { self.all_shots.clone() } else { session };
         app.explorer.page = app.explorer.page.min(layout.pages.len().saturating_sub(1));
@@ -494,6 +493,15 @@ impl Page for ShotsPage {
 
         // Second row: the filter and what to do with the selection, or the page while arranging.
         let mut exclude: Option<bool> = None;
+        let mut correct: Option<String> = None;
+        // The clubs "Correct club" offers: those of the history, read again after a new or changed shot.
+        if !ex.selected.is_empty() && self.history_clubs.as_ref().is_none_or(|(at, _)| *at != seen) {
+            // "All time" shows the history (loaded above), "This session" the session.
+            let history = if self.all_time { None } else { Some(load_history(&shots)) };
+            let clubs = correctable_clubs(history.as_deref().unwrap_or(&self.all_shots));
+            self.history_clubs = Some((seen, clubs));
+        }
+        let history_clubs: &[String] = self.history_clubs.as_ref().map_or(&[], |(_, c)| c);
         let gspro_toggled;
         let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
         let mut row = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -506,7 +514,7 @@ impl Page for ShotsPage {
                 0.0
             } else {
                 let n = tr("{n} selected").replace("{n}", &ex.selected.len().to_string());
-                [n.as_str(), tr("Show only these"), tr("Exclude"), tr("Clear")]
+                [n.as_str(), tr("Show only these"), tr("Correct club"), tr("Exclude"), tr("Clear")]
                     .iter()
                     .map(|t| text_width(&row, t, 13.0) + 20.0)
                     .sum::<f32>()
@@ -550,6 +558,18 @@ impl Page for ShotsPage {
                     if link(ui, label, AMBER).on_hover_text(hint).clicked() {
                         exclude = Some(!all_excluded);
                     }
+                    let menu = link(ui, tr("Correct club"), AMBER).on_hover_text(tr("Count these shots for the club they were really hit with"));
+                    egui::Popup::menu(&menu).show(|ui| {
+                        if history_clubs.is_empty() {
+                            ui.label(RichText::new(tr("No clubs saved yet")).size(13.0).color(MUTED));
+                        }
+                        for code in history_clubs {
+                            if ui.button(club_name(code)).clicked() {
+                                correct = Some(code.clone());
+                                ui.close();
+                            }
+                        }
+                    });
                     let only = if ex.only_selected { tr("Show all") } else { tr("Show only these") };
                     if link(ui, only, ICON).clicked() {
                         ex.only_selected = !ex.only_selected;
@@ -684,17 +704,11 @@ impl Page for ShotsPage {
             // Applied and saved at once, like the overlay's settings.
             let _ = app.change_settings(|s| s.explorer.clone_from(&layout));
         }
-        if let Some(excluded) = exclude {
-            let keys = app.explorer.selected.clone();
-            let mark = |shots: &mut Vec<ShotRecord>| {
-                for s in shots.iter_mut().filter(|s| keys.contains(&key(s))) {
-                    s.excluded = excluded;
-                }
-            };
-            state::with(|s| mark(&mut s.session));
-            mark(&mut self.all_shots);
-            for (time, number) in &keys {
-                if let Err(e) = history::set_excluded(time, *number, excluded) {
+        // Through the core's one way to change a shot; the lists here follow its change counter.
+        let change = exclude.map(recorder::ShotChange::Excluded).or(correct.map(recorder::ShotChange::Club));
+        if let Some(change) = change {
+            for (time, number) in &app.explorer.selected {
+                if let Err(e) = recorder::change_shot(time, *number, &change) {
                     self.export_note = Some(tr("Saving failed: {e}").replace("{e}", &e));
                 }
             }
@@ -821,6 +835,25 @@ pub(super) fn tile_options(ui: &mut egui::Ui, tile: &mut Tile, metric: bool, met
     if let Some(kind) = kind_of(&tile.kind) {
         kind.options(ui, tile, Units { metric, meters });
     }
+}
+
+/// The history's shots for the explorer; the demo doesn't save its shots, so its history is the
+/// demo session.
+fn load_history(session: &[ShotRecord]) -> Vec<ShotRecord> {
+    if history::persist() { history::load_all() } else { session.to_vec() }
+}
+
+/// The clubs a shot can be corrected to: those the history's shots count for and those GSPro sent
+/// for them (so a correction can be undone), in bag order, each once.
+fn correctable_clubs(shots: &[ShotRecord]) -> Vec<String> {
+    let mut codes: Vec<String> = Vec::new();
+    for code in shots.iter().flat_map(|s| [s.club_code.as_deref(), s.club_gspro.as_deref()]).flatten() {
+        if !code.is_empty() && !codes.iter().any(|c| c == code) {
+            codes.push(code.to_string());
+        }
+    }
+    codes.sort_by_key(|c| club_rank(Some(c)));
+    codes
 }
 
 /// Clubs in bag order (driver to putter), so their colours stay put while filtering.
@@ -1603,6 +1636,128 @@ mod tests {
             harness.step();
         }
         harness
+    }
+
+    /// Shots in the history: one of an earlier day (8-iron, only in the file), then a 6-iron and a
+    /// 7-iron of this session (also in the session). Returns them and the session before.
+    fn three_shots() -> ([ShotRecord; 3], Vec<ShotRecord>) {
+        let (ball, club) = engine::test_shot();
+        let mut six = ShotRecord::new(ball, Some(club), Some("I6".into()), true, 951);
+        six.time = "2026-11-08T11:00:00+01:00".into();
+        let seven = ShotRecord { shot_number: 952, club_code: Some("I7".into()), ..six.clone() };
+        let eight = ShotRecord { shot_number: 953, club_code: Some("I8".into()), time: "2026-11-01T11:00:00+01:00".into(), ..six.clone() };
+        for r in [&eight, &six, &seven] {
+            history::append(r).unwrap();
+        }
+        let before = state::with(|s| std::mem::replace(&mut s.session, vec![six.clone(), seven.clone()]));
+        ([eight, six, seven], before)
+    }
+
+    /// The explorer on an empty page with `shot` selected, on "All time" or not.
+    fn selecting(shot: &ShotRecord, all_time: bool) -> egui_kittest::Harness<'static, App> {
+        let mut harness = explorer_with(Vec::new(), false);
+        harness.state_mut().page_mut::<ShotsPage>().all_time = all_time;
+        harness.run_steps(2);
+        harness.state_mut().explorer.selected = [key(shot)].into();
+        harness.run_steps(3);
+        harness
+    }
+
+    /// "Correct club" in the selection bar offers the history's clubs (one hit only on an earlier
+    /// day, too); the club picked is the selected shot's in the file and the session, and "All
+    /// time" shows it at once. The club GSPro sent stays offered, so the correction can be undone.
+    #[test]
+    fn the_menu_corrects_the_club_of_the_selection() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("explorer-correct-club");
+        let ([eight, six, seven], before) = three_shots();
+        // "All time": the page's own copy of the history, which must follow the change.
+        let mut harness = selecting(&six, true);
+        harness.get_by_label("Correct club").click();
+        harness.run_steps(3);
+        harness.get_by_label("8-Iron");
+        harness.get_by_label("7-Iron").click();
+        harness.run_steps(3);
+
+        let want = ShotRecord { club_code: Some("I7".into()), club_gspro: Some("I6".into()), ..six.clone() };
+        assert_eq!(history::load_all(), [eight.clone(), want.clone(), seven.clone()]);
+        assert_eq!(state::with(|s| s.session.clone()), [want.clone(), seven.clone()]);
+        assert!(harness.state_mut().page_mut::<ShotsPage>().all_shots.contains(&want), "All time shows the change");
+
+        // No shot counts for the 6-iron any more, but GSPro sent it: back again.
+        harness.get_by_label("Correct club").click();
+        harness.run_steps(3);
+        harness.get_by_label("6-Iron").click();
+        harness.run_steps(3);
+        assert_eq!(history::load_all(), [eight, six.clone(), seven.clone()]);
+        assert_eq!(state::with(|s| s.session.clone()), [six, seven]);
+        state::with(|s| s.session = before);
+    }
+
+    /// On "This session", too, the menu offers the clubs of the whole history.
+    #[test]
+    fn the_menu_offers_the_history_clubs_on_this_session() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("explorer-session-clubs");
+        let ([_, six, _], before) = three_shots();
+        let mut harness = selecting(&six, false);
+        harness.get_by_label("Correct club").click();
+        harness.run_steps(3);
+        harness.get_by_label("8-Iron");
+        harness.get_by_label("7-Iron");
+        state::with(|s| s.session = before);
+    }
+
+    /// Exclude and Count go through the change API: the file, the session and "All time" follow.
+    #[test]
+    fn exclude_and_count_change_file_session_and_all_time() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        let _history = crate::test_util::TestHistory::new("explorer-exclude");
+        let ([_, six, _], before) = three_shots();
+        let mut harness = selecting(&six, true);
+        let excluded = |harness: &mut egui_kittest::Harness<'static, App>| {
+            let file = history::load_all().iter().find(|r| key(r) == key(&six)).map(|r| r.excluded);
+            let session = state::with(|s| s.session.iter().find(|r| key(r) == key(&six)).map(|r| r.excluded));
+            let all = harness.state_mut().page_mut::<ShotsPage>().all_shots.iter().find(|r| key(r) == key(&six)).map(|r| r.excluded);
+            (file, session, all)
+        };
+        harness.get_by_label("Exclude").click();
+        harness.run_steps(3);
+        assert_eq!(excluded(&mut harness), (Some(true), Some(true), Some(true)));
+        harness.get_by_label("Count").click();
+        harness.run_steps(3);
+        assert_eq!(excluded(&mut harness), (Some(false), Some(false), Some(false)));
+        state::with(|s| s.session = before);
+    }
+
+    /// The details of a corrected shot name the club GSPro sent ("–" for none); an uncorrected
+    /// shot has no such note.
+    #[test]
+    fn details_show_the_club_gspro_sent() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        let (ball, club) = engine::test_shot();
+        let shot = ShotRecord::new(ball, Some(club), Some("I6".into()), true, 961);
+        let before = state::with(|s| std::mem::take(&mut s.session));
+        for (gspro, label) in [(Some("I7"), Some("GSPro: I7")), (Some(""), Some("GSPro: –")), (None, None)] {
+            let shot = ShotRecord { club_gspro: gspro.map(Into::into), ..shot.clone() };
+            state::with(|s| s.session = vec![shot.clone()]);
+            let mut harness = explorer_with(vec![Tile::new("details", TileSize::W2H2)], false);
+            harness.state_mut().explorer.focus = Some(key(&shot));
+            harness.run_steps(3);
+            match label {
+                Some(label) => drop(harness.get_by_label(label)),
+                None => assert!(harness.query_by_label_contains("GSPro:").is_none(), "no note"),
+            }
+        }
+        state::with(|s| s.session = before);
     }
 
     /// A kind as another crate would add it: only the public interface.

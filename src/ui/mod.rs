@@ -24,6 +24,7 @@ use crate::launcher;
 use crate::num;
 use crate::log;
 use crate::misread::Misread;
+use crate::recorder;
 use crate::settings::{Arrangement, DEFAULT_ARRANGEMENT, OverlayItem, OverlayPos, OverlayStyle, Settings, TileOverlay};
 use crate::shape::{Curve, Shape};
 use crate::state::{self, R10Status};

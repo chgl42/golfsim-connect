@@ -72,6 +72,12 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
         let (dot, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());
         ui.painter().circle_filled(dot.center(), 4.0, (ctx.color_of)(&s.club_code));
         ui.label(RichText::new(name).size(13.0).color(WHITE));
+        // Corrected: the club GSPro sent, as it sent it.
+        if let Some(gspro) = &s.club_gspro {
+            let code = if gspro.is_empty() { "–" } else { gspro };
+            ui.label(RichText::new(tr("GSPro: {club}").replace("{club}", code)).size(12.0).color(AMBER))
+                .on_hover_text(tr("The club GSPro sent; the shot was corrected to another club"));
+        }
         ui.label(RichText::new(time).size(12.0).color(MUTED));
         if s.excluded {
             let label = ui.label(RichText::new(tr("excluded")).size(12.0).color(AMBER));

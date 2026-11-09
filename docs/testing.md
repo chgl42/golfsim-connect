@@ -94,5 +94,8 @@ Each item: setup → action → what you should see (log line or screen). Lines 
   too.
 - [ ] **History.** → Hit a few shots, exclude one on the *Shots* page, quit, start again. → All shots are there,
   the excluded one still excluded; an export (CSV) contains the same shots without it.
+- [ ] **Corrected club.** → Select a shot on the *Shots* page, *Correct club*, pick another club; quit, start
+  again. → The shot counts for the new club in the table, the filter chips and the CSV; the details show
+  *GSPro:* with the club GSPro sent. Corrected back, that note is gone.
 - [ ] **Update from the last release.** → Install the last release, use it, then install the build under test over
   it. → Settings and history carry over unchanged (nothing falls back to the defaults).

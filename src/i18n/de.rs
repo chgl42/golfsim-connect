@@ -40,6 +40,11 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "Tempo" => "Tempo",
         "Exclude" => "Ausblenden",
         "Count" => "Mitzählen",
+        "Correct club" => "Schläger korrigieren",
+        "Count these shots for the club they were really hit with" => "Diese Schläge für den Schläger zählen, mit dem sie wirklich geschlagen wurden",
+        "No clubs saved yet" => "Noch keine Schläger gespeichert",
+        "GSPro: {club}" => "GSPro: {club}",
+        "The club GSPro sent; the shot was corrected to another club" => "Der Schläger, den GSPro gesendet hat; der Schlag wurde auf einen anderen Schläger korrigiert",
 
         "LAST SHOT" => "LETZTER SCHLAG",
         "{n} sent" => "{n} gesendet",

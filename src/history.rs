@@ -23,8 +23,13 @@ pub struct ShotRecord {
     /// Local time, RFC 3339.
     pub time: String,
     pub shot_number: u32,
-    /// Club selected in GSPro at the time of the shot (e.g. `DR`, `I7`).
+    /// Club the shot counts for: the one selected in GSPro at the time of the shot (e.g. `DR`,
+    /// `I7`), or the one it was corrected to (`recorder::change_shot`).
     pub club_code: Option<String>,
+    /// The club GSPro sent, kept at the first correction of `club_code` and cleared when the shot
+    /// is corrected back to it; `Some("")` when GSPro sent none. Missing in files written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub club_gspro: Option<String>,
     pub delivered: bool,
     pub ball: GsBall,
     pub club: Option<GsClub>,
@@ -49,6 +54,7 @@ impl ShotRecord {
             time: chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
             shot_number,
             club_code,
+            club_gspro: None,
             delivered,
             ball,
             club,
@@ -96,7 +102,7 @@ fn path() -> Option<PathBuf> {
 
 /// Whether shots are written to disk ([`PERSIST`]; in unit tests: whether the thread has a `TEST_FILE`,
 /// so tests running in parallel can't turn it on or off for each other).
-fn persist() -> bool {
+pub(crate) fn persist() -> bool {
     #[cfg(test)]
     let on = TEST_FILE.with_borrow(Option::is_some);
     #[cfg(not(test))]
@@ -146,42 +152,45 @@ pub fn load_all() -> Vec<ShotRecord> {
         .unwrap_or_default()
 }
 
-/// Marks the shot with this time and number as excluded (or counts it again) in `shots.jsonl`.
-/// Other lines, unreadable ones included, are kept as they are.
+/// Keep GSPro's result with a recorded shot.
+pub fn set_gspro(time: &str, shot_number: u32, result: crate::gspro_db::GsproResult) -> Result<(), String> {
+    update(time, shot_number, |rec| rec.gspro = Some(result)).map(|_| ())
+}
+
+/// Changes the shot with this time and number in `shots.jsonl` and returns it as it is now, with
+/// whether `change` made a difference (`None`: no such shot). The file is rewritten only when it
+/// did; other lines, unreadable ones included, are kept as they are. Off in demo mode (`Ok(None)`).
 ///
 /// # Errors
 /// Returns a message if the file cannot be read or written.
-pub fn set_excluded(time: &str, shot_number: u32, excluded: bool) -> Result<(), String> {
-    update(time, shot_number, |rec| rec.excluded = excluded)
-}
-
-/// Keep GSPro's result with a recorded shot.
-pub fn set_gspro(time: &str, shot_number: u32, result: crate::gspro_db::GsproResult) -> Result<(), String> {
-    update(time, shot_number, |rec| rec.gspro = Some(result))
-}
-
-/// Change one recorded shot in the history file.
-fn update(time: &str, shot_number: u32, change: impl Fn(&mut ShotRecord)) -> Result<(), String> {
+pub(crate) fn update(time: &str, shot_number: u32, change: impl Fn(&mut ShotRecord)) -> Result<Option<(ShotRecord, bool)>, String> {
     if !persist() {
-        return Ok(());
+        return Ok(None);
     }
     let path = path().ok_or("HOME not set")?;
     let _lock = FILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut out = String::with_capacity(text.len() + 32);
+    let mut found: Option<(ShotRecord, bool)> = None;
     for line in text.lines() {
         match serde_json::from_str::<ShotRecord>(line) {
             Ok(mut rec) if rec.time == time && rec.shot_number == shot_number => {
+                let before = rec.clone();
                 change(&mut rec);
+                let changed = rec != before || found.as_ref().is_some_and(|(_, c)| *c);
                 out.push_str(&serde_json::to_string(&rec).map_err(|e| e.to_string())?);
+                found = Some((rec, changed));
             }
             _ => out.push_str(line),
         }
         out.push('\n');
     }
-    // Write a copy and swap it in, so a crash never leaves a half-written history.
-    let tmp = path.with_extension("jsonl.tmp");
-    std::fs::write(&tmp, out).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
+    if found.as_ref().is_some_and(|(_, changed)| *changed) {
+        // Write a copy and swap it in, so a crash never leaves a half-written history.
+        let tmp = path.with_extension("jsonl.tmp");
+        std::fs::write(&tmp, out).and_then(|()| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())?;
+    }
+    Ok(found)
 }
 
 const CSV_HEADER: &str = "time,shot_number,club,delivered,ball_speed_mph,vla_deg,hla_deg,total_spin_rpm,\
@@ -579,6 +588,7 @@ mod tests {
             time: "2026-10-19T18:30:05+02:00".into(),
             shot_number: 1,
             club_code: code.map(Into::into),
+            club_gspro: None,
             delivered: true,
             ball,
             club,
@@ -771,7 +781,7 @@ mod tests {
         assert_eq!(load_all(), shots);
     }
 
-    /// `set_gspro` and `set_excluded` change the shot with that time and number, and only that one.
+    /// `set_gspro` and `update` change the shot with that time and number, and only that one.
     #[test]
     fn updates_change_the_right_shot() {
         let _h = crate::test_util::TestHistory::new("history-update");
@@ -782,16 +792,46 @@ mod tests {
             append(s).unwrap();
         }
         set_gspro(&shots[1].time, 2, result(150.0)).unwrap();
-        set_excluded(&shots[3].time, 3, true).unwrap();
+        let (now, changed) = update(&shots[3].time, 3, |r| r.excluded = true).unwrap().unwrap();
+        assert!(now.excluded && changed, "the shot as it is now");
         let mut want = shots.clone();
         want[1].gspro = Some(result(150.0));
         want[3].excluded = true;
         assert_eq!(load_all(), want);
         // And back again; a shot that isn't there changes nothing.
-        set_excluded(&shots[3].time, 3, false).unwrap();
+        update(&shots[3].time, 3, |r| r.excluded = false).unwrap();
         set_gspro(&shots[0].time, 99, result(1.0)).unwrap();
+        assert_eq!(update(&shots[0].time, 99, |r| r.excluded = true), Ok(None), "not found");
         want[3].excluded = false;
         assert_eq!(load_all(), want);
+    }
+
+    /// A change that makes no difference leaves the file alone (no copy swapped in).
+    #[test]
+    fn an_update_without_a_difference_writes_nothing() {
+        use std::os::unix::fs::MetadataExt;
+
+        let h = crate::test_util::TestHistory::new("history-same");
+        let shot = numbered(1, 110.0);
+        append(&shot).unwrap();
+        let inode = std::fs::metadata(&h.file).unwrap().ino();
+        assert_eq!(update(&shot.time, 1, |r| r.excluded = false), Ok(Some((shot.clone(), false))));
+        assert_eq!(std::fs::metadata(&h.file).unwrap().ino(), inode, "not rewritten");
+        update(&shot.time, 1, |r| r.excluded = true).unwrap();
+        assert_ne!(std::fs::metadata(&h.file).unwrap().ino(), inode, "rewritten");
+    }
+
+    /// `club_gspro` is written only when set, and lines without it read as `None`.
+    #[test]
+    fn the_club_from_gspro_is_written_only_when_set() {
+        let mut r = rec(Some("I7"), 120.0, None);
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(!json.contains("club_gspro"));
+        assert_eq!(serde_json::from_str::<ShotRecord>(&json).unwrap(), r);
+        r.club_gspro = Some("I6".into());
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains(r#""club_gspro":"I6""#));
+        assert_eq!(serde_json::from_str::<ShotRecord>(&json).unwrap(), r);
     }
 
     /// Today: an unreadable line in the middle of `shots.jsonl` is skipped by `load_all` (the shots
@@ -804,7 +844,7 @@ mod tests {
         let text = format!("{}\n{broken}\nnot json at all\n{}\n", serde_json::to_string(&first).unwrap(), serde_json::to_string(&last).unwrap());
         std::fs::write(&h.file, &text).unwrap();
         assert_eq!(load_all(), [first.clone(), last.clone()]);
-        set_excluded(&last.time, 2, true).unwrap();
+        update(&last.time, 2, |r| r.excluded = true).unwrap();
         let lines: Vec<String> = h.text().lines().map(Into::into).collect();
         assert_eq!(lines.len(), 4);
         assert_eq!((lines[1].as_str(), lines[2].as_str()), (broken, "not json at all"), "unreadable lines are kept");

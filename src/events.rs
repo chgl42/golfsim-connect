@@ -8,8 +8,9 @@
 //!   in (one lock around the fan-out); from one thread, that is the order it published them.
 //!   An event is published after the state it describes is written, so a subscriber that looks
 //!   into `state` finds it there.
-//! - **Threads:** events are published from the bridge threads (`r10`, `gspro`, `gspro-db`);
-//!   a receiver can be read on any thread (std mpsc).
+//! - **Threads:** events are published from the bridge threads (`r10`, `gspro`, `gspro-db`) and,
+//!   for a changed shot, from the thread that changed it (the GUI; ADR-015); a receiver can be
+//!   read on any thread (std mpsc).
 //! - **Never blocks:** the channels are unbounded and a dropped receiver is removed on the next
 //!   publish, so a slow or gone subscriber never holds up the bridge. A receiver that is kept but
 //!   never read keeps every event, so drop what you don't read.
@@ -26,6 +27,9 @@ pub enum Event {
     /// A shot was recorded: sent to GSPro or not (`shot.delivered`), in the session and the
     /// history unless it is a test shot.
     ShotRecorded { shot: Box<ShotRecord>, test: bool },
+    /// A recorded shot was changed through `recorder::change_shot` (excluded or counted again,
+    /// its club corrected): the whole record as it is now, already in the history and the session.
+    ShotChanged { shot: Box<ShotRecord> },
     /// GSPro's result arrived for the session shot with this time and shot number, or for a shot
     /// not in the session (`None`, e.g. a test shot).
     GsproResult { shot: Option<(String, u32)>, result: GsproResult },

@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- **Correct club:** shots hit with the wrong club selected in GSPro can be put right on the SHOTS page: select them,
+  choose *Correct club* and pick one of the clubs in your history. From then on they count for that club in every
+  tile and export; the details show the club GSPro sent (*GSPro: I6*), and correcting back to it clears that.
+- One way to change a recorded shot for extensions: `recorder::change_shot` with `ShotChange::Excluded` or
+  `ShotChange::Club` writes the history file, then the session, then publishes the new event `Event::ShotChanged`
+  with the record as it is now (ADR-015). *Exclude*, *Count* and *Correct club* go through it, so an extension
+  sees an exclusion without a restart. `ShotRecord` has the new optional field `club_gspro`.
 - The update check is an extension point: an extension can register where the app learns about new versions
   (`update::UpdateSource`, `update::register`; `update::is_newer` is public), and only then does the settings card
   show the *Updates* row.

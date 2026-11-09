@@ -189,7 +189,9 @@ the spin axis, named for right-handers.
 
 **Filter and selection:** the club filter (a menu when there are many clubs) and *Hide excluded* apply to every tile.
 Click a shot in a table or a dot in a chart to select it everywhere; then show only the selected shots, or
-*Exclude* misreads from the stats and exports (*Count* takes them back).
+*Exclude* misreads from the stats and exports (*Count* takes them back), or *Correct club* when the wrong club was
+selected in GSPro: the shots then count for the club picked (one of those in your history) in every tile and export,
+and the details show the club GSPro sent.
 
 **Your own pages:** *CUSTOMIZE* shows an empty tile with **+** to add tiles, a menu on each tile for what it shows
 and its size (1×1 up to the whole page), and lets you drag tiles into place or remove them (×). The page shown can be

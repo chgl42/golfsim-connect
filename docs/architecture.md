@@ -137,9 +137,10 @@ flowchart TB
   G -- "GsproStatus" --> EV
   L -- "GSPro's mode" --> S
   L -- "GsproMode" --> EV
-  REC -- "ShotRecorded, GsproResult" --> EV
+  REC -- "ShotRecorded, GsproResult, ShotChanged" --> EV
   EV --> SUB
   UI -- "reads" --> S
+  UI -- "change_shot (exclude, correct club)" --> REC
   UI -- "Cmd::Shot (test shot)" --> G
 ```
 
@@ -176,7 +177,11 @@ shots ignored, focus under CrossOver) are listed in [CLAUDE.md](../CLAUDE.md).
 
 The threads write into `state`, the snapshot the GUI draws each frame. What happens is also
 published as an `events::Event` ([ADR-007](adr/adr-007-bridge-events.md)): `ShotRecorded`,
-`GsproResult`, `R10Status` and `GsproStatus` (on a change), `BatteryLow`, `DeviceError`. Every
+`GsproResult`, `ShotChanged`, `R10Status` and `GsproStatus` (on a change), `BatteryLow`, `DeviceError`,
+`GsproMode`. A recorded shot is changed (excluded or counted again, its club corrected) only through
+`recorder::change_shot` ([ADR-015](adr/adr-015-shot-changes-through-one-function.md)): the history
+file, then the session and `state.shot_changes`, then `ShotChanged`; a page with its own copy of the
+history (the explorer's *All time*) reloads it when `shot_changes` moved. Every
 receiver from `events::subscribe()` gets every event, in the same order; an event is published
 after its state is written, and publishing never blocks. Nothing in the app subscribes yet: the
 GUI still compares the key of the last shot of the list a tile shows to animate a new shot, since
@@ -199,7 +204,7 @@ that list isn't always the session (all time, the preview's sample shot).
 |---|---|---|---|
 | Instance lock | `…/GolfSim Connect/instance.lock` | app and CLI at start (`Settings::claim_data_dir`) | Empty; an exclusive lock held for the whole run, released by the OS (ADR-012) |
 | Settings | `~/Library/Application Support/GolfSim Connect/settings.json` | GUI, "apply and save at once" | Write-then-rename; an earlier data folder moves in at start (see below) |
-| Shot history | `…/GolfSim Connect/shots.jsonl` | `recorder` (append, GSPro's result), explorer (excluded) | One JSON line per shot; test and demo shots are not kept |
+| Shot history | `…/GolfSim Connect/shots.jsonl` | `recorder` (append, GSPro's result, `change_shot`: excluded, corrected club) | One JSON line per shot; test and demo shots are not kept; a corrected shot keeps GSPro's club in `club_gspro` |
 | GSPro's results | `…/CrossOver/Bottles/<bottle>/drive_c/users/<user>/AppData/LocalLow/GSPro/GSPro/GSPro.db` | GSPro | Opened read-only |
 | GSPro's log | `Player.log` next to `GSPro.db` | GSPro (Unity) | Read-only; only the mode markers are used – it also holds the player's name |
 | App log | stderr + the last 400 lines in `state` | `log` | English; home folder, email addresses and other Bluetooth devices' names masked; copied by *COPY LOG*; the app writes no log file and sends it nowhere |
