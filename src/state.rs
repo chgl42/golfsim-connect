@@ -58,6 +58,9 @@ pub struct State {
     pub update_check: Option<crate::update::Check>,
     /// Real shots of this session (test shots excluded), oldest first.
     pub session: Vec<ShotRecord>,
+    /// Shots changed through `recorder::change_shot` so far: a page holding its own copy of the
+    /// history reloads it when this moved (ADR-015).
+    pub shot_changes: u64,
     pub log: VecDeque<String>,
 }
 
@@ -79,6 +82,7 @@ impl Default for State {
             update: None,
             update_check: None,
             session: Vec::new(),
+            shot_changes: 0,
             log: VecDeque::with_capacity(LOG_CAPACITY),
         }
     }
