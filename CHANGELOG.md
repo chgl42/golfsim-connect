@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   show the *Updates* row.
 
 ### Changed
+- The SQLite library used to read GSPro's results is updated to a release with a security fix (RUSTSEC-2026-0459;
+  `rusqlite` 0.41).
 - The repository moved to chgl42/golfsim-connect; old links redirect.
 - **Nearby Bluetooth devices masked in the log:** when the app searches for the R10, the log lists the devices it
   found with their ids, but shows every name except the R10's as `<device>` – in the terminal, on the Log page and
