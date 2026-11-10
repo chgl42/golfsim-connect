@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Removed
 - The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.
 
+### Fixed
+- **SQLite updated:** the SQLite built into the app, which reads GSPro's results from its database, is updated to
+  a version without the page-cache flaw of CVE-2026-119375 (RUSTSEC-2026-0459).
+
 ## [1.2.0] – 2026-10-27
 
 ### Added
