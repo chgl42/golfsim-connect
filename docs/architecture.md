@@ -56,6 +56,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `events` | Bridge events: `subscribe()` → mpsc receiver, `publish()` to every subscriber ([ADR-007](adr/adr-007-bridge-events.md)) | Small, one enum and two functions |
 | `flight` | Estimated ball flight (drag/lift, 3D, roll-out) when GSPro's result is missing | Deep, pure |
 | `misread` | Plausibility check: marks a shot with a reading no club gives (left out of stats, still sent to GSPro) | Small, pure |
+| `club` | GSPro club codes: their order in a bag (`rank`, an opaque `Rank` to sort by) and display names in the active language (`name`); public, also without `gui`, so an extension sorts and names clubs like the app | Small, pure |
 | `shape` | Shot shape names (e.g. "Push-Draw") from start direction and spin axis | Deep, pure |
 | `history` | `shots.jsonl` (append/update), per-club stats, CSV exports | File IO next to pure stats |
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct; a tile is its kind's id, size and settings as JSON |

@@ -16,6 +16,7 @@ use eframe::egui::{
     Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, StrokeKind,
     pos2, vec2,
 };
+use crate::club;
 use crate::engine;
 use crate::gspro::Cmd;
 use crate::history::{self, ExportFormat, ShotRecord};
@@ -439,7 +440,7 @@ impl Page for PlayPage {
         p.text(
             club_r.center(),
             Align2::CENTER_CENTER,
-            club.as_deref().map_or("–".to_string(), club_name),
+            club.as_deref().map_or("–".to_string(), club::name),
             FontId::proportional(16.0),
             WHITE,
         );
@@ -1205,23 +1206,6 @@ fn dir(v: f64, positive: &str, negative: &str) -> String {
     }
 }
 
-/// GSPro club code → display name.
-fn club_name(code: &str) -> String {
-    let num = |s: &str| s[1..].to_string();
-    match code {
-        "DR" => "Driver".into(),
-        "PW" => "Pitching Wedge".into(),
-        "GW" => "Gap Wedge".into(),
-        "SW" => "Sand Wedge".into(),
-        "LW" => "Lob Wedge".into(),
-        "PT" => "Putter".into(),
-        c if c.len() >= 2 && c.starts_with('W') => tr("{n}-Wood").replace("{n}", &num(c)),
-        c if c.len() >= 2 && c.starts_with('H') => tr("{n}-Hybrid").replace("{n}", &num(c)),
-        c if c.len() >= 2 && c.starts_with('I') => tr("{n}-Iron").replace("{n}", &num(c)),
-        c => c.to_string(),
-    }
-}
-
 /// Export the shown shots as CSV; returns a status note for the UI.
 fn export_csv(shots: &[ShotRecord], format: ExportFormat) -> String {
     let name = format.file_name(chrono::Local::now());
@@ -1759,17 +1743,5 @@ mod tests {
         assert_eq!(fit_zoom(vec2(3000.0, 705.0)), 1.5);
         assert_eq!(fit_zoom(vec2(1500.0, 2000.0)), 1.5);
         assert_eq!(fit_zoom(vec2(1234.0, 999.0)), 1.23);
-    }
-
-    #[test]
-    fn club_names() {
-        assert_eq!(club_name("DR"), "Driver");
-        assert_eq!(club_name("I7"), "7-Iron");
-        assert_eq!(club_name("W3"), "3-Wood");
-        assert_eq!(club_name("H4"), "4-Hybrid");
-        i18n::set(&Language::new("de"));
-        assert_eq!((club_name("I7"), club_name("W3"), club_name("H4")), ("Eisen 7".into(), "Holz 3".into(), "Hybrid 4".into()));
-        assert_eq!(club_name("DR"), "Driver");
-        i18n::set(&Language::new("en"));
     }
 }

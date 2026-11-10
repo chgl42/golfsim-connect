@@ -42,7 +42,7 @@ eframe = { version = "0.35.0", optional = true }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 image = { version = "0.25.10", default-features = false, features = ["png"], optional = true }
 sys-locale = "0.3.2"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 [profile.release]
 opt-level = 3

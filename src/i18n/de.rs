@@ -349,7 +349,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "GSPro connection lost" => "Verbindung zu GSPro verloren",
         "Shot was not delivered to GSPro" => "Schlag wurde nicht an GSPro übergeben",
 
-        // Club names (ui::club_name; `{n}` is the club's number)
+        // Club names (club::name; `{n}` is the club's number)
         "{n}-Wood" => "Holz {n}",
         "{n}-Hybrid" => "Hybrid {n}",
         "{n}-Iron" => "Eisen {n}",

@@ -861,9 +861,9 @@ impl OverlayContent {
                 OverlayItem::Status => Some(Cell::Status),
                 OverlayItem::Club => Some(Cell::Value {
                     glyph: None,
-                    text: club.map_or_else(|| "–".into(), club_name),
+                    text: club.map_or_else(|| "–".into(), club::name),
                     color: SOFT,
-                    wide: club_name("PW"),
+                    wide: club::name("PW"),
                 }),
                 OverlayItem::Battery => Some(Cell::Battery(battery)),
                 OverlayItem::Pin => value(Some(Glyph::Pin), pin.clone().filter(|_| shot.is_some()), pin_text(888.0, true)),

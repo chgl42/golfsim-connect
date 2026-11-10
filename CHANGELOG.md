@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The update check is an extension point: an extension can register where the app learns about new versions
   (`update::UpdateSource`, `update::register`; `update::is_newer` is public), and only then does the settings card
   show the *Updates* row.
+- Club order and club names for extensions: an extension can sort GSPro club codes in the app's bag order
+  (`club::rank`) and name them like the app, in its current language (`club::name`).
 
 ### Changed
 - The repository moved to chgl42/golfsim-connect; old links redirect.
@@ -22,6 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 - The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.
+
+### Fixed
+- **SQLite updated:** the SQLite built into the app, which reads GSPro's results from its database, is updated to
+  a version without the page-cache flaw of CVE-2026-119375 (RUSTSEC-2026-0459).
 
 ## [1.2.0] – 2026-10-27
 

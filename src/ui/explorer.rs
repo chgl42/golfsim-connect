@@ -797,7 +797,7 @@ impl ExplorerState {
         let head = Rect::from_min_size(rect.min, vec2(rect.width(), 28.0)).shrink2(vec2(10.0, 0.0));
         let mut title = kind_name(&cfg.tile.kind).to_uppercase();
         if let Some(code) = club {
-            title = format!("{title} · {}", club_name(code).to_uppercase());
+            title = format!("{title} · {}", club::name(code).to_uppercase());
         }
         p.text(head.left_center(), Align2::LEFT_CENTER, title, cond(14.0), LABEL);
         p.line_segment([pos2(rect.left(), head.bottom()), pos2(rect.right(), head.bottom())], Stroke::new(1.0, LINE));
@@ -831,7 +831,7 @@ fn club_codes(shots: &[ShotRecord]) -> Vec<Option<String>> {
             codes.push(s.club_code.clone());
         }
     }
-    codes.sort_by_key(|c| club_rank(c.as_deref()));
+    codes.sort_by_key(|c| club::rank(c.as_deref()));
     codes
 }
 
@@ -1274,24 +1274,6 @@ fn chip_width(ui: &egui::Ui, label: &str, dot: bool) -> f32 {
     text_width(ui, label, 12.5) + if dot { 14.0 } else { 0.0 } + 20.0
 }
 
-/// Position of a GSPro club code in a bag: driver, woods, hybrids, irons, wedges, putter.
-fn club_rank(code: Option<&str>) -> (u8, u8) {
-    let Some(code) = code else { return (9, 0) };
-    let n = code.get(1..).and_then(|n| n.parse::<u8>().ok()).unwrap_or(0);
-    match code {
-        "DR" => (0, 0),
-        "PW" => (5, 0),
-        "GW" | "AW" => (5, 1),
-        "SW" => (5, 2),
-        "LW" => (5, 3),
-        "PT" => (6, 0),
-        c if c.starts_with('W') => (1, n),
-        c if c.starts_with('H') => (2, n),
-        c if c.starts_with('I') => (3, n),
-        _ => (8, 0),
-    }
-}
-
 /// The club filter as a menu, when the chips don't fit: "Clubs 12/14" with a tick per club.
 fn club_menu(ui: &mut egui::Ui, codes: &[Option<String>], hidden: &mut BTreeSet<Option<String>>, color_of: &dyn Fn(&Option<String>) -> Color32) {
     let shown = codes.iter().filter(|c| !hidden.contains(*c)).count();
@@ -1312,7 +1294,7 @@ fn club_menu(ui: &mut egui::Ui, codes: &[Option<String>], hidden: &mut BTreeSet<
             ui.horizontal(|ui| {
                 let (dot, _) = ui.allocate_exact_size(vec2(10.0, 18.0), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 4.0, color_of(code));
-                let name = code.as_deref().map_or(tr("Unknown").to_string(), |c| format!("{c} · {}", club_name(c)));
+                let name = code.as_deref().map_or(tr("Unknown").to_string(), |c| format!("{c} · {}", club::name(c)));
                 if ui.checkbox(&mut on, name).changed() {
                     if on {
                         hidden.remove(code);
@@ -1749,13 +1731,6 @@ mod tests {
         assert_eq!(page_name(&page("Daten"), 2), "Data");
         assert_eq!(page_name(&page("Driver only"), 0), "Driver only");
         assert_eq!(page_name(&page(""), 3), "Page 4");
-    }
-
-    #[test]
-    fn clubs_sort_in_bag_order() {
-        let mut codes = vec![Some("PW"), None, Some("I7"), Some("H4"), Some("DR"), Some("LW"), Some("W3"), Some("I10"), Some("GW"), Some("PT")];
-        codes.sort_by_key(|c| club_rank(*c));
-        assert_eq!(codes, [Some("DR"), Some("W3"), Some("H4"), Some("I7"), Some("I10"), Some("PW"), Some("GW"), Some("LW"), Some("PT"), None]);
     }
 
     #[test]

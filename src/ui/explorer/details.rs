@@ -66,7 +66,7 @@ fn details(ui: &mut egui::Ui, shot: Option<&ShotRecord>, ctx: &TileCtx) {
     }
     // The tile's width, before the header row could widen the layout.
     let width = ui.available_width();
-    let name = s.club_code.as_deref().map_or(tr("Unknown").to_string(), club_name);
+    let name = s.club_code.as_deref().map_or(tr("Unknown").to_string(), club::name);
     let time = if ctx.all_time { s.time.get(..16).unwrap_or(&s.time).replace('T', " ") } else { s.clock().to_string() };
     ui.horizontal(|ui| {
         let (dot, _) = ui.allocate_exact_size(vec2(10.0, 16.0), Sense::hover());

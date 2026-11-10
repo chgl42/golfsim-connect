@@ -293,7 +293,9 @@ mod tests {
     /// by another test.
     #[test]
     fn every_ui_text_has_a_translation_in_every_shipped_language() {
-        let sources = ui_sources();
+        let mut sources = ui_sources();
+        // Club names are UI texts outside `ui` (`club::name`).
+        sources.push(include_str!("../club.rs").to_string());
         let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
         let gui = sources.concat();
         let bridge = [include_str!("../engine.rs"), include_str!("../gspro.rs")].concat();

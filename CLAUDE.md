@@ -26,6 +26,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   - `engine.rs` – R10 thread (BLE, reconnect, events → status) and start of the GSPro thread; `test_shot()`, `demo_session()`
   - `flight.rs` – estimated ball flight from the launch data (`fly()`: drag/lift from the spin factor, 3D,
     no wind; rough roll-out) → carry, total, apex, lateral, descent, path. GSPro doesn't send its results back.
+  - `club.rs` – GSPro club codes: bag order (`club::rank`, opaque `Rank`) and display names (`club::name`, through `tr()`);
+    public and outside `gui`, for the app and extensions alike
   - `shape.rs` – shot shape from HLA and spin axis (`Shape::of`, names like "Push-Draw"; right-hander's names)
   - `gspro_db.rs` – GSPro's own results (carry, total, apex, offline, to pin) from its SQLite DB in the CrossOver bottle
     (`…/AppData/LocalLow/GSPro/GSPro/GSPro.db`, table `LastShot`, read-only, polled each second; matched by ball speed
