@@ -184,7 +184,7 @@ fn averages_table(ui: &mut egui::Ui, i: usize, ctx: &TileCtx) {
     table(ui, egui::Id::new(("averages-table", i)), &cols, stats.len(), |r| {
         let c = &stats[r];
         let cells = [
-            c.club_code.as_deref().map_or(tr("Unknown").to_string(), club_name),
+            c.club_code.as_deref().map_or(tr("Unknown").to_string(), club::name),
             c.shots.to_string(),
             fmt(c.carry, 0, &dist, c.shots),
             fmt(c.total, 0, &dist, c.shots),
