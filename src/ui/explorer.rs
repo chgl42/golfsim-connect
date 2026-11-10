@@ -564,7 +564,7 @@ impl Page for ShotsPage {
                             ui.label(RichText::new(tr("No clubs saved yet")).size(13.0).color(MUTED));
                         }
                         for code in history_clubs {
-                            if ui.button(club_name(code)).clicked() {
+                            if ui.button(club::name(code)).clicked() {
                                 correct = Some(code.clone());
                                 ui.close();
                             }
@@ -852,7 +852,7 @@ fn correctable_clubs(shots: &[ShotRecord]) -> Vec<String> {
             codes.push(code.to_string());
         }
     }
-    codes.sort_by_key(|c| club_rank(Some(c)));
+    codes.sort_by_key(|c| club::rank(Some(c)));
     codes
 }
 
