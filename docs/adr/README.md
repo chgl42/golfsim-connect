@@ -24,3 +24,4 @@ no longer holds is marked *Superseded by ADR-NNN* or *Deprecated*, not deleted.
 | [ADR-013](adr-013-languages-as-registered-tables.md) | Languages as registered tables | Accepted |
 | [ADR-014](adr-014-update-source-as-an-extension-point.md) | Update source as an extension point | Accepted |
 | [ADR-015](adr-015-shot-changes-through-one-function.md) | Shot changes through one function | Accepted |
+| [ADR-016](adr-016-pages-and-tile-kinds-decorate-themselves.md) | Pages and tile kinds decorate themselves | Accepted |

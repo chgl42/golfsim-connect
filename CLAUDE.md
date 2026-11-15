@@ -86,7 +86,10 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   pass runs with the overlay's size as zoom (`options.zoom_factor` set around `show_viewport_immediate`), and on macOS
   its frame is set through AppKit (`ui/mac.rs`, `mac::place_window`, native points, within the visible frame) – egui takes a second
   window's size in native points but reports it in zoomed ones, and a layer transform isn't applied in it.
-  Pages implement the trait `ui::Page` (`id`, `label`, `ui`) and keep their own state (ADR-010, `ui/page.rs`); what they
+  Pages implement the trait `ui::Page` (`id`, `label`, `ui`) and keep their own state (ADR-010, `ui/page.rs`);
+  an extension's page or tile kind can mark itself with the default methods `badge` and `greyed` (ADR-016: a mark
+  after the label/name, and greyed at `kit::DISABLED` with a tooltip, still clickable; drawn in the navigation, the
+  tile-kind menus and the Shots page's tile title, not in the tile overlays); what they
   share comes through `AppCtx` (`settings()`, `change_settings`, the one way settings change; `commands()`; for the core
   pages `edit`, `explorer`, `moving` and the arrangement operations). The list `page::pages` makes the navigation
   (Play, Shots, Log, Overlay, extra pages, Help, Settings); a new core page goes there. The *Help* page
