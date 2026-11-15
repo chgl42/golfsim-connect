@@ -207,15 +207,22 @@ mod tests {
         harness.get_by_label("PLAY");
     }
 
-    /// The entry's colour: active or hovered white, else muted; greyed at the kit's disabled look.
+    /// The entry's colour: active or hovered white, else muted; while the page is greyed at the
+    /// kit's disabled look, and as usual once it is not.
     #[test]
     fn a_greyed_entry_is_dimmed() {
         use super::super::{DISABLED, MUTED, WHITE, entry_color};
-        assert_eq!(entry_color(true, false, false), WHITE);
-        assert_eq!(entry_color(false, true, false), WHITE);
-        assert_eq!(entry_color(false, false, false), MUTED);
-        assert_eq!(entry_color(false, false, true), MUTED.gamma_multiply(DISABLED));
-        assert_eq!(entry_color(true, false, true), WHITE.gamma_multiply(DISABLED), "the page shown, greyed: dimmed too");
+        let greyed = Rc::new(Cell::new(Some("Not available yet")));
+        let page = MarkedPage { greyed: greyed.clone(), drawn: Rc::new(Cell::new(0)) };
+        assert_eq!(entry_color(&page, false, false), MUTED.gamma_multiply(DISABLED));
+        assert_eq!(entry_color(&page, false, true), WHITE.gamma_multiply(DISABLED));
+        assert_eq!(entry_color(&page, true, false), WHITE.gamma_multiply(DISABLED), "the page shown, greyed: dimmed too");
+        greyed.set(None);
+        assert_eq!(entry_color(&page, false, false), MUTED);
+        assert_eq!(entry_color(&page, true, false), WHITE);
+        assert_eq!(entry_color(&page, false, true), WHITE);
+        let core = super::super::PlayPage;
+        assert_eq!(entry_color(&core, false, false), MUTED, "a core page as before");
     }
 
     #[test]

@@ -53,8 +53,8 @@ pub const FIELD_LINE: Color32 = Color32::from_rgb(0x2b, 0x3d, 0x63);
 /// Row labels and card headings.
 pub const LABEL: Color32 = Color32::from_rgb(0x9f, 0xb0, 0xd0);
 
-/// The disabled or greyed look: a colour multiplied by it (`gamma_multiply(DISABLED)`) keeps its
-/// hue at 45 %. Used by a disabled [`button`] and by greyed navigation entries and tile kinds
+/// The disabled or greyed look: a colour multiplied by it (`gamma_multiply(DISABLED)`) is that
+/// colour at 45 % intensity and opacity. Used by a disabled [`button`] and by greyed navigation entries and tile kinds
 /// (`Page::greyed`, `TileKind::greyed`); an extension can grey its own values with it.
 pub const DISABLED: f32 = 0.45;
 

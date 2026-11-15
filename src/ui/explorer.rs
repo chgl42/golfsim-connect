@@ -108,16 +108,38 @@ fn kind_name(id: &str) -> &str {
 /// badge, dimmed with the reason as tooltip when it is greyed (ADR-016). Every menu of kinds
 /// goes through it.
 fn kind_entry(ui: &mut egui::Ui, kind: &dyn TileKind, add: impl FnOnce(&mut egui::Ui, RichText) -> egui::Response) -> egui::Response {
-    let mut text = RichText::new(with_badge(kind.name(), kind.badge()));
-    let greyed = kind.greyed();
-    if greyed.is_some() {
-        text = text.color(ui.visuals().widgets.inactive.text_color().gamma_multiply(DISABLED));
-    }
-    let resp = add(ui, text);
-    match greyed {
+    let text = RichText::new(with_badge(kind.name(), kind.badge()));
+    let resp = ui
+        .scope(|ui| {
+            *ui.visuals_mut() = kind_visuals(kind, ui.visuals());
+            add(ui, text)
+        })
+        .inner;
+    match kind.greyed() {
         Some(why) => resp.on_hover_text(why),
         None => resp,
     }
+}
+
+/// The visuals a kind's menu entry is drawn with: for a greyed kind every state's text and the
+/// selection's text at the kit's [`DISABLED`] look, so it still shows hover and selection;
+/// otherwise as they are.
+fn kind_visuals(kind: &dyn TileKind, visuals: &egui::Visuals) -> egui::Visuals {
+    let mut visuals = visuals.clone();
+    if kind.greyed().is_some() {
+        let w = &mut visuals.widgets;
+        for state in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+            state.fg_stroke.color = state.fg_stroke.color.gamma_multiply(DISABLED);
+        }
+        visuals.selection.stroke.color = visuals.selection.stroke.color.gamma_multiply(DISABLED);
+    }
+    visuals
+}
+
+/// Colour of a tile's title on the Shots page: dimmed to the kit's [`DISABLED`] look when its kind
+/// is greyed.
+fn title_color(greyed: bool) -> Color32 {
+    if greyed { LABEL.gamma_multiply(DISABLED) } else { LABEL }
 }
 
 /// Gap between tiles.
@@ -1175,9 +1197,13 @@ fn tile_ui(ui: &mut egui::Ui, rect: Rect, i: usize, tile: &Tile, arrange: bool, 
         let kind = kind_of(&tile.kind);
         if rect.width() >= kind.map_or(0.0, TileKind::title_from) {
             // With the kind's badge, dimmed when greyed, as in its menus (ADR-016).
-            let title = with_badge(kind_name(&tile.kind), kind.and_then(TileKind::badge)).to_uppercase();
-            let color = if kind.and_then(TileKind::greyed).is_some() { LABEL.gamma_multiply(DISABLED) } else { LABEL };
-            head_ui.label(RichText::new(title).font(cond(14.0)).color(color).extra_letter_spacing(1.2));
+            // The name in capitals, the badge as given.
+            let title = with_badge(&kind_name(&tile.kind).to_uppercase(), kind.and_then(TileKind::badge));
+            let greyed = kind.and_then(TileKind::greyed);
+            let resp = head_ui.label(RichText::new(title).font(cond(14.0)).color(title_color(greyed.is_some())).extra_letter_spacing(1.2));
+            if let Some(why) = greyed {
+                resp.on_hover_text(why);
+            }
         }
         if let Some(kind) = kind {
             head_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| kind.header(ui, &mut changed, ctx));
@@ -1838,7 +1864,7 @@ mod tests {
         }
 
         fn name(&self) -> &'static str {
-            "Bag"
+            "Marked"
         }
 
         fn badge(&self) -> Option<&'static str> {
@@ -1865,9 +1891,9 @@ mod tests {
         let mut harness = explorer_with(vec![Tile::new("details", TileSize::W1H1)], true);
         harness.get_by_label("Add tile").click();
         harness.run_steps(3);
-        assert!(harness.query_by_label("Bag").is_none(), "the entry carries the badge");
+        assert!(harness.query_by_label("Marked").is_none(), "the entry carries the badge");
         harness.get_by_label("Table");
-        harness.get_by_label("Bag ★").click();
+        harness.get_by_label("Marked ★").click();
         harness.run_steps(3);
         let tiles = harness.state().saved.explorer.pages[0].tiles.clone();
         assert_eq!(tiles.iter().map(|t| t.kind.as_str()).collect::<Vec<_>>(), ["details", "test-marked-kind"], "a greyed kind can be chosen");
@@ -1875,8 +1901,43 @@ mod tests {
 
         harness.state_mut().explorer.arrange = false;
         harness.run_steps(3);
-        harness.get_by_label("BAG ★");
+        harness.get_by_label("MARKED ★");
         harness.get_by_label("DETAILS");
+    }
+
+    /// In the tile header's kind menu while customizing, a marked kind is listed with its badge
+    /// and can be chosen.
+    #[test]
+    fn a_marked_kind_can_be_chosen_in_the_tile_header() {
+        use egui_kittest::kittest::Queryable;
+
+        register_tile_kind(&MarkedKind);
+        let _state = crate::test_util::state_lock();
+        let mut harness = explorer_with(vec![Tile::new("details", TileSize::W2H2)], true);
+        // The kind's menu is the header's first combo box, showing the kind chosen.
+        let combo = harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Details"));
+        combo.expect("the kind's menu").click();
+        harness.run_steps(3);
+        harness.get_by_label("Marked ★").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().saved.explorer.pages[0].tiles[0].kind, "test-marked-kind");
+    }
+
+    /// A greyed kind's menu entries are dimmed in every state, a core kind's are not; so is the
+    /// title of its tile.
+    #[test]
+    fn a_greyed_kind_is_dimmed() {
+        let visuals = egui::Visuals::dark();
+        let dimmed = kind_visuals(&MarkedKind, &visuals);
+        for (d, v) in [(&dimmed.widgets.inactive, &visuals.widgets.inactive), (&dimmed.widgets.hovered, &visuals.widgets.hovered), (&dimmed.widgets.active, &visuals.widgets.active), (&dimmed.widgets.open, &visuals.widgets.open), (&dimmed.widgets.noninteractive, &visuals.widgets.noninteractive)] {
+            assert_eq!(d.fg_stroke.color, v.fg_stroke.color.gamma_multiply(DISABLED));
+        }
+        assert_eq!(dimmed.selection.stroke.color, visuals.selection.stroke.color.gamma_multiply(DISABLED));
+        let core = kind_visuals(&table::Table, &visuals);
+        assert_eq!(core.widgets.inactive.fg_stroke.color, visuals.widgets.inactive.fg_stroke.color);
+        assert_eq!(core.selection.stroke.color, visuals.selection.stroke.color);
+        assert_eq!(title_color(true), LABEL.gamma_multiply(DISABLED));
+        assert_eq!(title_color(false), LABEL);
     }
 
     /// The menu entry of a greyed kind explains itself on hover.
@@ -1890,7 +1951,7 @@ mod tests {
         harness.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
         harness.get_by_label("Add tile").click();
         harness.run_steps(3);
-        harness.get_by_label("Bag ★").hover();
+        harness.get_by_label("Marked ★").hover();
         harness.run_steps(3);
         harness.get_by_label("Not available yet");
     }
