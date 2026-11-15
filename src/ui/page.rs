@@ -199,6 +199,12 @@ mod tests {
         harness.run_steps(2);
         assert!(drawn.get() > 0, "a greyed page opens");
         assert_eq!(harness.state().pages[harness.state().page].id(), "sound");
+        harness.get_by_label("Sound page").hover();
+        harness.run_steps(2);
+        assert_eq!(painted(&harness), Some(super::super::WHITE.gamma_multiply(super::super::DISABLED)), "shown, not hovered, greyed: white, dimmed");
+        harness.get_by_label("SETTINGS").hover();
+        harness.run_steps(2);
+        assert_eq!(crate::test_util::painted_text_color(harness.output(), "SETTINGS"), Some(super::super::WHITE), "hovered: white");
 
         greyed.set(None);
         harness.get_by_label("SOUND ★").hover();
