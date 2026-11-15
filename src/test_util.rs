@@ -82,3 +82,22 @@ macro_rules! fixture {
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/", $name)).trim_ascii_end()
     };
 }
+
+/// The colour `text` was painted in, in the last frame of a UI test: the first text shape whose
+/// whole text it is (its override, else its first section's colour, else its fallback colour).
+#[cfg(feature = "gui")]
+pub fn painted_text_color(output: &crate::ui::egui::FullOutput, text: &str) -> Option<crate::ui::egui::Color32> {
+    use crate::ui::egui::{Color32, Shape};
+    fn find(shape: &Shape, text: &str) -> Option<Color32> {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().find_map(|s| find(s, text)),
+            Shape::Text(t) if t.galley.text() == text => {
+                let section = t.galley.job.sections.first().map_or(Color32::PLACEHOLDER, |s| s.format.color);
+                let color = t.override_text_color.unwrap_or(if section == Color32::PLACEHOLDER { t.fallback_color } else { section });
+                Some(if t.opacity_factor < 1.0 { color.gamma_multiply(t.opacity_factor) } else { color })
+            }
+            _ => None,
+        }
+    }
+    output.shapes.iter().find_map(|c| find(&c.shape, text))
+}

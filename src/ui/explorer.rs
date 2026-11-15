@@ -121,8 +121,8 @@ fn kind_entry(ui: &mut egui::Ui, kind: &dyn TileKind, add: impl FnOnce(&mut egui
     }
 }
 
-/// The visuals a kind's menu entry is drawn with: for a greyed kind every state's text and the
-/// selection's text at the kit's [`DISABLED`] look, so it still shows hover and selection;
+/// The visuals a kind's menu entry is drawn with: for a greyed kind every state's text, the
+/// selection's text and the app's text colour at the kit's [`DISABLED`] look, so it still shows hover and selection;
 /// otherwise as they are.
 fn kind_visuals(kind: &dyn TileKind, visuals: &egui::Visuals) -> egui::Visuals {
     let mut visuals = visuals.clone();
@@ -132,6 +132,8 @@ fn kind_visuals(kind: &dyn TileKind, visuals: &egui::Visuals) -> egui::Visuals {
             state.fg_stroke.color = state.fg_stroke.color.gamma_multiply(DISABLED);
         }
         visuals.selection.stroke.color = visuals.selection.stroke.color.gamma_multiply(DISABLED);
+        // The app sets one text colour for all states (`setup_style`); it is dimmed, too.
+        visuals.override_text_color = visuals.override_text_color.map(|c| c.gamma_multiply(DISABLED));
     }
     visuals
 }
@@ -1893,6 +1895,9 @@ mod tests {
         harness.run_steps(3);
         assert!(harness.query_by_label("Marked").is_none(), "the entry carries the badge");
         harness.get_by_label("Table");
+        let table = crate::test_util::painted_text_color(harness.output(), "Table").expect("Table painted");
+        let marked = crate::test_util::painted_text_color(harness.output(), "Marked ★");
+        assert_eq!(marked, Some(table.gamma_multiply(DISABLED)), "the greyed kind dimmed, the core's not");
         harness.get_by_label("Marked ★").click();
         harness.run_steps(3);
         let tiles = harness.state().saved.explorer.pages[0].tiles.clone();
@@ -1901,8 +1906,28 @@ mod tests {
 
         harness.state_mut().explorer.arrange = false;
         harness.run_steps(3);
-        harness.get_by_label("MARKED ★");
-        harness.get_by_label("DETAILS");
+        assert_eq!(crate::test_util::painted_text_color(harness.output(), "MARKED ★"), Some(LABEL.gamma_multiply(DISABLED)), "its title dimmed");
+        assert_eq!(crate::test_util::painted_text_color(harness.output(), "DETAILS"), Some(LABEL));
+        harness.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+        harness.get_by_label("MARKED ★").hover();
+        harness.run_steps(3);
+        harness.get_by_label("Not available yet");
+    }
+
+    /// On the Overlay page's choice of tile, a marked kind is listed with its badge and can be chosen.
+    #[test]
+    fn a_marked_kind_can_be_chosen_for_a_tile_overlay() {
+        use egui_kittest::kittest::Queryable;
+
+        register_tile_kind(&MarkedKind);
+        let mut harness = egui_kittest::Harness::new_ui_state(|ui, tile: &mut Tile| tile_options(ui, tile, true, true, |_| {}), Tile::new("details", TileSize::W2H2));
+        harness.run_steps(2);
+        let combo = harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Details"));
+        combo.expect("the choice of tile").click();
+        harness.run_steps(3);
+        harness.get_by_label("Marked ★").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().kind, "test-marked-kind");
     }
 
     /// In the tile header's kind menu while customizing, a marked kind is listed with its badge
@@ -1927,8 +1952,9 @@ mod tests {
     /// title of its tile.
     #[test]
     fn a_greyed_kind_is_dimmed() {
-        let visuals = egui::Visuals::dark();
+        let visuals = egui::Visuals { override_text_color: Some(SOFT), ..egui::Visuals::dark() };
         let dimmed = kind_visuals(&MarkedKind, &visuals);
+        assert_eq!(dimmed.override_text_color, Some(SOFT.gamma_multiply(DISABLED)));
         for (d, v) in [(&dimmed.widgets.inactive, &visuals.widgets.inactive), (&dimmed.widgets.hovered, &visuals.widgets.hovered), (&dimmed.widgets.active, &visuals.widgets.active), (&dimmed.widgets.open, &visuals.widgets.open), (&dimmed.widgets.noninteractive, &visuals.widgets.noninteractive)] {
             assert_eq!(d.fg_stroke.color, v.fg_stroke.color.gamma_multiply(DISABLED));
         }
@@ -1936,6 +1962,7 @@ mod tests {
         let core = kind_visuals(&table::Table, &visuals);
         assert_eq!(core.widgets.inactive.fg_stroke.color, visuals.widgets.inactive.fg_stroke.color);
         assert_eq!(core.selection.stroke.color, visuals.selection.stroke.color);
+        assert_eq!(core.override_text_color, Some(SOFT));
         assert_eq!(title_color(true), LABEL.gamma_multiply(DISABLED));
         assert_eq!(title_color(false), LABEL);
     }

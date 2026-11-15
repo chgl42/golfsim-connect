@@ -187,8 +187,10 @@ mod tests {
             App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)])
         });
         harness.state_mut().remember_size = false;
-        harness.step();
+        harness.run_steps(2);
         assert!(harness.query_by_label("SOUND").is_none(), "the label carries the badge");
+        let painted = |harness: &Harness<'_, App>| crate::test_util::painted_text_color(harness.output(), "SOUND ★");
+        assert_eq!(painted(&harness), Some(super::super::MUTED.gamma_multiply(super::super::DISABLED)), "greyed: dimmed");
         harness.get_by_label("SOUND ★").hover();
         harness.run_steps(3);
         harness.get_by_label("Not available yet");
@@ -202,6 +204,9 @@ mod tests {
         harness.get_by_label("SOUND ★").hover();
         harness.run_steps(3);
         assert!(harness.query_by_label("Not available yet").is_none(), "no reason once it is not greyed");
+        harness.get_by_label("PLAY").click();
+        harness.run_steps(2);
+        assert_eq!(painted(&harness), Some(super::super::MUTED), "no longer greyed: as usual");
         // The core entries are as they were.
         harness.get_by_label("SETTINGS");
         harness.get_by_label("PLAY");
