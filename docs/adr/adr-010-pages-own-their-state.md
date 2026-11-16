@@ -38,6 +38,17 @@ without editing the core.
 - **Not in this step:** a premium marker or badge. It can be added later as a trait method with a
   default (`fn badge(&self) -> Option<&str> { None }`), which doesn't break existing pages.
 
+## Addendum 2026-11-16: a page's position
+
+`Page` has the method `fn after(&self) -> Option<&'static str> { None }`: the id of the core page
+(`play`, `shots`, `log`, `overlay`, `help`, `settings`) the page sits right after in the
+navigation. `page::pages(extra)` keeps the core pages' order and puts each extra page after the
+core page it names; pages in the same place keep the order given to `run_with`. A page without a
+position, or naming no core page (another extension's page included), goes where extra pages
+went before, after *Overlay* and before *Help* and *Settings*; for an id of no core page, a log
+line names the page and the id. It is a defaulted method, like the one foreseen for a badge, so
+existing pages are unchanged; there is no placement relative to another extension's page.
+
 ## Consequences
 
 - Positive: a new page is one type and one entry in a list; another crate adds one without

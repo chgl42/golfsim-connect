@@ -35,6 +35,13 @@ pub trait Page: std::any::Any {
     fn greyed(&self) -> Option<&'static str> {
         None
     }
+    /// The id of the core page this page sits right after in the navigation: `"play"`, `"shots"`,
+    /// `"log"`, `"overlay"`, `"help"` or `"settings"`. Pages after the same core page keep the order
+    /// given to [`run_with`](super::run_with). `None` (the default), or an id of no core page, puts
+    /// the page after *Overlay*, before *Help* and *Settings*.
+    fn after(&self) -> Option<&'static str> {
+        None
+    }
     /// Draws the page; `ui` is the room below the top bar, inside the page margins.
     fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>);
 }
@@ -88,19 +95,36 @@ impl<'a> AppCtx<'a> {
     }
 }
 
-/// The core pages in the order of the navigation, left to right, with `extra` (pages of other
-/// crates) before *Help* and *Settings*, which stay last.
+/// The core page that pages without a position (or naming no core page) sit after.
+const UNPOSITIONED_AFTER: &str = "overlay";
+
+/// The pages in the order of the navigation, left to right: the core pages (*Play*, *Shots*,
+/// *Log*, *Overlay*, *Help*, *Settings*), each followed by the pages of `extra` (pages of other
+/// crates) that name it in [`Page::after`], in the order given; the others come after *Overlay*,
+/// before *Help* and *Settings*.
 pub(super) fn pages(extra: Vec<Box<dyn Page>>) -> Vec<Box<dyn Page>> {
-    let mut pages: Vec<Box<dyn Page>> = vec![
+    let core: Vec<Box<dyn Page>> = vec![
         Box::new(super::PlayPage),
         Box::new(super::explorer::ShotsPage::default()),
         Box::new(super::LogPage::default()),
         Box::new(super::overlay::OverlayPage::default()),
+        Box::new(super::help::HelpPage),
+        Box::new(super::SettingsPage::default()),
     ];
-    pages.extend(extra);
-    pages.push(Box::new(super::help::HelpPage));
-    pages.push(Box::new(super::SettingsPage::default()));
-    pages
+    let slot = |id: &str| core.iter().position(|p| p.id() == id);
+    let unpositioned = slot(UNPOSITIONED_AFTER).expect("Overlay is a core page");
+    let mut after: Vec<Vec<Box<dyn Page>>> = core.iter().map(|_| Vec::new()).collect();
+    for page in extra {
+        let at = match page.after() {
+            None => unpositioned,
+            Some(id) => slot(id).unwrap_or_else(|| {
+                log::info(&format!("The page \"{}\" names no core page to sit after (\"{id}\"); it goes after Overlay", page.id()));
+                unpositioned
+            }),
+        };
+        after[at].push(page);
+    }
+    core.into_iter().zip(after).flat_map(|(page, extra)| std::iter::once(page).chain(extra)).collect()
 }
 
 /// The page shown first: the one named `wanted` (`OPENLAUNCH_PAGE`), else the first.
@@ -234,6 +258,112 @@ mod tests {
         assert_eq!(entry_color(&page, false, true), WHITE);
         let core = super::super::PlayPage;
         assert_eq!(entry_color(&core, false, false), MUTED, "a core page as before");
+    }
+
+    /// A page of another crate that names the core page it sits after.
+    struct At {
+        id: &'static str,
+        after: Option<&'static str>,
+        drawn: Rc<Cell<u32>>,
+    }
+
+    impl Page for At {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+
+        fn label(&self) -> &'static str {
+            "EXT"
+        }
+
+        fn after(&self) -> Option<&'static str> {
+            self.after
+        }
+
+        fn ui(&mut self, ui: &mut egui::Ui, _app: &mut AppCtx<'_>) {
+            self.drawn.set(self.drawn.get() + 1);
+            ui.label("Extension page");
+        }
+    }
+
+    /// The navigation's ids for extra pages given as `(id, after)`.
+    fn ids_with(extra: &[(&'static str, Option<&'static str>)]) -> Vec<&'static str> {
+        let extra = extra.iter().map(|&(id, after)| Box::new(At { id, after, drawn: Rc::default() }) as Box<dyn Page>).collect();
+        pages(extra).iter().map(|p| p.id()).collect()
+    }
+
+    #[test]
+    fn a_page_without_a_position_comes_after_overlay() {
+        assert_eq!(ids_with(&[("sound", None)]), ["play", "shots", "log", "overlay", "sound", "help", "settings"]);
+        assert_eq!(ids_with(&[]), ["play", "shots", "log", "overlay", "help", "settings"], "the core pages' order");
+    }
+
+    #[test]
+    fn a_page_sits_right_after_the_core_page_it_names() {
+        assert_eq!(ids_with(&[("ext", Some("shots"))]), ["play", "shots", "ext", "log", "overlay", "help", "settings"]);
+    }
+
+    #[test]
+    fn pages_after_the_same_core_page_keep_the_order_given() {
+        assert_eq!(ids_with(&[("a", Some("shots")), ("b", Some("shots"))]), ["play", "shots", "a", "b", "log", "overlay", "help", "settings"]);
+        assert_eq!(ids_with(&[("a", None), ("b", Some("overlay"))]), ["play", "shots", "log", "overlay", "a", "b", "help", "settings"]);
+    }
+
+    #[test]
+    fn positioned_and_unpositioned_pages_mix() {
+        assert_eq!(ids_with(&[("a", None), ("b", Some("play"))]), ["play", "b", "shots", "log", "overlay", "a", "help", "settings"]);
+    }
+
+    #[test]
+    fn an_unknown_or_extension_id_is_as_no_position() {
+        assert_eq!(ids_with(&[("x", Some("nope"))]), ["play", "shots", "log", "overlay", "x", "help", "settings"]);
+        // Only core pages count: naming another extension's page is no position either.
+        assert_eq!(ids_with(&[("a", Some("shots")), ("b", Some("a"))]), ["play", "shots", "a", "log", "overlay", "b", "help", "settings"]);
+    }
+
+    #[test]
+    fn a_page_can_sit_after_the_last_core_page() {
+        assert_eq!(ids_with(&[("x", Some("settings"))]), ["play", "shots", "log", "overlay", "help", "settings", "x"]);
+        assert_eq!(ids_with(&[("x", Some("help"))]), ["play", "shots", "log", "overlay", "help", "x", "settings"]);
+    }
+
+    #[test]
+    fn the_start_page_finds_a_positioned_page() {
+        let pages = pages(vec![Box::new(At { id: "ext", after: Some("shots"), drawn: Rc::default() })]);
+        assert_eq!(start_page(&pages, Some("ext")), 2);
+        assert_eq!(start_page(&pages, Some("log")), 3);
+    }
+
+    /// A page placed after *Shots* shows there in the navigation and opens on click.
+    #[test]
+    fn a_positioned_page_is_in_the_navigation_and_renders() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::i18n::set(&crate::i18n::Language::new("en"));
+        let drawn = Rc::new(Cell::new(0));
+        let page = At { id: "ext", after: Some("shots"), drawn: drawn.clone() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)])
+        });
+        harness.state_mut().remember_size = false;
+        harness.step();
+        let ids: Vec<&str> = harness.state().pages.iter().map(|p| p.id()).collect();
+        assert_eq!(ids, ["play", "shots", "ext", "log", "overlay", "help", "settings"]);
+        // In the navigation, left to right: SHOTS, then EXT, then LOG.
+        let x = |label: &str| harness.get_by_label(label).rect().left();
+        assert!(x("SHOTS") < x("EXT") && x("EXT") < x("LOG"), "EXT sits right after SHOTS");
+        assert_eq!(drawn.get(), 0, "the Play page is shown first");
+        harness.get_by_label("EXT").click();
+        harness.step();
+        harness.step();
+        assert!(drawn.get() > 0);
+        assert_eq!(harness.state().pages[harness.state().page].id(), "ext");
+        harness.get_by_label("Extension page");
     }
 
     #[test]

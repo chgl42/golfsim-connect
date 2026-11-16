@@ -82,9 +82,12 @@ The module `ui` (`src/ui/`):
 | `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
 
-- **Pages** implement the trait `Page` (`id`, `label`, `ui`; `badge` and `greyed` with defaults)
+- **Pages** implement the trait `Page` (`id`, `label`, `ui`; `badge`, `greyed` and `after` with defaults)
   and keep their own state ([ADR-010](adr/adr-010-pages-own-their-state.md)). `App` holds the list of pages – *Play*,
-  *Shots*, *Log*, *Overlay*, the pages given to `run_with`, *Help*, *Settings* – and the window, zoom,
+  *Shots*, *Log*, *Overlay*, *Help*, *Settings*, with each page given to `run_with` right after the
+  core page its `after()` names (`play`, `shots`, `log`, `overlay`, `help`, `settings`; pages in the
+  same place keep the order given), or after *Overlay* without one or with an id of no core page
+  (a log line names an unknown id) – and the window, zoom,
   overlays and capture. A page reaches what pages share through `AppCtx`: the settings and
   `change_settings`, the command sender, and for the core pages the Settings page's copy, the
   explorer state and the overlay being moved.
@@ -271,7 +274,8 @@ can be added without editing the core in many places.
   Left: kinds share one namespace of keys in a tile.
 - **Pages**: each page is a type implementing `Page` with its own state; the navigation,
   `OPENLAUNCH_PAGE` and the README screenshots go through one list, and another crate adds pages
-  with `ui::run_with` ([ADR-010](adr/adr-010-pages-own-their-state.md)). Left: an extension's
+  with `ui::run_with`, placed after a core page by `Page::after`
+  ([ADR-010](adr/adr-010-pages-own-their-state.md)). Left: an extension's
   page sees only the settings and the command sender.
 - **Decoration**: a page or a tile kind of an extension can mark itself with two default trait
   methods, `badge` (a mark after its label or name) and `greyed` (`Some(why)`: drawn at the kit's
