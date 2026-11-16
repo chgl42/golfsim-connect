@@ -76,8 +76,9 @@ fn start_check_wanted(check_updates: bool, demo: bool) -> bool {
     check_updates && !demo
 }
 
-/// Like [`run`], with more pages: `pages` (e.g. of another crate) come in the navigation after
-/// the core pages, before *Settings*, in the order given.
+/// Like [`run`], with more pages: `pages` (e.g. of another crate) come in the navigation right
+/// after the core page each names in [`Page::after`]; a page without one comes after *Overlay*,
+/// before *Help* and *Settings*. Pages in the same place keep the order given.
 ///
 /// # Errors
 /// Returns eframe's error if the window can't be created.
@@ -176,7 +177,8 @@ struct App {
     saved: Settings,
     /// The Settings page's copy, which every change through `AppCtx::change_settings` reaches too.
     edit: Settings,
-    /// The pages in the order of the navigation (`page::pages`), and the one shown.
+    /// The pages in the order of the navigation (`page::pages`: the core pages, each extra page
+    /// after the core page it names in `Page::after`, else after *Overlay*), and the one shown.
     pages: Vec<Box<dyn Page>>,
     page: usize,
     capture: Capture,

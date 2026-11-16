@@ -92,7 +92,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   with the default methods `badge` and `greyed` (ADR-016: a mark after the label/name, and greyed at `kit::DISABLED`
   with a tooltip, still clickable; drawn in the navigation, the tile-kind menus and the Shots page's tile title, not in
   the tile overlays). The list `page::pages` makes the navigation
-  (Play, Shots, Log, Overlay, extra pages, Help, Settings); a new core page goes there. The *Help* page
+  (Play, Shots, Log, Overlay, Help, Settings, each extra page right after the core page its `Page::after` names,
+  else after Overlay); a new core page goes there. The *Help* page
   (`ui/help.rs`) follows the README's *Troubleshooting* – change both together. Tests open a page with
   `App::show_page("id")` and reach its state with `App::page_mut::<P>()`.
   Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`. The *Overlay* page sets the overlay's position, size, lines, opacity and
