@@ -62,7 +62,7 @@ feature `gui` (on by default), so another crate can build its own app binary fro
 | `settings` | `settings.json`, data directory, migration from earlier names, overlay arrangements; tolerant of unknown values | One flat struct; a tile is its kind's id, size and settings as JSON |
 | `state` | Process-wide status read by the GUI (R10/GSPro status, last shot, session, log) | Shallow: public fields |
 | `i18n` | `tr()` lookup, languages as data (code, native name, table; English is the source), language switch and locale resolution; tables added by other crates per language (`register`) | One file with one `match` per language (`i18n/de.rs`), its `mod` line and one line in `SHIPPED`, plus registered tables ([ADR-013](adr/adr-013-languages-as-registered-tables.md)) |
-| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `run_with`, `Page`, `AppCtx`, `kit`, the tile kind interface in `explorer`, re-exported `egui`/`eframe`; the rest `pub(super)` |
+| `ui` | The app (feature `gui`): see [App](#app) | Public: `run`, `run_with`, `Page`, `AppCtx`, `kit`, the tile kind interface in `explorer`, the overlay kind interface in `overlay`, re-exported `egui`/`eframe`; the rest `pub(super)` |
 | `notify` | macOS notifications, rate-limited per kind | Small |
 | `update` | Update check through a source another crate registers (`UpdateSource`, `register`, `is_newer`); the core has none and contacts nobody ([ADR-014](adr/adr-014-update-source-as-an-extension-point.md)) | Small |
 | `launcher` | Find and open the GSPro launcher in CrossOver | Small |
@@ -78,7 +78,7 @@ The module `ui` (`src/ui/`):
 | `help.rs` | The *Help* page: the common fixes and how to ask for help |
 | `page.rs` | The `Page` trait, `AppCtx` (what pages share), the list of pages |
 | `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, the reading sizes and spacing `READ`/`READ_HEADING`/`READ_LINE`/`READ_GAP`/`READ_SECTION_GAP`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
-| `overlay.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements |
+| `overlay.rs`, `overlay/extension.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements; the overlay kind interface for other crates (`OverlayKind`, `register_overlay_kind`) |
 | `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
 
@@ -99,7 +99,7 @@ The module `ui` (`src/ui/`):
   `TileCtx` (shots, flights, units, selection) and keeps session state there (`state`, `shared`).
   In the settings a tile is its kind's id, its size and the kind's settings next to them; a tile
   of a kind the build doesn't have is kept and says what it needs.
-- **Overlays** (`ui/overlay.rs`): the status overlay and tile overlays are extra egui viewports that stay with GSPro:
+- **Overlays** (`ui/overlay.rs`): the status overlay, tile overlays and the overlays of other crates' kinds are extra egui viewports that stay with GSPro:
   above it while it is in front, ordered right above its window otherwise, on its screen, hidden without it. On macOS their
   frames, window levels and stacking above GSPro are set through AppKit (`ui/mac.rs`), because
   egui reports a second window's size in zoomed points and doesn't apply layer transforms there
@@ -272,6 +272,12 @@ can be added without editing the core in many places.
   module and an entry in `CORE_KINDS` (or `register_tile_kind` from another crate) plus its German
   texts; tiles of unknown kinds survive a save ([ADR-009](adr/adr-009-tile-kinds-as-modules.md)).
   Left: kinds share one namespace of keys in a tile.
+- **Overlay kinds**: another crate adds a window of its own over GSPro behind the trait
+  `overlay::OverlayKind` (id, name, size, draw) with `overlay::register_overlay_kind`; it is placed,
+  moved, stacked and hidden like a tile overlay (one window helper for both), gets a tab on the
+  Overlay page, and its entry (`extension_overlays`, in the arrangements too) survives a build
+  without it ([ADR-016](adr/adr-016-overlay-kinds-from-other-crates.md)). Left: one overlay per
+  kind, and a kind isn't handed its entry's fields.
 - **Pages**: each page is a type implementing `Page` with its own state; the navigation,
   `OPENLAUNCH_PAGE` and the README screenshots go through one list, and another crate adds pages
   with `ui::run_with`, placed after a core page by `Page::after`
@@ -286,8 +292,8 @@ can be added without editing the core in many places.
 - **UI in the library**: the UI is the module `ui` behind the feature `gui`, its building blocks
   are public (`ui::kit`), and other crates add translations with `i18n::register`
   ([ADR-008](adr/adr-008-ui-in-the-library.md), per language since
-  [ADR-013](adr/adr-013-languages-as-registered-tables.md)), tile kinds with `explorer::register_tile_kind`
-  and pages with `ui::run_with`.
+  [ADR-013](adr/adr-013-languages-as-registered-tables.md)), tile kinds with `explorer::register_tile_kind`,
+  overlay kinds with `overlay::register_overlay_kind` and pages with `ui::run_with`.
 - **Launch monitors**: R10 code and generic code are mixed in `engine` and `mapping`; names like
   `R10Status` are used for generic status. Left until a second device is added (issue #1).
 

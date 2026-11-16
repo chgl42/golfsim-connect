@@ -8,6 +8,7 @@ use crate::log;
 use crate::settings::Settings;
 
 use super::Moving;
+use super::overlay::OverlayKind;
 use super::egui;
 use super::explorer::ExplorerState;
 
@@ -57,6 +58,8 @@ pub struct AppCtx<'a> {
     tx: &'a Sender<Cmd>,
     pub(super) explorer: &'a mut ExplorerState,
     pub(super) moving: &'a mut Option<Moving>,
+    /// The overlay kinds of other crates (the Overlay page's tabs for them).
+    pub(super) overlay_kinds: &'a [&'static dyn OverlayKind],
 }
 
 impl<'a> AppCtx<'a> {
@@ -66,8 +69,9 @@ impl<'a> AppCtx<'a> {
         tx: &'a Sender<Cmd>,
         explorer: &'a mut ExplorerState,
         moving: &'a mut Option<Moving>,
+        overlay_kinds: &'a [&'static dyn OverlayKind],
     ) -> Self {
-        Self { saved, edit, tx, explorer, moving }
+        Self { saved, edit, tx, explorer, moving, overlay_kinds }
     }
 
     /// The settings in use (as saved).

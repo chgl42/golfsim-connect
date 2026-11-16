@@ -17,6 +17,10 @@ name = "openlaunch-connect"
 path = "src/bin/openlaunch-connect/main.rs"
 required-features = ["gui"]
 
+[[example]]
+name = "overlay_kind"
+required-features = ["gui"]
+
 [features]
 default = ["gui"]
 # The desktop app (`openlaunch_connect::ui`: egui/eframe, AppKit windows). The CLI builds without

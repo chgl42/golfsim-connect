@@ -35,7 +35,7 @@ pub mod explorer;
 pub mod kit;
 #[cfg(target_os = "macos")]
 mod mac;
-mod overlay;
+pub mod overlay;
 mod help;
 mod page;
 
@@ -48,6 +48,8 @@ const MPH_TO_KMH: f64 = 1.609_344;
 const M_TO_YD: f64 = 1.093_613;
 const OVERLAY_TITLE: &str = "GolfSim Overlay";
 const TILE_OVERLAY_TITLE: &str = "GolfSim Tile Overlay";
+/// Start of the title of an overlay of another crate's kind (`overlay::OverlayKind`), its id after it.
+const EXTENSION_OVERLAY_TITLE: &str = "GolfSim Connect Overlay";
 /// Size the layout is designed for. Larger windows zoom the whole UI uniformly, or, with a fixed
 /// interface size, give the pages more room.
 const BASE_SIZE: egui::Vec2 = vec2(1000.0, 470.0);
@@ -193,9 +195,9 @@ struct App {
     aspect_locked: Option<bool>,
     /// Interface size whose minimum window size was last applied (`None` until then).
     applied_scale: Option<Option<f32>>,
-    /// Where and how large the overlay window was first created (native points); later changes
+    /// Where and how large each overlay window was first created (native points); later changes
     /// go through AppKit.
-    overlay_first: Option<(egui::Pos2, egui::Vec2)>,
+    window_first: HashMap<OverlayWindow, (egui::Pos2, egui::Vec2)>,
     /// The main window's screen size when last known: macOS doesn't tell it while the window is
     /// on no visible Space (e.g. GSPro in full screen on that screen), and the overlays must keep
     /// being drawn then, or egui closes them.
@@ -208,19 +210,32 @@ struct App {
     explorer: explorer::ExplorerState,
     /// Where the status overlay is on the screen this frame (native points), if shown.
     status_rect: Option<Rect>,
-    /// Like `overlay_first`, for the tile overlays.
-    tile_overlay_first: HashMap<usize, (egui::Pos2, egui::Vec2)>,
+    /// The last overlay at each of the nine places this frame (status and tile overlays), which
+    /// the extension overlays stack under.
+    taken: HashMap<OverlayPos, Rect>,
     /// An overlay being moved by hand.
     moving: Option<Moving>,
-    /// Whether clicks were last set to go through the status (`None`) and the tile overlays.
-    passthrough: HashMap<Option<usize>, bool>,
+    /// Whether clicks were last set to go through each overlay window.
+    passthrough: HashMap<OverlayWindow, bool>,
+    /// The overlay kinds of other crates (`overlay::register_overlay_kind`), taken once at start.
+    overlay_kinds: Vec<&'static dyn OverlayKind>,
+}
+
+/// One of the overlay windows: the status overlay, tile overlay `k`, or the overlay of the `k`th
+/// registered kind (`App::overlay_kinds`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+enum OverlayWindow {
+    #[default]
+    Status,
+    Tile(usize),
+    Extension(usize),
 }
 
 /// An overlay being moved by hand: it takes the mouse until it is dropped.
 #[derive(Default)]
 struct Moving {
-    /// The tile overlay (else the status overlay).
-    tile: Option<usize>,
+    /// Which overlay.
+    window: OverlayWindow,
     /// Where the mouse and the overlay were when the drag started (native points).
     grab: Option<(egui::Pos2, egui::Pos2)>,
     /// How far it has been dragged where the mouse can't be read from the system.
@@ -261,21 +276,22 @@ impl App {
             size_changed: None,
             aspect_locked: None,
             applied_scale: None,
-            overlay_first: None,
+            window_first: HashMap::new(),
             screen_size: None,
             all_covered: false,
             overlay_base: std::cell::Cell::new(egui::Vec2::ZERO),
             explorer: explorer::ExplorerState::default(),
             status_rect: None,
-            tile_overlay_first: HashMap::new(),
+            taken: HashMap::new(),
             moving: None,
             passthrough: HashMap::new(),
+            overlay_kinds: kinds(),
         }
     }
 
     /// What the pages share, for the app's own use (the overlay windows, the window size).
     fn ctx(&mut self) -> AppCtx<'_> {
-        AppCtx::new(&mut self.saved, &mut self.edit, &self.tx, &mut self.explorer, &mut self.moving)
+        AppCtx::new(&mut self.saved, &mut self.edit, &self.tx, &mut self.explorer, &mut self.moving, &self.overlay_kinds)
     }
 
     /// Shows the page `id` (tests; `OPENLAUNCH_PAGE` in the app).
@@ -904,6 +920,7 @@ impl eframe::App for App {
         if self.all_covered {
             self.overlay(ctx);
             self.tile_overlays(ctx);
+            self.extension_overlays(ctx);
         }
     }
 
@@ -911,13 +928,14 @@ impl eframe::App for App {
         if !self.all_covered {
             self.overlay(ui.ctx());
             self.tile_overlays(ui.ctx());
+            self.extension_overlays(ui.ctx());
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(PAGE)).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             self.top_bar(ui);
             egui::Frame::new().inner_margin(Margin { left: 18, right: 18, top: 14, bottom: 14 }).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
-                let mut app = AppCtx::new(&mut self.saved, &mut self.edit, &self.tx, &mut self.explorer, &mut self.moving);
+                let mut app = AppCtx::new(&mut self.saved, &mut self.edit, &self.tx, &mut self.explorer, &mut self.moving, &self.overlay_kinds);
                 self.pages[self.page].ui(ui, &mut app);
             });
         });
