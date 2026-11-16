@@ -1,4 +1,4 @@
-//! Overlay kinds of other crates (ADR-016): a window of their own over GSPro that sits, moves and
+//! Overlay kinds of other crates (ADR-017): a window of their own over GSPro that sits, moves and
 //! stacks like the tile overlays. A kind is registered once, before `ui::run_with`; its entry in
 //! the settings (`settings::ExtensionOverlay`) says where it sits.
 

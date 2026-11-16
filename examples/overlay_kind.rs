@@ -1,4 +1,4 @@
-//! A sample overlay kind as another crate adds it (ADR-016): a panel with the number of shots of
+//! A sample overlay kind as another crate adds it (ADR-017): a panel with the number of shots of
 //! the session and the last shot's club, in a window of its own over GSPro. Turn it on in the
 //! Overlay page's *SAMPLE* tab.
 //!

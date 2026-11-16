@@ -1,4 +1,4 @@
-//! An overlay kind as another crate adds it: only the library's public interface (ADR-016). Its
+//! An overlay kind as another crate adds it: only the library's public interface (ADR-017). Its
 //! own test binary, so registering the process-wide kind leaves the lib tests' Overlay page as it
 //! is, and setting `HOME` touches no other test.
 #![cfg(feature = "gui")]

@@ -1,4 +1,4 @@
-# ADR-016: Overlay kinds from other crates
+# ADR-017: Overlay kinds from other crates
 
 **Date:** 2026-11-16
 **Status:** Accepted

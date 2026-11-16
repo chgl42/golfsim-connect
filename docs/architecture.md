@@ -277,7 +277,7 @@ can be added without editing the core in many places.
   (found by id with `overlay::overlay_kind`); it is placed,
   moved, stacked and hidden like a tile overlay (one window helper for both), gets a tab on the
   Overlay page, and its entry (`extension_overlays`, in the arrangements too) survives a build
-  without it ([ADR-016](adr/adr-016-overlay-kinds-from-other-crates.md)). Left: one overlay per
+  without it ([ADR-017](adr/adr-017-overlay-kinds-from-other-crates.md)). Left: one overlay per
   kind, and a kind isn't handed its entry's fields.
 - **Pages**: each page is a type implementing `Page` with its own state; the navigation,
   `OPENLAUNCH_PAGE` and the README screenshots go through one list, and another crate adds pages

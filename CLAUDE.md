@@ -97,7 +97,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   (`ui/help.rs`) follows the README's *Troubleshooting* – change both together. Tests open a page with
   `App::show_page("id")` and reach its state with `App::page_mut::<P>()`.
   Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`; other crates add overlay windows of
-  their own behind the public trait `overlay::OverlayKind` (`ui/overlay/extension.rs`, ADR-016) with
+  their own behind the public trait `overlay::OverlayKind` (`ui/overlay/extension.rs`, ADR-017) with
   `overlay::register_overlay_kind`, each placed, moved and stacked like a tile overlay (`Windows::show`), with a tab on
   the Overlay page; their entries are `settings::ExtensionOverlay` (`extension_overlays`, kept when the kind is unknown).
   `examples/overlay_kind.rs` registers a sample kind (`OPENLAUNCH_DEMO=range cargo run --example overlay_kind`).

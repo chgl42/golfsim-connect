@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Pages of extensions can take their place in the navigation: a page names the core page it sits right after
   (`Page::after`, e.g. `"shots"`); pages without it still come after OVERLAY, before HELP and SETTINGS.
 - Overlay windows for extensions: an extension can show a panel of its own over GSPro, also in full screen
-  (`ui::overlay::OverlayKind`, `ui::overlay::register_overlay_kind`, ADR-016). It sits at one of the nine places or
+  (`ui::overlay::OverlayKind`, `ui::overlay::register_overlay_kind`, ADR-017). It sits at one of the nine places or
   where you drag it, stacks under the tile overlays at a place they share and hides in GSPro's menus like them; the
   OVERLAY page gets a tab for it to turn it on and place it. Its settings follow the arrangements and are kept by a
   build without the extension.
