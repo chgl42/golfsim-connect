@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Extensions can mark their pages and tile kinds: `Page::badge` and `TileKind::badge` add a mark after the name in
+  the navigation, the tile menus and the tile's title on the SHOTS page; `Page::greyed` and `TileKind::greyed` grey
+  the entry with a tooltip saying why, and it can still be chosen (ADR-016). Both are asked every frame and default
+  to nothing, so existing extensions look as before. The disabled look is the public `kit::DISABLED`.
 - **Correct club:** shots hit with the wrong club selected in GSPro can be put right on the SHOTS page: select them,
   choose *Correct club* and pick one of the clubs in your history. From then on they count for that club in every
   tile and export; the details show the club GSPro sent (*GSPro: I6*), and correcting back to it clears that.

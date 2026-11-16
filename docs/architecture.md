@@ -82,15 +82,15 @@ The module `ui` (`src/ui/`):
 | `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
 
-- **Pages** implement the trait `Page` (`id`, `label`, `ui`) and keep their own state
-  ([ADR-010](adr/adr-010-pages-own-their-state.md)). `App` holds the list of pages – *Play*,
+- **Pages** implement the trait `Page` (`id`, `label`, `ui`; `badge` and `greyed` with defaults)
+  and keep their own state ([ADR-010](adr/adr-010-pages-own-their-state.md)). `App` holds the list of pages – *Play*,
   *Shots*, *Log*, *Overlay*, the pages given to `run_with`, *Help*, *Settings* – and the window, zoom,
   overlays and capture. A page reaches what pages share through `AppCtx`: the settings and
   `change_settings`, the command sender, and for the core pages the Settings page's copy, the
   explorer state and the overlay being moved.
 - **Shots explorer** (`ui/explorer.rs`): pages of tiles on a grid, a shared filter and selection.
   What a tile shows is up to its kind, behind the public trait `explorer::TileKind` (id, name,
-  options, header, body; [ADR-009](adr/adr-009-tile-kinds-as-modules.md)). The core's kinds are
+  options, header, body, badge, greyed; [ADR-009](adr/adr-009-tile-kinds-as-modules.md)). The core's kinds are
   modules of `ui/explorer/` (table with shots or averages, details, dispersion, correlation, 3D
   flight); another crate adds kinds with `explorer::register_tile_kind`. A kind draws from a
   `TileCtx` (shots, flights, units, selection) and keeps session state there (`state`, `shared`).
@@ -272,7 +272,13 @@ can be added without editing the core in many places.
 - **Pages**: each page is a type implementing `Page` with its own state; the navigation,
   `OPENLAUNCH_PAGE` and the README screenshots go through one list, and another crate adds pages
   with `ui::run_with` ([ADR-010](adr/adr-010-pages-own-their-state.md)). Left: an extension's
-  page sees only the settings and the command sender; no premium marker yet.
+  page sees only the settings and the command sender.
+- **Decoration**: a page or a tile kind of an extension can mark itself with two default trait
+  methods, `badge` (a mark after its label or name) and `greyed` (`Some(why)`: drawn at the kit's
+  `kit::DISABLED` look with `why` as tooltip, still clickable), asked every frame. The core draws
+  them in the navigation, the three menus of tile kinds and the tile's title on the Shots page,
+  not in the tile overlays; it never decides what is marked
+  ([ADR-016](adr/adr-016-pages-and-tile-kinds-decorate-themselves.md)).
 - **UI in the library**: the UI is the module `ui` behind the feature `gui`, its building blocks
   are public (`ui::kit`), and other crates add translations with `i18n::register`
   ([ADR-008](adr/adr-008-ui-in-the-library.md), per language since

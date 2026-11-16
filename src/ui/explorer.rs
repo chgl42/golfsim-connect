@@ -38,6 +38,22 @@ pub trait TileKind: Sync {
     /// Name in the menus and the tile's title, translated (`tr`).
     fn name(&self) -> &'static str;
 
+    /// A mark drawn after the name in the menus of tiles and in the tile's title on the Shots
+    /// page (not in the tile overlays), one space apart and in its colour (e.g. `"★"`),
+    /// translated with `tr`; the entry's accessible label is then `"<name> <badge>"`. Asked every
+    /// frame, so a change shows at once. None by default (ADR-016).
+    fn badge(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// `Some(why)` draws the kind's menu entries and its title on the Shots page greyed (the
+    /// kit's [`DISABLED`] look) with `why` as the entries' tooltip, translated with `tr`. The
+    /// entry can still be chosen; what the tile shows then is the kind's own `body`. Asked every
+    /// frame. None by default (ADR-016).
+    fn greyed(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Its switches on the Overlay page, below the choice of tile.
     fn options(&self, _ui: &mut egui::Ui, _tile: &mut Tile, _units: Units) {}
 
@@ -88,6 +104,45 @@ fn kind_name(id: &str) -> &str {
     kind_of(id).map_or(id, |k| k.name())
 }
 
+/// A kind's entry in a menu, added by `add` (a button, a selectable value): its name with its
+/// badge, dimmed with the reason as tooltip when it is greyed (ADR-016). Every menu of kinds
+/// goes through it.
+fn kind_entry(ui: &mut egui::Ui, kind: &dyn TileKind, add: impl FnOnce(&mut egui::Ui, RichText) -> egui::Response) -> egui::Response {
+    let text = RichText::new(with_badge(kind.name(), kind.badge()));
+    let resp = ui
+        .scope(|ui| {
+            *ui.visuals_mut() = kind_visuals(kind, ui.visuals());
+            add(ui, text)
+        })
+        .inner;
+    match kind.greyed() {
+        Some(why) => resp.on_hover_text(why),
+        None => resp,
+    }
+}
+
+/// The visuals a kind's menu entry is drawn with: for a greyed kind every state's text, the
+/// selection's text and the app's text colour at the kit's [`DISABLED`] look, so it still shows hover and selection;
+/// otherwise as they are.
+fn kind_visuals(kind: &dyn TileKind, visuals: &egui::Visuals) -> egui::Visuals {
+    let mut visuals = visuals.clone();
+    if kind.greyed().is_some() {
+        let w = &mut visuals.widgets;
+        for state in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+            state.fg_stroke.color = state.fg_stroke.color.gamma_multiply(DISABLED);
+        }
+        visuals.selection.stroke.color = visuals.selection.stroke.color.gamma_multiply(DISABLED);
+        // The app sets one text colour for all states (`setup_style`); it is dimmed, too.
+        visuals.override_text_color = visuals.override_text_color.map(|c| c.gamma_multiply(DISABLED));
+    }
+    visuals
+}
+
+/// Colour of a tile's title on the Shots page: dimmed to the kit's [`DISABLED`] look when its kind
+/// is greyed.
+fn title_color(greyed: bool) -> Color32 {
+    if greyed { LABEL.gamma_multiply(DISABLED) } else { LABEL }
+}
 
 /// Gap between tiles.
 const GAP: f32 = 8.0;
@@ -827,7 +882,7 @@ pub(super) fn tile_options(ui: &mut egui::Ui, tile: &mut Tile, metric: bool, met
     setting_row(ui, tr("Tile"), |ui| {
         egui::ComboBox::from_id_salt("tile-overlay-kind").width(150.0).selected_text(kind_name(&tile.kind)).show_ui(ui, |ui| {
             for k in kinds() {
-                ui.selectable_value(&mut tile.kind, k.id().to_string(), k.name());
+                kind_entry(ui, k, |ui, text| ui.selectable_value(&mut tile.kind, k.id().to_string(), text));
             }
         });
         extra(ui);
@@ -918,7 +973,7 @@ fn add_tile(ui: &mut egui::Ui, rect: Rect) -> Option<&'static str> {
     let mut picked = None;
     egui::Popup::menu(&resp).show(|ui| {
         for kind in kinds() {
-            if ui.button(kind.name()).clicked() {
+            if kind_entry(ui, kind, egui::Ui::button).clicked() {
                 picked = Some(kind.id());
             }
         }
@@ -1113,7 +1168,7 @@ fn tile_ui(ui: &mut egui::Ui, rect: Rect, i: usize, tile: &Tile, arrange: bool, 
         let kind_w = if narrow { (rect.width() - 120.0).max(40.0) } else { 90.0 };
         egui::ComboBox::from_id_salt(("tile-kind", i)).width(kind_w).selected_text(kind_name(&tile.kind)).show_ui(&mut head_ui, |ui| {
             for k in kinds() {
-                ui.selectable_value(&mut kind, k.id().to_string(), k.name());
+                kind_entry(ui, k, |ui, text| ui.selectable_value(&mut kind, k.id().to_string(), text));
             }
         });
         if kind != tile.kind {
@@ -1143,7 +1198,14 @@ fn tile_ui(ui: &mut egui::Ui, rect: Rect, i: usize, tile: &Tile, arrange: bool, 
     } else {
         let kind = kind_of(&tile.kind);
         if rect.width() >= kind.map_or(0.0, TileKind::title_from) {
-            head_ui.label(RichText::new(kind_name(&tile.kind).to_uppercase()).font(cond(14.0)).color(LABEL).extra_letter_spacing(1.2));
+            // With the kind's badge, dimmed when greyed, as in its menus (ADR-016).
+            // The name in capitals, the badge as given.
+            let title = with_badge(&kind_name(&tile.kind).to_uppercase(), kind.and_then(TileKind::badge));
+            let greyed = kind.and_then(TileKind::greyed);
+            let resp = head_ui.label(RichText::new(title).font(cond(14.0)).color(title_color(greyed.is_some())).extra_letter_spacing(1.2));
+            if let Some(why) = greyed {
+                resp.on_hover_text(why);
+            }
         }
         if let Some(kind) = kind {
             head_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| kind.header(ui, &mut changed, ctx));
@@ -1793,6 +1855,132 @@ mod tests {
         harness.get_by_label("Drawn by the test kind");
         assert_eq!(tiles[1].config["drawn"], true, "its settings are saved");
         assert!(harness.state().explorer.states.get::<u32>((0, 1)).is_some_and(|n| *n >= 2), "its state is kept");
+    }
+
+    /// A kind as an extension marks it: a badge, greyed with a reason.
+    struct MarkedKind;
+
+    impl TileKind for MarkedKind {
+        fn id(&self) -> &'static str {
+            "test-marked-kind"
+        }
+
+        fn name(&self) -> &'static str {
+            "Marked"
+        }
+
+        fn badge(&self) -> Option<&'static str> {
+            Some("★")
+        }
+
+        fn greyed(&self) -> Option<&'static str> {
+            Some("Not available yet")
+        }
+
+        fn body(&self, ui: &mut egui::Ui, _tile: &mut Tile, _ctx: &TileCtx) {
+            ui.label("Drawn by the marked kind");
+        }
+    }
+
+    /// A marked kind is listed with its badge in the add-tile menu, can be chosen there, and its
+    /// title on the Shots page carries the badge; the core's kinds are listed as before.
+    #[test]
+    fn a_marked_kind_shows_its_badge_and_can_be_chosen() {
+        use egui_kittest::kittest::Queryable;
+
+        register_tile_kind(&MarkedKind);
+        let _state = crate::test_util::state_lock();
+        let mut harness = explorer_with(vec![Tile::new("details", TileSize::W1H1)], true);
+        harness.get_by_label("Add tile").click();
+        harness.run_steps(3);
+        assert!(harness.query_by_label("Marked").is_none(), "the entry carries the badge");
+        harness.get_by_label("Table");
+        let table = crate::test_util::painted_text_color(harness.output(), "Table").expect("Table painted");
+        let marked = crate::test_util::painted_text_color(harness.output(), "Marked ★");
+        assert_eq!(marked, Some(table.gamma_multiply(DISABLED)), "the greyed kind dimmed, the core's not");
+        harness.get_by_label("Marked ★").click();
+        harness.run_steps(3);
+        let tiles = harness.state().saved.explorer.pages[0].tiles.clone();
+        assert_eq!(tiles.iter().map(|t| t.kind.as_str()).collect::<Vec<_>>(), ["details", "test-marked-kind"], "a greyed kind can be chosen");
+        harness.get_by_label("Drawn by the marked kind");
+
+        harness.state_mut().explorer.arrange = false;
+        harness.run_steps(3);
+        assert_eq!(crate::test_util::painted_text_color(harness.output(), "MARKED ★"), Some(LABEL.gamma_multiply(DISABLED)), "its title dimmed");
+        assert_eq!(crate::test_util::painted_text_color(harness.output(), "DETAILS"), Some(LABEL));
+        harness.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+        harness.get_by_label("MARKED ★").hover();
+        harness.run_steps(3);
+        harness.get_by_label("Not available yet");
+    }
+
+    /// On the Overlay page's choice of tile, a marked kind is listed with its badge and can be chosen.
+    #[test]
+    fn a_marked_kind_can_be_chosen_for_a_tile_overlay() {
+        use egui_kittest::kittest::Queryable;
+
+        register_tile_kind(&MarkedKind);
+        let mut harness = egui_kittest::Harness::new_ui_state(|ui, tile: &mut Tile| tile_options(ui, tile, true, true, |_| {}), Tile::new("details", TileSize::W2H2));
+        harness.run_steps(2);
+        let combo = harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Details"));
+        combo.expect("the choice of tile").click();
+        harness.run_steps(3);
+        harness.get_by_label("Marked ★").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().kind, "test-marked-kind");
+    }
+
+    /// In the tile header's kind menu while customizing, a marked kind is listed with its badge
+    /// and can be chosen.
+    #[test]
+    fn a_marked_kind_can_be_chosen_in_the_tile_header() {
+        use egui_kittest::kittest::Queryable;
+
+        register_tile_kind(&MarkedKind);
+        let _state = crate::test_util::state_lock();
+        let mut harness = explorer_with(vec![Tile::new("details", TileSize::W2H2)], true);
+        // The kind's menu is the header's first combo box, showing the kind chosen.
+        let combo = harness.get_all_by_role(egui::accesskit::Role::ComboBox).find(|n| n.value().as_deref() == Some("Details"));
+        combo.expect("the kind's menu").click();
+        harness.run_steps(3);
+        harness.get_by_label("Marked ★").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().saved.explorer.pages[0].tiles[0].kind, "test-marked-kind");
+    }
+
+    /// A greyed kind's menu entries are dimmed in every state, a core kind's are not; so is the
+    /// title of its tile.
+    #[test]
+    fn a_greyed_kind_is_dimmed() {
+        let visuals = egui::Visuals { override_text_color: Some(SOFT), ..egui::Visuals::dark() };
+        let dimmed = kind_visuals(&MarkedKind, &visuals);
+        assert_eq!(dimmed.override_text_color, Some(SOFT.gamma_multiply(DISABLED)));
+        for (d, v) in [(&dimmed.widgets.inactive, &visuals.widgets.inactive), (&dimmed.widgets.hovered, &visuals.widgets.hovered), (&dimmed.widgets.active, &visuals.widgets.active), (&dimmed.widgets.open, &visuals.widgets.open), (&dimmed.widgets.noninteractive, &visuals.widgets.noninteractive)] {
+            assert_eq!(d.fg_stroke.color, v.fg_stroke.color.gamma_multiply(DISABLED));
+        }
+        assert_eq!(dimmed.selection.stroke.color, visuals.selection.stroke.color.gamma_multiply(DISABLED));
+        let core = kind_visuals(&table::Table, &visuals);
+        assert_eq!(core.widgets.inactive.fg_stroke.color, visuals.widgets.inactive.fg_stroke.color);
+        assert_eq!(core.selection.stroke.color, visuals.selection.stroke.color);
+        assert_eq!(core.override_text_color, Some(SOFT));
+        assert_eq!(title_color(true), LABEL.gamma_multiply(DISABLED));
+        assert_eq!(title_color(false), LABEL);
+    }
+
+    /// The menu entry of a greyed kind explains itself on hover.
+    #[test]
+    fn a_greyed_kind_has_its_reason_as_tooltip() {
+        use egui_kittest::kittest::Queryable;
+
+        register_tile_kind(&MarkedKind);
+        let _state = crate::test_util::state_lock();
+        let mut harness = explorer_with(vec![Tile::new("details", TileSize::W1H1)], true);
+        harness.ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+        harness.get_by_label("Add tile").click();
+        harness.run_steps(3);
+        harness.get_by_label("Marked ★").hover();
+        harness.run_steps(3);
+        harness.get_by_label("Not available yet");
     }
 
     /// A tile of a kind this build doesn't have says what it needs, and is kept.

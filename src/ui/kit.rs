@@ -53,6 +53,20 @@ pub const FIELD_LINE: Color32 = Color32::from_rgb(0x2b, 0x3d, 0x63);
 /// Row labels and card headings.
 pub const LABEL: Color32 = Color32::from_rgb(0x9f, 0xb0, 0xd0);
 
+/// The disabled or greyed look: a colour multiplied by it (`gamma_multiply(DISABLED)`) is that
+/// colour at 45 % intensity and opacity. Used by a disabled [`button`] and by greyed navigation entries and tile kinds
+/// (`Page::greyed`, `TileKind::greyed`); an extension can grey its own values with it.
+pub const DISABLED: f32 = 0.45;
+
+/// `label` with its `badge` after it, one space apart: what is drawn and the accessible label of
+/// a decorated entry (`Page::badge`, `TileKind::badge`).
+pub(crate) fn with_badge(label: &str, badge: Option<&str>) -> String {
+    match badge {
+        Some(badge) => format!("{label} {badge}"),
+        None => label.to_string(),
+    }
+}
+
 /// The condensed bold font (DIN Condensed) at `size`, for figures and headings; set up by
 /// [`setup_style`]. Draw it in boxes with [`caps_text`].
 #[must_use]
@@ -389,7 +403,7 @@ pub fn button(ui: &mut egui::Ui, rect: Rect, label: &str, icon: Icon, primary: b
     let hovered = enabled && resp.hovered();
     let pressed = enabled && resp.is_pointer_button_down_on();
     let r = if pressed { rect.translate(vec2(0.0, 1.0)) } else { rect };
-    let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(0.45) };
+    let dim = |c: Color32| if enabled { c } else { c.gamma_multiply(DISABLED) };
     let (fill, border) = match (primary, hovered) {
         (true, false) => (ACCENT, ACCENT),
         (true, true) => (ACCENT_HOVER, ACCENT_HOVER),

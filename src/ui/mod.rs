@@ -314,19 +314,27 @@ impl App {
         // Navigation, right-aligned: the last page rightmost.
         let mut x = rect.right() - 18.0;
         for page in (0..self.pages.len()).rev() {
-            let label = self.pages[page].label();
-            let galley = ui.painter().layout_no_wrap(label.into(), cond(19.0), WHITE);
+            let plain = self.pages[page].label();
+            // The widget id is keyed on the plain label, so it stays the same when the badge changes.
+            // Asked every frame: a page's decoration shows as soon as it changes (ADR-016).
+            let label = with_badge(plain, self.pages[page].badge());
+            let greyed = self.pages[page].greyed();
+            let galley = ui.painter().layout_no_wrap(label.clone(), cond(19.0), WHITE);
             let w = galley.size().x;
             let hit = Rect::from_min_max(pos2(x - w - 6.0, rect.top()), pos2(x + 6.0, rect.bottom()));
-            let resp = ui.interact(hit, ui.id().with(label), Sense::click());
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+            let resp = ui.interact(hit, ui.id().with(plain), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
             let active = self.page == page;
-            let color = if active || resp.hovered() { WHITE } else { MUTED };
+            let color = entry_color(self.pages[page].as_ref(), active, resp.hovered());
             let p = ui.painter();
-            caps_text(p, pos2(x, y), egui::Align::Max, label, 19.0, color);
+            caps_text(p, pos2(x, y), egui::Align::Max, &label, 19.0, color);
             if active {
                 p.line_segment([pos2(x - w, y + 16.0), pos2(x, y + 16.0)], Stroke::new(2.0, ACCENT));
             }
+            let resp = match greyed {
+                Some(why) => resp.on_hover_text(why),
+                None => resp,
+            };
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 self.page = page;
             }
@@ -1131,6 +1139,13 @@ impl Capture {
 }
 
 // ── widgets ──
+
+/// Colour of `page`'s navigation entry: white when it is the page shown or hovered, else muted;
+/// a greyed page (`Page::greyed`) at the kit's [`DISABLED`] look of that colour.
+fn entry_color(page: &dyn Page, active: bool, hovered: bool) -> Color32 {
+    let color = if active || hovered { WHITE } else { MUTED };
+    if page.greyed().is_some() { color.gamma_multiply(DISABLED) } else { color }
+}
 
 fn section(ui: &mut egui::Ui, title: &str) -> egui::Response {
     ui.label(RichText::new(title).font(cond(15.0)).color(MUTED).extra_letter_spacing(1.5))

@@ -22,6 +22,19 @@ pub trait Page: std::any::Any {
     /// The entry in the navigation, in capitals and translated with `tr` (a table of its own
     /// crate goes in with `i18n::register`, one per language).
     fn label(&self) -> &'static str;
+    /// A mark drawn after the label in the navigation, one space apart and in its colour (e.g.
+    /// `"★"`), translated with `tr`; the entry's accessible label is then `"<label> <badge>"`.
+    /// Asked every frame, so a change shows at once. None by default (ADR-016).
+    fn badge(&self) -> Option<&'static str> {
+        None
+    }
+    /// `Some(why)` draws the navigation entry greyed (the kit's [`DISABLED`](super::kit::DISABLED)
+    /// look) with `why` as its tooltip, translated with `tr`. The entry stays clickable and opens
+    /// the page as always; what the page shows then is its own. Asked every frame. None by
+    /// default (ADR-016).
+    fn greyed(&self) -> Option<&'static str> {
+        None
+    }
     /// Draws the page; `ui` is the room below the top bar, inside the page margins.
     fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>);
 }
@@ -123,6 +136,104 @@ mod tests {
                 let _ = app.change_settings(|s| s.metric = false);
             }
         }
+    }
+
+    /// A page as an extension marks it: a badge, and greyed while `greyed` holds a reason.
+    struct MarkedPage {
+        greyed: Rc<Cell<Option<&'static str>>>,
+        drawn: Rc<Cell<u32>>,
+    }
+
+    impl Page for MarkedPage {
+        fn id(&self) -> &'static str {
+            "sound"
+        }
+
+        fn label(&self) -> &'static str {
+            "SOUND"
+        }
+
+        fn badge(&self) -> Option<&'static str> {
+            Some("★")
+        }
+
+        fn greyed(&self) -> Option<&'static str> {
+            self.greyed.get()
+        }
+
+        fn ui(&mut self, ui: &mut egui::Ui, _app: &mut AppCtx<'_>) {
+            self.drawn.set(self.drawn.get() + 1);
+            ui.label("Sound page");
+        }
+    }
+
+    /// A marked page shows its badge in the navigation, greyed with its reason as tooltip, opens
+    /// on a click all the same, and looks as usual the frame after it is no longer greyed.
+    #[test]
+    fn a_marked_page_shows_its_badge_and_reason_and_still_opens() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        crate::settings::SAVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        crate::i18n::set(&crate::i18n::Language::new("en"));
+        let greyed = Rc::new(Cell::new(Some("Not available yet")));
+        let drawn = Rc::new(Cell::new(0));
+        let page = MarkedPage { greyed: greyed.clone(), drawn: drawn.clone() };
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
+            setup_style(&cc.egui_ctx);
+            cc.egui_ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
+            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)])
+        });
+        harness.state_mut().remember_size = false;
+        harness.run_steps(2);
+        assert!(harness.query_by_label("SOUND").is_none(), "the label carries the badge");
+        let painted = |harness: &Harness<'_, App>| crate::test_util::painted_text_color(harness.output(), "SOUND ★");
+        assert_eq!(painted(&harness), Some(super::super::MUTED.gamma_multiply(super::super::DISABLED)), "greyed: dimmed");
+        harness.get_by_label("SOUND ★").hover();
+        harness.run_steps(3);
+        harness.get_by_label("Not available yet");
+
+        harness.get_by_label("SOUND ★").click();
+        harness.run_steps(2);
+        assert!(drawn.get() > 0, "a greyed page opens");
+        assert_eq!(harness.state().pages[harness.state().page].id(), "sound");
+        harness.get_by_label("Sound page").hover();
+        harness.run_steps(2);
+        assert_eq!(painted(&harness), Some(super::super::WHITE.gamma_multiply(super::super::DISABLED)), "shown, not hovered, greyed: white, dimmed");
+        harness.get_by_label("SETTINGS").hover();
+        harness.run_steps(2);
+        assert_eq!(crate::test_util::painted_text_color(harness.output(), "SETTINGS"), Some(super::super::WHITE), "hovered: white");
+
+        greyed.set(None);
+        harness.get_by_label("SOUND ★").hover();
+        harness.run_steps(3);
+        assert!(harness.query_by_label("Not available yet").is_none(), "no reason once it is not greyed");
+        harness.get_by_label("PLAY").click();
+        harness.run_steps(2);
+        assert_eq!(painted(&harness), Some(super::super::MUTED), "no longer greyed: as usual");
+        // The core entries are as they were.
+        harness.get_by_label("SETTINGS");
+        harness.get_by_label("PLAY");
+    }
+
+    /// The entry's colour: active or hovered white, else muted; while the page is greyed at the
+    /// kit's disabled look, and as usual once it is not.
+    #[test]
+    fn a_greyed_entry_is_dimmed() {
+        use super::super::{DISABLED, MUTED, WHITE, entry_color};
+        let greyed = Rc::new(Cell::new(Some("Not available yet")));
+        let page = MarkedPage { greyed: greyed.clone(), drawn: Rc::new(Cell::new(0)) };
+        assert_eq!(entry_color(&page, false, false), MUTED.gamma_multiply(DISABLED));
+        assert_eq!(entry_color(&page, false, true), WHITE.gamma_multiply(DISABLED));
+        assert_eq!(entry_color(&page, true, false), WHITE.gamma_multiply(DISABLED), "the page shown, greyed: dimmed too");
+        greyed.set(None);
+        assert_eq!(entry_color(&page, false, false), MUTED);
+        assert_eq!(entry_color(&page, true, false), WHITE);
+        assert_eq!(entry_color(&page, false, true), WHITE);
+        let core = super::super::PlayPage;
+        assert_eq!(entry_color(&core, false, false), MUTED, "a core page as before");
     }
 
     #[test]
