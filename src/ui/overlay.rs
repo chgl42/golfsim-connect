@@ -1666,7 +1666,6 @@ fn impact_top(p: &egui::Painter, r: Rect, i: Impact, labels: bool) {
     }
 }
 
-/// The overlay position as a small screen with eight spots; the middle turns the overlay off.
 /// The extension overlay on the GSPro-like backdrop at its place, scaled to fit.
 fn extension_overlay_preview(ui: &mut egui::Ui, area: Rect, kind: &dyn OverlayKind, entry: &ExtensionOverlay) {
     let p = ui.painter();
@@ -2123,6 +2122,46 @@ mod tests {
         assert!(app.others_shown(&ctx).is_some());
         app.show_overlay = false;
         assert!(app.others_shown(&ctx).is_none(), "the overlays off");
+        state::with(|s| s.gspro_mode = None);
+    }
+
+    /// A kind with nothing to show now.
+    struct Empty;
+
+    impl OverlayKind for Empty {
+        fn id(&self) -> &'static str {
+            "empty"
+        }
+
+        fn name(&self) -> &'static str {
+            "Empty"
+        }
+
+        fn size(&self, _ctx: &egui::Context) -> Option<egui::Vec2> {
+            None
+        }
+
+        fn ui(&self, _ui: &mut egui::Ui, _rect: Rect) {
+            panic!("nothing to draw");
+        }
+    }
+
+    /// A kind whose `size` is `None` has no window (and what its window was told about clicks is
+    /// forgotten); one with a size gets its window.
+    #[test]
+    fn an_extension_kind_with_nothing_to_show_has_no_window() {
+        let _state = demo_state();
+        state::with(|s| s.gspro_mode = Some(GameMode::Range));
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let settings = Settings { extension_overlays: vec![ExtensionOverlay { pos: OverlayPos::Left, ..ExtensionOverlay::new("empty") }, ExtensionOverlay { pos: OverlayPos::Right, ..ExtensionOverlay::new("panel") }], ..Settings::default() };
+        let mut app = App::new(settings, tx);
+        app.overlay_kinds = vec![&Empty, &Panel];
+        app.screen_size = Some(vec2(1500.0, 900.0));
+        app.passthrough.insert(OverlayWindow::Extension(0), true);
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| app.extension_overlays(ui.ctx()));
+        assert!(!app.passthrough.contains_key(&OverlayWindow::Extension(0)), "no window for nothing to show");
+        assert_eq!(app.passthrough.get(&OverlayWindow::Extension(1)), Some(&true), "the other one's window");
         state::with(|s| s.gspro_mode = None);
     }
 
