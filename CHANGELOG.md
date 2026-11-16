@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   to nothing, so existing extensions look as before. The disabled look is the public `kit::DISABLED`.
 - Pages of extensions can take their place in the navigation: a page names the core page it sits right after
   (`Page::after`, e.g. `"shots"`); pages without it still come after OVERLAY, before HELP and SETTINGS.
+- Overlay windows for extensions: an extension can show a panel of its own over GSPro, also in full screen
+  (`ui::overlay::OverlayKind`, `ui::overlay::register_overlay_kind`, ADR-017). It sits at one of the nine places or
+  where you drag it, stacks under the tile overlays at a place they share and hides in GSPro's menus like them; the
+  OVERLAY page gets a tab for it to turn it on and place it. Its settings follow the arrangements and are kept by a
+  build without the extension.
 - **Correct club:** shots hit with the wrong club selected in GSPro can be put right on the SHOTS page: select them,
   choose *Correct club* and pick one of the clubs in your history. From then on they count for that club in every
   tile and export; the details show the club GSPro sent (*GSPro: I6*), and correcting back to it clears that.

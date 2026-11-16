@@ -96,7 +96,12 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   else after Overlay); a new core page goes there. The *Help* page
   (`ui/help.rs`) follows the README's *Troubleshooting* – change both together. Tests open a page with
   `App::show_page("id")` and reach its state with `App::page_mut::<P>()`.
-  Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`. The *Overlay* page sets the overlay's position, size, lines, opacity and
+  Overlay windows, their content and the *Overlay* page are in `ui/overlay.rs`; other crates add overlay windows of
+  their own behind the public trait `overlay::OverlayKind` (`ui/overlay/extension.rs`, ADR-017) with
+  `overlay::register_overlay_kind`, each placed, moved and stacked like a tile overlay (`Windows::show`), with a tab on
+  the Overlay page; their entries are `settings::ExtensionOverlay` (`extension_overlays`, kept when the kind is unknown).
+  `examples/overlay_kind.rs` registers a sample kind (`OPENLAUNCH_DEMO=range cargo run --example overlay_kind`).
+  The *Overlay* page sets the overlay's position, size, lines, opacity and
   contents (`OverlayStyle` in the settings, applied and saved at once) and shows a preview with a sample shot;
   `OverlayContent` builds what both the overlay window and the preview draw. The *Shots* page is the explorer
   (`src/ui/explorer.rs`): pages of tiles (`settings::Explorer`, saved at once) on a grid of
@@ -110,7 +115,8 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   Controls (buttons, toggles, segments, stepper, cards, the confirm dialog) are drawn with the painter, in the public
   module `ui::kit` (`src/ui/kit.rs`) with the palette – see `button()`, `card()`, `toggle()`, `confirm()`. Only `ui::run`,
   `ui::run_with`, `ui::Page`, `ui::AppCtx`, `ui::kit`, the tile kind interface in `ui::explorer` (`TileKind`, `TileCtx`,
-  `Units`, `FlightSummary`, `register_tile_kind`) and the re-exported `ui::egui`/`ui::eframe` are public; everything else
+  `Units`, `FlightSummary`, `register_tile_kind`), the overlay kind interface in `ui::overlay` (`OverlayKind`,
+  `register_overlay_kind`, `overlay_kind`) and the re-exported `ui::egui`/`ui::eframe` are public; everything else
   stays `pub(super)`/private.
 - `src/main.rs` – CLI `openlaunch` (`t` + Enter = test shot, `--test-shot`, `--debug`)
 - `vendor/tenover/` – R10 protocol library [divotmaker/10over](https://github.com/divotmaker/10over)

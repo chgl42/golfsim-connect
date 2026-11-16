@@ -293,6 +293,7 @@ pub(super) fn table(en: &str) -> Option<&'static str> {
         "The status is always shown" => "Der Status wird immer angezeigt",
         "PREVIEW" => "VORSCHAU",
         "Overlay off" => "Overlay aus",
+        "Nothing to show now" => "Gerade nichts zu zeigen",
         "No overlay" => "Kein Overlay",
         "off" => "aus",
         "Top left" => "Oben links",

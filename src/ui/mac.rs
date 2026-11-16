@@ -341,7 +341,7 @@ fn arrange_overlays(changed: bool) {
         .iter()
         .filter(|w| {
             let t = w.title().to_string();
-            t.starts_with(super::OVERLAY_TITLE) || t.starts_with(super::TILE_OVERLAY_TITLE)
+            t.starts_with(super::OVERLAY_TITLE) || t.starts_with(super::TILE_OVERLAY_TITLE) || t.starts_with(super::EXTENSION_OVERLAY_TITLE)
         })
         .collect();
     if overlays.is_empty() {

@@ -50,6 +50,11 @@ pub struct Settings {
     /// Overlays with one tile of the shots explorer each.
     #[serde(deserialize_with = "tolerant::list")]
     pub tile_overlays: Vec<TileOverlay>,
+    /// Overlays of the kinds other crates register (`ui::overlay::OverlayKind`); an entry of a kind
+    /// this build doesn't have is kept as it is. Not written while empty, so a plain build's file
+    /// stays as it was.
+    #[serde(deserialize_with = "tolerant::list", skip_serializing_if = "Vec::is_empty")]
+    pub extension_overlays: Vec<ExtensionOverlay>,
     /// Saved arrangements of all overlays; the one in use (`arrangement`) follows every change.
     #[serde(deserialize_with = "tolerant::list")]
     pub arrangements: Vec<Arrangement>,
@@ -314,6 +319,9 @@ pub struct Arrangement {
     pub overlay_style: OverlayStyle,
     #[serde(deserialize_with = "tolerant::list")]
     pub tiles: Vec<TileOverlay>,
+    /// Like `Settings::extension_overlays`.
+    #[serde(deserialize_with = "tolerant::list", skip_serializing_if = "Vec::is_empty")]
+    pub extension_overlays: Vec<ExtensionOverlay>,
 }
 
 impl Default for Arrangement {
@@ -324,6 +332,7 @@ impl Default for Arrangement {
             overlay_spot: None,
             overlay_style: OverlayStyle::default(),
             tiles: Vec::new(),
+            extension_overlays: Vec::new(),
         }
     }
 }
@@ -341,6 +350,7 @@ impl Settings {
             overlay_spot: self.overlay_spot,
             overlay_style: self.overlay_style.clone(),
             tiles: self.tile_overlays.clone(),
+            extension_overlays: self.extension_overlays.clone(),
         };
         if self.arrangements.is_empty() {
             self.arrangement = 0;
@@ -359,6 +369,7 @@ impl Settings {
         self.overlay_spot = a.overlay_spot;
         self.overlay_style = a.overlay_style;
         self.tile_overlays = a.tiles;
+        self.extension_overlays = a.extension_overlays;
     }
 }
 
@@ -400,6 +411,41 @@ impl TileOverlay {
     #[must_use]
     pub fn height(&self) -> f32 {
         (self.width * 0.75).round()
+    }
+}
+
+/// An overlay of a kind another crate registers (`ui::overlay::OverlayKind`): which kind, where it
+/// sits, and the kind's own settings. Here it is data, so an entry of a kind this build doesn't
+/// have is kept as it is.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ExtensionOverlay {
+    /// Id of the overlay's kind.
+    pub id: String,
+    /// Where it sits; `Off` hides it (the entry is kept). A place this build doesn't know reads
+    /// as `Off`.
+    #[serde(deserialize_with = "tolerant::or_off")]
+    pub pos: OverlayPos,
+    /// Placed by hand (like `Settings::overlay_spot`).
+    pub spot: Option<[f32; 2]>,
+    /// The kind's settings, next to `id`, `pos` and `spot` in the file; kept as they are. Those
+    /// three keys are taken: a kind's fields use other names.
+    #[serde(flatten)]
+    pub config: Map<String, Value>,
+}
+
+impl Default for ExtensionOverlay {
+    /// Off, of no kind.
+    fn default() -> Self {
+        Self { id: String::new(), pos: OverlayPos::Off, spot: None, config: Map::new() }
+    }
+}
+
+impl ExtensionOverlay {
+    /// An entry of the kind `id`, off.
+    #[must_use]
+    pub fn new(id: &str) -> Self {
+        Self { id: id.into(), ..Self::default() }
     }
 }
 
@@ -453,6 +499,7 @@ impl Default for Settings {
             overlay_spot: None,
             overlay_style: OverlayStyle::default(),
             tile_overlays: Vec::new(),
+            extension_overlays: Vec::new(),
             arrangements: Vec::new(),
             arrangement: 0,
             export_format: ExportFormat::default(),
@@ -636,6 +683,11 @@ mod tolerant {
     /// The value, or the default if this version can't read it.
     pub fn or_default<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
         Ok(read(Value::deserialize(d)?).unwrap_or_default())
+    }
+
+    /// The place of an overlay, or `Off` if this version can't read it.
+    pub fn or_off<'de, D: Deserializer<'de>>(d: D) -> Result<super::OverlayPos, D::Error> {
+        Ok(read(Value::deserialize(d)?).unwrap_or(super::OverlayPos::Off))
     }
 
     /// The overlay's columns: an item this version doesn't know leaves its place empty.
@@ -1252,6 +1304,68 @@ mod tests {
         let expected: Value = serde_json::from_str(gapping).unwrap();
         assert_eq!(saved["explorer"]["pages"][0]["tiles"][0], expected);
         assert_eq!(saved["tile_overlays"][0]["tile"], expected);
+    }
+
+    /// An overlay of a kind this build doesn't have (an extension's) is kept with its place and
+    /// all of its settings, in the overlays shown and in the arrangements, when the settings are
+    /// saved.
+    #[test]
+    fn extension_overlays_of_an_unknown_kind_survive_a_save() {
+        let clock = r#"{"id":"clock","pos":"bottom_left","spot":[0.25,0.5],"rows":3,"theme":{"dark":true}}"#;
+        let json = format!(r#"{{"metric":false,"extension_overlays":[{clock}],"arrangements":[{{"name":"Range","extension_overlays":[{clock}]}}]}}"#);
+        let home = crate::test_util::TempDir::new("settings-extension-overlay");
+        write_in(home.path(), DATA_DIR, &json);
+        let s = Settings::load_in(home.path());
+        let entry = &s.extension_overlays[0];
+        assert_eq!((entry.id.as_str(), entry.pos, entry.spot), ("clock", OverlayPos::BottomLeft, Some([0.25, 0.5])));
+        assert_eq!(entry.config["rows"], Value::from(3));
+        assert_eq!(s.arrangements[0].extension_overlays, s.extension_overlays);
+        assert!(s.extra.is_empty(), "a known key: {:?}", s.extra);
+        s.save_in(home.path()).unwrap();
+        let file = Settings::dir_in(home.path(), DATA_DIR).join("settings.json");
+        let saved: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        let expected: Value = serde_json::from_str(clock).unwrap();
+        assert_eq!(saved["extension_overlays"][0], expected);
+        assert_eq!(saved["arrangements"][0]["extension_overlays"][0], expected);
+        assert_eq!(Settings::load_in(home.path()), s);
+    }
+
+    /// Without extension overlays nothing about them is written, and a file without the key loads
+    /// with none.
+    #[test]
+    fn no_extension_overlays_leave_the_file_as_it_was() {
+        let s: Settings = serde_json::from_str(r#"{"metric":false,"arrangements":[{"name":"Range"}]}"#).unwrap();
+        assert!(s.extension_overlays.is_empty() && s.arrangements[0].extension_overlays.is_empty());
+        let mut s = Settings::default();
+        s.keep_arrangement();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("extension_overlays"), "{json}");
+    }
+
+    /// A place this build doesn't know turns the overlay off; its kind and settings stay.
+    #[test]
+    fn extension_overlay_at_an_unknown_place_is_off() {
+        let entry: ExtensionOverlay = serde_json::from_str(r#"{"id":"clock","pos":"centre","rows":3}"#).unwrap();
+        assert_eq!((entry.id.as_str(), entry.pos), ("clock", OverlayPos::Off));
+        assert_eq!(entry.config["rows"], Value::from(3));
+        let entry: ExtensionOverlay = serde_json::from_str(r#"{"id":"clock"}"#).unwrap();
+        assert_eq!(entry, ExtensionOverlay::new("clock"), "no place: off");
+    }
+
+    /// The extension overlays follow the arrangements like the core's overlays.
+    #[test]
+    fn extension_overlays_follow_the_arrangements() {
+        let mut s = Settings::default();
+        s.keep_arrangement();
+        s.arrangements.push(Arrangement { name: "Range".into(), ..Arrangement::default() });
+        s.use_arrangement(1);
+        s.extension_overlays.push(ExtensionOverlay { pos: OverlayPos::Left, ..ExtensionOverlay::new("clock") });
+        s.keep_arrangement();
+        assert_eq!(s.arrangements[1].extension_overlays.len(), 1);
+        s.use_arrangement(0);
+        assert!(s.extension_overlays.is_empty());
+        s.use_arrangement(1);
+        assert_eq!(s.extension_overlays[0].pos, OverlayPos::Left);
     }
 
     /// A kind's settings: read as its own type with defaults for what is missing or unreadable,
