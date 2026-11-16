@@ -8,7 +8,9 @@ use super::super::egui;
 
 /// A kind of overlay window another crate adds: the core makes the window (borderless,
 /// transparent, click-through, always on top, placed like its own overlays) and the Overlay page's
-/// tab for it; the kind says how large it is and draws it.
+/// tab for it; the kind says how large it is and draws it. Its entry in the settings
+/// (`settings::ExtensionOverlay`) has the keys `id`, `pos` and `spot`; fields a kind keeps there
+/// use other names.
 pub trait OverlayKind: Sync {
     /// Unique, lower case, e.g. `"clock"`: the id of its entry in the settings and the end of
     /// its window's title.

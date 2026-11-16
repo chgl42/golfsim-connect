@@ -113,7 +113,8 @@ impl App {
     /// Always-on-top, click-through windows with one tile of the shots explorer each (not in GSPro's
     /// menus). Overlays at
     /// the same place (not placed by hand) stack: each under the one before (above it at the bottom
-    /// of the screen), the status first.
+    /// of the screen), the status first. Leaves the places taken in `App::taken`, which
+    /// `extension_overlays` stacks under later in the same frame.
     pub(super) fn tile_overlays(&mut self, ctx: &egui::Context) {
         let tiles = self.saved.tile_overlays.clone();
         self.moving = self.moving.take().filter(|m| match m.window {
@@ -152,13 +153,14 @@ impl App {
 
     /// The overlays of other crates' kinds (`OverlayKind`), each in a window like a tile
     /// overlay's, after them: hidden in GSPro's menus, at a place they share under the tile
-    /// overlays there. A kind with nothing to show (`size` is `None`) has no window.
+    /// overlays there (`App::taken`, filled by `tile_overlays` earlier in the same frame, so it
+    /// must run after it). A kind with nothing to show (`size` is `None`) has no window.
     pub(super) fn extension_overlays(&mut self, ctx: &egui::Context) {
         let entries = self.saved.extension_overlays.clone();
         let kinds = self.overlay_kinds.clone();
         let entry_of = |kind: &dyn OverlayKind| entries.iter().find(|e| e.id == kind.id()).filter(|e| e.pos != OverlayPos::Off);
         self.moving = self.moving.take().filter(|m| match m.window {
-            OverlayWindow::Extension(k) => kinds.get(k).is_some_and(|kind| entry_of(*kind).is_some()),
+            OverlayWindow::Extension(k) => kinds.get(k).is_some_and(|kind| entry_of(*kind).is_some() && kind.size(ctx).is_some()),
             _ => true,
         });
         let Some(visible) = self.others_shown(ctx) else {
@@ -219,6 +221,9 @@ impl Windows<'_> {
         };
         let size = inner + vec2(2.0, 2.0) * OVERLAY_BORDER;
         let mut at = stacked_origin(&mut self.taken, self.visible, size, (pos, anchor), spot);
+        // Told to AppKit for all the overlays at once: whether any is being moved.
+        #[cfg(target_os = "macos")]
+        let any_moving = self.moving.is_some();
         let mut moving = self.moving.as_mut().filter(|m| m.window == which);
         if let Some(by_hand) = moving.as_ref().and_then(|m| m.at) {
             at = by_hand;
@@ -240,7 +245,7 @@ impl Windows<'_> {
             }
             #[cfg(target_os = "macos")]
             {
-                mac::float_over_fullscreen(ui.ctx(), title, grabbable);
+                mac::float_over_fullscreen(ui.ctx(), title, any_moving);
                 mac::place_window(title, at, size);
             }
             let rect = Rect::from_min_size(pos2(OVERLAY_BORDER, OVERLAY_BORDER), inner);
@@ -611,6 +616,9 @@ impl OverlayPage {
         let id = kind.id();
         let had = app.settings().extension_overlays.iter().find(|e| e.id == id).cloned();
         let mut entry = had.clone().unwrap_or_else(|| ExtensionOverlay::new(id));
+        if let Some(on) = had.as_ref().filter(|e| e.pos != OverlayPos::Off) {
+            self.extension_was.insert(id, on.pos);
+        }
         let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
         let col_w = (area.width() - 10.0) / 2.0;
         let left = Rect::from_min_size(area.min, vec2(col_w, area.height()));
@@ -628,7 +636,6 @@ impl OverlayPage {
                     if on {
                         entry.pos = self.extension_was.get(id).copied().unwrap_or_default();
                     } else {
-                        self.extension_was.insert(id, entry.pos);
                         entry.pos = OverlayPos::Off;
                     }
                 }
@@ -1861,8 +1868,8 @@ fn overlay_picker(ui: &mut egui::Ui, value: &mut OverlayPos, by_hand: bool) -> b
             let c = inner.min + vec2((col as f32 + 0.5) * cell.x, (row as f32 + 0.5) * cell.y);
             let hit = Rect::from_center_size(c, cell);
             let resp = ui.interact(hit, ui.id().with(("overlay_pos", row, col)), Sense::click());
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, *value == pos, overlay_name(pos)));
             let selected = *value == pos && (!by_hand || pos == OverlayPos::Off);
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, overlay_name(pos)));
             let p = ui.painter();
             if pos == OverlayPos::Off {
                 let color = if selected { WHITE } else if resp.hovered() { SOFT } else { MUTED };
@@ -2031,6 +2038,13 @@ mod tests {
         let app = harness.state();
         assert_eq!(app.saved.extension_overlays[0].pos, OverlayPos::BottomLeft);
         assert_eq!(app.saved.arrangements[0].extension_overlays, app.saved.extension_overlays);
+        // Off in the picker and on again: back where it was.
+        harness.get_by_label("No overlay").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().saved.extension_overlays[0].pos, OverlayPos::Off);
+        harness.get_by_label("Sample panel").click();
+        harness.run_steps(3);
+        assert_eq!(harness.state().saved.extension_overlays[0].pos, OverlayPos::BottomLeft);
         // Off and on again: back where it was.
         harness.get_by_label("Sample panel").click();
         harness.run_steps(3);
@@ -2162,6 +2176,34 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| app.extension_overlays(ui.ctx()));
         assert!(!app.passthrough.contains_key(&OverlayWindow::Extension(0)), "no window for nothing to show");
         assert_eq!(app.passthrough.get(&OverlayWindow::Extension(1)), Some(&true), "the other one's window");
+        state::with(|s| s.gspro_mode = None);
+    }
+
+    /// The tile loop leaves the places it took for the extension loop; a move of an extension
+    /// overlay ends when its entry is off or its kind has nothing to show.
+    #[test]
+    fn the_extension_loop_follows_the_tile_loop_and_ends_moves_without_a_window() {
+        let _state = demo_state();
+        state::with(|s| s.gspro_mode = Some(GameMode::Range));
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let settings = Settings {
+            tile_overlays: vec![TileOverlay { pos: OverlayPos::Left, ..TileOverlay::default() }],
+            extension_overlays: vec![ExtensionOverlay::new("panel"), ExtensionOverlay { pos: OverlayPos::Left, ..ExtensionOverlay::new("empty") }],
+            ..Settings::default()
+        };
+        let mut app = App::new(settings, tx);
+        app.overlay_kinds = vec![&Panel, &Empty];
+        app.screen_size = Some(vec2(1500.0, 900.0));
+        let ctx = egui::Context::default();
+        // The tile overlay draws in the app's fonts.
+        setup_style(&ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| app.tile_overlays(ui.ctx()));
+        assert!(app.taken.contains_key(&OverlayPos::Left), "the tile overlay's place");
+        for k in [0, 1] {
+            app.moving = Some(Moving { window: OverlayWindow::Extension(k), ..Moving::default() });
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| app.extension_overlays(ui.ctx()));
+            assert!(app.moving.is_none(), "extension {k}: no window, no move");
+        }
         state::with(|s| s.gspro_mode = None);
     }
 

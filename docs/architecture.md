@@ -78,7 +78,7 @@ The module `ui` (`src/ui/`):
 | `help.rs` | The *Help* page: the common fixes and how to ask for help |
 | `page.rs` | The `Page` trait, `AppCtx` (what pages share), the list of pages |
 | `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, the reading sizes and spacing `READ`/`READ_HEADING`/`READ_LINE`/`READ_GAP`/`READ_SECTION_GAP`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
-| `overlay.rs`, `overlay/extension.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements; the overlay kind interface for other crates (`OverlayKind`, `register_overlay_kind`) |
+| `overlay.rs`, `overlay/extension.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements; the overlay kind interface for other crates (`OverlayKind`, `register_overlay_kind`, `overlay_kind`) |
 | `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
 | `mac.rs` | AppKit: overlay frames, window levels, ordering above GSPro, the main window's size |
 
@@ -273,7 +273,8 @@ can be added without editing the core in many places.
   texts; tiles of unknown kinds survive a save ([ADR-009](adr/adr-009-tile-kinds-as-modules.md)).
   Left: kinds share one namespace of keys in a tile.
 - **Overlay kinds**: another crate adds a window of its own over GSPro behind the trait
-  `overlay::OverlayKind` (id, name, size, draw) with `overlay::register_overlay_kind`; it is placed,
+  `overlay::OverlayKind` (id, name, `short_label`, size, draw) with `overlay::register_overlay_kind`
+  (found by id with `overlay::overlay_kind`); it is placed,
   moved, stacked and hidden like a tile overlay (one window helper for both), gets a tab on the
   Overlay page, and its entry (`extension_overlays`, in the arrangements too) survives a build
   without it ([ADR-016](adr/adr-016-overlay-kinds-from-other-crates.md)). Left: one overlay per

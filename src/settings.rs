@@ -428,7 +428,8 @@ pub struct ExtensionOverlay {
     pub pos: OverlayPos,
     /// Placed by hand (like `Settings::overlay_spot`).
     pub spot: Option<[f32; 2]>,
-    /// The kind's settings, next to `id`, `pos` and `spot` in the file; kept as they are.
+    /// The kind's settings, next to `id`, `pos` and `spot` in the file; kept as they are. Those
+    /// three keys are taken: a kind's fields use other names.
     #[serde(flatten)]
     pub config: Map<String, Value>,
 }
