@@ -27,15 +27,17 @@ pub trait SettingsSection {
     /// Draws the card's body (rows with [`setting_row`](super::kit::setting_row) like the core's
     /// cards). `settings` are the core's settings in use, to read only.
     fn ui(&mut self, ui: &mut egui::Ui, settings: &Settings);
-    /// Whether the section has unsaved changes: SAVE is enabled and "Unsaved changes" shows while
-    /// it has. False by default.
+    /// Whether the section has unsaved changes: SAVE is enabled while it has, and "Unsaved
+    /// changes" shows next to it unless the last SAVE failed (its note shows then, until another
+    /// note replaces it). False by default.
     fn dirty(&self) -> bool {
         false
     }
     /// Writes the section's unsaved changes to its own file; called by SAVE while it is
     /// [`dirty`](SettingsSection::dirty). `Err(why)` shows as "Saving failed: why" next to SAVE
-    /// (translated by the section); the edits stay, so SAVE can be pressed again. Does nothing
-    /// by default.
+    /// (translated by the section); the edits stay, so SAVE can be pressed again. On `Ok` the
+    /// section clears its own `dirty`, else SAVE stays enabled and saves it again on every press.
+    /// Does nothing by default.
     ///
     /// # Errors
     /// Why the section's changes could not be saved.
@@ -410,6 +412,66 @@ mod tests {
         harness.run_steps(3);
         assert_eq!(painted(&harness), Some(normal), "no longer greyed: as usual");
         assert!(harness.query_by_label("Not available yet").is_none());
+    }
+
+    /// A section reads the core's saved settings, not the page's unsaved copy.
+    #[test]
+    fn a_section_reads_the_saved_settings() {
+        use egui_kittest::kittest::Queryable;
+
+        let _state = crate::test_util::state_lock();
+        let (a, _) = TestSection::new("one", "FIRST", 140.0);
+        let mut harness = harness(TALL, vec![Box::new(a)]);
+        assert!(harness.query_by_label("one body").is_some(), "metric by default");
+        harness.state_mut().saved.metric = false;
+        harness.state_mut().edit.metric = false;
+        harness.run_steps(2);
+        assert!(harness.query_by_label("one body (imperial)").is_some(), "the saved settings");
+        // Back to metric in the copy only, not saved: the section still sees the saved value.
+        harness.state_mut().edit.metric = true;
+        harness.run_steps(2);
+        assert!(harness.query_by_label("one body (imperial)").is_some(), "not the unsaved copy");
+    }
+
+    /// A section with only `id`, `title`, `icon` and `ui`: the defaults.
+    struct Minimal;
+
+    impl SettingsSection for Minimal {
+        fn id(&self) -> &'static str {
+            "minimal"
+        }
+
+        fn title(&self) -> &'static str {
+            "MINIMAL"
+        }
+
+        fn icon(&self) -> Icon {
+            Icon::Bell
+        }
+
+        fn ui(&mut self, ui: &mut egui::Ui, _settings: &Settings) {
+            ui.label("minimal body");
+        }
+    }
+
+    #[test]
+    fn a_minimal_section_takes_the_defaults_and_leaves_save_disabled() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut minimal = Minimal;
+        assert!(!minimal.dirty());
+        assert_eq!(minimal.save(), Ok(()));
+        assert_eq!(minimal.height(), 140.0);
+        assert_eq!((minimal.badge(), minimal.greyed()), (None, None));
+
+        let _state = crate::test_util::state_lock();
+        let mut harness = harness(TALL, vec![Box::new(Minimal)]);
+        harness.get_by_label("MINIMAL");
+        assert!(harness.query_by_label("minimal body").is_some());
+        assert!(crate::test_util::painted_text_color(harness.output(), "Unsaved changes").is_none());
+        harness.get_by_label("SAVE").click();
+        harness.run_steps(2);
+        assert!(crate::test_util::painted_text_color(harness.output(), "Saved.").is_none(), "SAVE is disabled");
     }
 
     /// Without sections the core cards are where they were, and the footer right below them,

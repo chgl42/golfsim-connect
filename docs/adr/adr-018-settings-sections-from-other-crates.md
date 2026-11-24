@@ -30,7 +30,9 @@ differs. `settings.json` has one writer, the core, through `AppCtx::change_setti
 - **One SAVE:** SAVE is enabled while the core's copy or any section has unsaved changes, and
   "Unsaved changes" shows meanwhile. It writes `settings.json` only if the core's copy changed, then
   calls `save` on each section with changes, all of them even after one failed; the first failure
-  shows as the existing "Saving failed: …" note (it stays until a SAVE succeeds). There is no revert:
+  shows as the existing "Saving failed: …" note, in place of "Unsaved changes", until a SAVE
+  succeeds or another note (the launcher search, RESET SHOTS VIEW) replaces it; a section clears
+  its own `dirty` when its `save` succeeds. There is no revert:
   unsaved edits stay until SAVE, as for the core's settings.
 - **Decoration:** the badge is drawn after the card's title, one space apart; a greyed card is
   drawn at `kit::DISABLED` (`Ui::multiply_opacity`) with the reason as the tooltip of its heading
