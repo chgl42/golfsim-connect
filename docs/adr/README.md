@@ -26,3 +26,4 @@ no longer holds is marked *Superseded by ADR-NNN* or *Deprecated*, not deleted.
 | [ADR-015](adr-015-shot-changes-through-one-function.md) | Shot changes through one function | Accepted |
 | [ADR-016](adr-016-pages-and-tile-kinds-decorate-themselves.md) | Pages and tile kinds decorate themselves | Accepted |
 | [ADR-017](adr-017-overlay-kinds-from-other-crates.md) | Overlay kinds from other crates | Accepted |
+| [ADR-018](adr-018-settings-sections-from-other-crates.md) | Settings sections from other crates | Accepted |
