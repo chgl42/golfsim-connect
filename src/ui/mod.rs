@@ -1,7 +1,7 @@
 //! The desktop app around the R10 → GSPro bridge (egui/eframe), styled after GSPro's in-game
 //! interface: pages, overlay windows, the shots explorer. Behind the `gui` feature; the binary
 //! `openlaunch-connect` only calls [`run`]. Another crate builds its own app with
-//! [`run_with`] and its own [`Page`]s.
+//! [`run_with`] and its own [`Page`]s, or [`run_with_sections`] and its own [`SettingsSection`]s too.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -38,9 +38,11 @@ mod mac;
 pub mod overlay;
 mod help;
 mod page;
+mod section;
 
 use kit::*;
 pub use page::{AppCtx, Page};
+pub use section::SettingsSection;
 use overlay::*;
 
 const APP_NAME: &str = "GolfSim Connect";
@@ -85,6 +87,16 @@ fn start_check_wanted(check_updates: bool, demo: bool) -> bool {
 /// # Errors
 /// Returns eframe's error if the window can't be created.
 pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
+    run_with_sections(pages, Vec::new())
+}
+
+/// Like [`run_with`], with settings of other crates: each of `sections` is a card on the
+/// *Settings* page after the core's cards, two to a row in the order given, saved by its SAVE
+/// (ADR-018).
+///
+/// # Errors
+/// Returns eframe's error if the window can't be created.
+pub fn run_with_sections(pages: Vec<Box<dyn Page>>, sections: Vec<Box<dyn SettingsSection>>) -> eframe::Result {
     if let Err(e) = Settings::claim_data_dir() {
         match e.earlier {
             None => log::info(&format!("{APP_NAME} is already running; this instance stops")),
@@ -130,7 +142,7 @@ pub fn run_with(pages: Vec<Box<dyn Page>>) -> eframe::Result {
         options,
         Box::new(move |cc| {
             setup_style(&cc.egui_ctx);
-            Ok(Box::new(App::with_pages(settings, tx, pages)))
+            Ok(Box::new(App::with_pages(settings, tx, pages, sections)))
         }),
     )
 }
@@ -248,11 +260,12 @@ impl App {
     /// The app with the core pages.
     #[cfg(test)]
     fn new(settings: Settings, tx: Sender<Cmd>) -> Self {
-        Self::with_pages(settings, tx, Vec::new())
+        Self::with_pages(settings, tx, Vec::new(), Vec::new())
     }
 
-    /// The app with the core pages and `extra` (see [`run_with`]).
-    fn with_pages(mut settings: Settings, tx: Sender<Cmd>, extra: Vec<Box<dyn Page>>) -> Self {
+    /// The app with the core pages, `extra` and the Settings page's `sections` (see
+    /// [`run_with_sections`]).
+    fn with_pages(mut settings: Settings, tx: Sender<Cmd>, extra: Vec<Box<dyn Page>>, sections: Vec<Box<dyn SettingsSection>>) -> Self {
         // The overlays as they are become the first arrangement.
         if settings.arrangements.is_empty() {
             settings.keep_arrangement();
@@ -261,7 +274,7 @@ impl App {
         if edit.launcher_path.is_none() {
             edit.launcher_path = launcher::find_gspro_launchers().into_iter().next();
         }
-        let pages = page::pages(extra);
+        let pages = page::pages(extra, sections);
         // OPENLAUNCH_PAGE=<id> opens another page first (e.g. settings, log).
         let page = page::start_page(&pages, std::env::var("OPENLAUNCH_PAGE").ok().as_deref());
         Self {
@@ -598,13 +611,18 @@ impl Page for PlayPage {
 }
 
 /// *Settings*: edited in a copy (`AppCtx::edit`) and saved with SAVE; the interface size and the
-/// reset of the shots view apply at once.
+/// reset of the shots view apply at once. Other crates' settings are cards after the core's
+/// (`sections`, ADR-018), saved by the same SAVE.
 #[derive(Default)]
 struct SettingsPage {
     /// The outcome of the last save or search, shown next to SAVE.
     note: Option<String>,
     /// Asking before the shots view is reset.
     confirm_reset: bool,
+    /// The last SAVE failed: its note shows instead of "Unsaved changes" until SAVE succeeds.
+    save_failed: bool,
+    /// Other crates' settings, as cards after the core's.
+    sections: Vec<Box<dyn SettingsSection>>,
 }
 
 impl Page for SettingsPage {
@@ -617,11 +635,31 @@ impl Page for SettingsPage {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
-        // 2 × 2 cards; cards side by side share their row's height.
-        let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 184.0 + 10.0 + 140.0), Sense::hover());
-        let col_w = (area.width() - 10.0) / 2.0;
+        // The cards scroll; the footer (after the item spacing) stays below them.
+        let cards_h = (ui.available_height() - ui.spacing().item_spacing.y - FOOTER_GAP - FOOTER_H).max(0.0);
+        egui::ScrollArea::vertical()
+            .id_salt("settings-cards")
+            .max_height(cards_h)
+            .auto_shrink([false, true])
+            .show(ui, |ui| self.cards(ui, app));
+        self.footer(ui, app);
+    }
+}
+
+/// Room between the Settings page's cards and its footer.
+const FOOTER_GAP: f32 = 12.0;
+/// Height of the Settings page's footer (RESET SHOTS VIEW, the note, SAVE).
+const FOOTER_H: f32 = 38.0;
+
+impl SettingsPage {
+    /// The core's 2 × 2 cards, then the sections' cards; cards side by side share their row's height.
+    fn cards(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
+        let core_h = 184.0 + section::GAP + 140.0;
+        let (all, _) = ui.allocate_exact_size(vec2(ui.available_width(), core_h + section::total_height(&self.sections)), Sense::hover());
+        let area = Rect::from_min_size(all.min, vec2(all.width(), core_h));
+        let col_w = (area.width() - section::GAP) / 2.0;
         let cell = |col: f32, top: f32, h: f32| {
-            Rect::from_min_size(pos2(area.left() + col * (col_w + 10.0), area.top() + top), vec2(col_w, h))
+            Rect::from_min_size(pos2(area.left() + col * (col_w + section::GAP), area.top() + top), vec2(col_w, h))
         };
         let (r10_device, r10_battery, r10) = state::with(|s| (s.r10_device.clone(), s.r10_battery, s.r10));
 
@@ -646,6 +684,7 @@ impl Page for SettingsPage {
                             Some(p) => app.edit.launcher_path = Some(p),
                             None => {
                                 self.note = Some(tr("No GSPro launcher found under ~/Applications/CrossOver.").into());
+                                self.save_failed = false;
                             }
                         }
                     }
@@ -697,7 +736,7 @@ impl Page for SettingsPage {
             });
         });
 
-        card(ui, cell(0.0, 194.0, 140.0), "R10", Icon::Signal, |ui| {
+        card(ui, cell(0.0, 184.0 + section::GAP, 140.0), "R10", Icon::Signal, |ui| {
             setting_row(ui, tr("Ball distance"), |ui| {
                 stepper(ui, &mut app.edit.tee_distance, 1.5..=4.0, 0.05, "m")
                     .on_hover_text(tr("Distance from the R10 to the ball; default 2.10 m"));
@@ -724,7 +763,7 @@ impl Page for SettingsPage {
             });
         });
 
-        let updates_card = cell(1.0, 194.0, 140.0);
+        let updates_card = cell(1.0, 184.0 + section::GAP, 140.0);
         let check = state::with(|s| s.update_check.clone());
         card(ui, updates_card, tr("NOTIFICATIONS & UPDATES"), Icon::Bell, |ui| {
             setting_row(ui, tr("Notifications"), |ui| {
@@ -786,26 +825,37 @@ impl Page for SettingsPage {
             resp.on_hover_text(hint);
         }
 
-        // Footer: status note and the primary save button, right-aligned.
-        ui.add_space(12.0);
-        let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
-        let dirty = *app.edit != *app.settings();
+        section::draw(ui, &mut self.sections, area.left_bottom(), area.width(), app.settings());
+    }
+
+    /// Footer: RESET SHOTS VIEW, the status note and the primary save button, right-aligned.
+    fn footer(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
+        ui.add_space(FOOTER_GAP);
+        let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), FOOTER_H), Sense::hover());
+        let core_dirty = *app.edit != *app.settings();
+        let dirty = core_dirty || section::any_dirty(&self.sections);
         let save_r = Rect::from_min_max(pos2(bar.right() - 160.0, bar.top()), bar.max);
         if button(ui, save_r, tr("SAVE"), Icon::None, true, dirty, tr("No changes")) {
             let restart = app.edit.gspro_addr != app.settings().gspro_addr
                 || (app.edit.tee_distance - app.settings().tee_distance).abs() > f32::EPSILON;
-            let edit = app.edit.clone();
-            match app.change_settings(|s| s.clone_from(&edit)) {
-                Ok(()) => {
-                    i18n::set(&app.settings().language);
-                    self.note = Some(if restart {
-                        tr("Saved. Address and distance apply after the next start.").into()
-                    } else {
-                        tr("Saved.").into()
-                    });
+            // settings.json only if the core's copy changed; then every section with changes.
+            let mut failed = None;
+            if core_dirty {
+                let edit = app.edit.clone();
+                match app.change_settings(|s| s.clone_from(&edit)) {
+                    Ok(()) => i18n::set(&app.settings().language),
+                    Err(e) => failed = Some(e),
                 }
-                Err(e) => self.note = Some(tr("Saving failed: {e}").replace("{e}", &e)),
             }
+            if let Some(e) = section::save_all(&mut self.sections) {
+                failed.get_or_insert(e);
+            }
+            self.save_failed = failed.is_some();
+            self.note = Some(match failed {
+                Some(e) => tr("Saving failed: {e}").replace("{e}", &e),
+                None if restart => tr("Saved. Address and distance apply after the next start.").into(),
+                None => tr("Saved.").into(),
+            });
         }
         // Left: back to the explorer's default pages (applies and saves at once, like arranging).
         let label = tr("RESET SHOTS VIEW");
@@ -820,6 +870,7 @@ impl Page for SettingsPage {
             if let Some(reset) = confirm(ui.ctx(), "reset-shot-pages", tr("Reset the shots view?"), text, tr("RESET")) {
                 self.confirm_reset = false;
                 if reset {
+                    self.save_failed = false;
                     self.note = Some(match app.change_settings(|s| s.explorer = crate::settings::Explorer::default()) {
                         Ok(()) => tr("Shots view reset.").into(),
                         Err(e) => tr("Saving failed: {e}").replace("{e}", &e),
@@ -827,7 +878,7 @@ impl Page for SettingsPage {
                 }
             }
         }
-        let note = if dirty { Some(tr("Unsaved changes").to_string()) } else { self.note.clone() };
+        let note = if dirty && !self.save_failed { Some(tr("Unsaved changes").to_string()) } else { self.note.clone() };
         if let Some(note) = note {
             ui.painter().text(
                 pos2(save_r.left() - 14.0, bar.center().y),
@@ -1368,7 +1419,7 @@ mod tests {
         i18n::set(&language);
         let _state = demo_state();
         // Every core page (the Shots page again with a range session below).
-        for page in page::pages(Vec::new()).iter().map(|p| p.id()) {
+        for page in page::pages(Vec::new(), Vec::new()).iter().map(|p| p.id()) {
             let name = if page == "overlay" { "screenshot-overlay-settings.png".to_string() } else { format!("screenshot-{page}.png") };
             let home = std::env::var("HOME").unwrap_or_default();
             let settings = Settings {
@@ -1522,7 +1573,7 @@ mod tests {
 
         i18n::set(&Language::new("en"));
         let _state = demo_state();
-        for page in page::pages(Vec::new()).iter().map(|p| p.id()) {
+        for page in page::pages(Vec::new(), Vec::new()).iter().map(|p| p.id()) {
             let settings = Settings { overlay: OverlayPos::Off, ui_scale: Some(1.0), ..Settings::default() };
             let (tx, _rx) = std::sync::mpsc::channel();
             let mut harness = Harness::builder()

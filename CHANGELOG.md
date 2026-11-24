@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Extensions can put their settings on the SETTINGS page: each `ui::SettingsSection` given to
+  `ui::run_with_sections` is a card after the core's, two to a row, and the page scrolls when they don't fit.
+  SAVE and "Unsaved changes" cover them too; a section saves its own file, never `settings.json`, and can carry a
+  badge or be greyed like pages (ADR-018). `ui::run_with` works as before.
 - Extensions can mark their pages and tile kinds: `Page::badge` and `TileKind::badge` add a mark after the name in
   the navigation, the tile menus and the tile's title on the SHOTS page; `Page::greyed` and `TileKind::greyed` grey
   the entry with a tooltip saying why, and it can still be chosen (ADR-016). Both are asked every frame and default
@@ -46,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The app no longer checks GitHub for updates and contacts nobody on its own; new versions are on the releases page.
 
 ### Fixed
+- **Settings footer:** RESET SHOTS VIEW and SAVE no longer cover the bottom of the cards when there is no *Updates*
+  row; they now always sit below the cards.
 - **SQLite updated:** the SQLite built into the app, which reads GSPro's results from its database, is updated to
   a version without the page-cache flaw of CVE-2026-119375 (RUSTSEC-2026-0459).
 

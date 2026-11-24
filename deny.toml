@@ -8,6 +8,11 @@ targets = ["aarch64-apple-darwin"]
 
 [advisories]
 yanked = "deny"
+ignore = [
+  # chrono is flagged unmaintained (2026-11-17); no vulnerability, and no maintained release to move to.
+  # Remove once the app is on jiff or time.
+  { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no known vulnerability; removed when the app moves to jiff or time" },
+]
 
 [licenses]
 # OSI-approved licences only; anything else fails the build.

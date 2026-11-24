@@ -11,6 +11,7 @@ use super::Moving;
 use super::overlay::OverlayKind;
 use super::egui;
 use super::explorer::ExplorerState;
+use super::section::SettingsSection;
 
 /// A page of the app: an entry in the navigation and what is drawn below the top bar when it is
 /// chosen. A page keeps its own state in its fields; what pages share comes through [`AppCtx`].
@@ -105,15 +106,15 @@ const UNPOSITIONED_AFTER: &str = "overlay";
 /// The pages in the order of the navigation, left to right: the core pages (*Play*, *Shots*,
 /// *Log*, *Overlay*, *Help*, *Settings*), each followed by the pages of `extra` (pages of other
 /// crates) that name it in [`Page::after`], in the order given; the others come after *Overlay*,
-/// before *Help* and *Settings*.
-pub(super) fn pages(extra: Vec<Box<dyn Page>>) -> Vec<Box<dyn Page>> {
+/// before *Help* and *Settings*. The *Settings* page gets `sections` (settings of other crates).
+pub(super) fn pages(extra: Vec<Box<dyn Page>>, sections: Vec<Box<dyn SettingsSection>>) -> Vec<Box<dyn Page>> {
     let core: Vec<Box<dyn Page>> = vec![
         Box::new(super::PlayPage),
         Box::new(super::explorer::ShotsPage::default()),
         Box::new(super::LogPage::default()),
         Box::new(super::overlay::OverlayPage::default()),
         Box::new(super::help::HelpPage),
-        Box::new(super::SettingsPage::default()),
+        Box::new(super::SettingsPage { sections, ..super::SettingsPage::default() }),
     ];
     let slot = |id: &str| core.iter().position(|p| p.id() == id);
     let unpositioned = slot(UNPOSITIONED_AFTER).expect("Overlay is a core page");
@@ -212,7 +213,7 @@ mod tests {
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
             setup_style(&cc.egui_ctx);
             cc.egui_ctx.all_styles_mut(|s| s.interaction.tooltip_delay = 0.0);
-            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)])
+            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)], Vec::new())
         });
         harness.state_mut().remember_size = false;
         harness.run_steps(2);
@@ -293,7 +294,7 @@ mod tests {
     /// The navigation's ids for extra pages given as `(id, after)`.
     fn ids_with(extra: &[(&'static str, Option<&'static str>)]) -> Vec<&'static str> {
         let extra = extra.iter().map(|&(id, after)| Box::new(At { id, after, drawn: Rc::default() }) as Box<dyn Page>).collect();
-        pages(extra).iter().map(|p| p.id()).collect()
+        pages(extra, Vec::new()).iter().map(|p| p.id()).collect()
     }
 
     #[test]
@@ -333,7 +334,7 @@ mod tests {
 
     #[test]
     fn the_start_page_finds_a_positioned_page() {
-        let pages = pages(vec![Box::new(At { id: "ext", after: Some("shots"), drawn: Rc::default() })]);
+        let pages = pages(vec![Box::new(At { id: "ext", after: Some("shots"), drawn: Rc::default() })], Vec::new());
         assert_eq!(start_page(&pages, Some("ext")), 2);
         assert_eq!(start_page(&pages, Some("log")), 3);
     }
@@ -352,7 +353,7 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
             setup_style(&cc.egui_ctx);
-            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)])
+            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)], Vec::new())
         });
         harness.state_mut().remember_size = false;
         harness.step();
@@ -373,7 +374,7 @@ mod tests {
     #[test]
     fn extra_pages_come_before_help_and_settings() {
         let drawn = Rc::new(Cell::new(0));
-        let pages = pages(vec![Box::new(SoundPage { drawn })]);
+        let pages = pages(vec![Box::new(SoundPage { drawn })], Vec::new());
         let ids: Vec<&str> = pages.iter().map(|p| p.id()).collect();
         assert_eq!(ids, ["play", "shots", "log", "overlay", "sound", "help", "settings"]);
         assert_eq!(start_page(&pages, Some("sound")), 4);
@@ -396,7 +397,7 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut harness = Harness::builder().with_size(BASE_SIZE).build_eframe(|cc| {
             setup_style(&cc.egui_ctx);
-            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)])
+            App::with_pages(Settings { overlay: crate::settings::OverlayPos::Off, ..Settings::default() }, tx, vec![Box::new(page)], Vec::new())
         });
         harness.state_mut().remember_size = false;
         harness.step();

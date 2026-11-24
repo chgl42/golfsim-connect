@@ -74,9 +74,10 @@ The module `ui` (`src/ui/`):
 
 | File | What |
 |---|---|
-| `mod.rs` | `run()`/`run_with()`, `App`, the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
+| `mod.rs` | `run()`/`run_with()`/`run_with_sections()`, `App`, the *Play*, *Settings* and *Log* pages, zoom, screenshot capture |
 | `help.rs` | The *Help* page: the common fixes and how to ask for help |
 | `page.rs` | The `Page` trait, `AppCtx` (what pages share), the list of pages |
+| `section.rs` | The `SettingsSection` trait (other crates' cards on the *Settings* page), their layout and saving |
 | `kit.rs` | Public building blocks: palette, `cond`/`caps_text`, the reading sizes and spacing `READ`/`READ_HEADING`/`READ_LINE`/`READ_GAP`/`READ_SECTION_GAP`, `card`, `button`, `secondary_button`, `toggle`, `segments`, `stepper`, `setting_row`, `Icon`, `confirm`, `setup_style` |
 | `overlay.rs`, `overlay/extension.rs` | Overlay windows, `OverlayContent` and its drawing, the *Overlay* page, arrangements; the overlay kind interface for other crates (`OverlayKind`, `register_overlay_kind`, `overlay_kind`) |
 | `explorer.rs`, `explorer/*.rs` | The *Shots* page (shots explorer), the tile kind interface, and the kinds: `table.rs`, `details.rs`, `dispersion.rs`, `scatter.rs` (correlation), `flight3d.rs` |
@@ -91,6 +92,13 @@ The module `ui` (`src/ui/`):
   overlays and capture. A page reaches what pages share through `AppCtx`: the settings and
   `change_settings`, the command sender, and for the core pages the Settings page's copy, the
   explorer state and the overlay being moved.
+- **Settings sections**: another crate's settings are cards on the *Settings* page after the core's
+  four, behind the trait `SettingsSection` (`id`, `title`, `icon`, `ui`; `dirty`, `save`, `height`,
+  `badge`, `greyed` with defaults), given to `ui::run_with_sections(pages, sections)` and owned by the
+  page. Two to a row, scrolling, with the footer fixed below; one SAVE writes `settings.json` if the
+  core's copy changed and calls each changed section's `save`. A section reads the settings, never
+  writes them, and keeps its data in its own file
+  ([ADR-018](adr/adr-018-settings-sections-from-other-crates.md)).
 - **Shots explorer** (`ui/explorer.rs`): pages of tiles on a grid, a shared filter and selection.
   What a tile shows is up to its kind, behind the public trait `explorer::TileKind` (id, name,
   options, header, body, badge, greyed; [ADR-009](adr/adr-009-tile-kinds-as-modules.md)). The core's kinds are
@@ -283,7 +291,9 @@ can be added without editing the core in many places.
   `OPENLAUNCH_PAGE` and the README screenshots go through one list, and another crate adds pages
   with `ui::run_with`, placed after a core page by `Page::after`
   ([ADR-010](adr/adr-010-pages-own-their-state.md)). Left: an extension's
-  page sees only the settings and the command sender.
+  page sees only the settings and the command sender. Settings of another crate are cards on the
+  *Settings* page (`SettingsSection`, `ui::run_with_sections`,
+  [ADR-018](adr/adr-018-settings-sections-from-other-crates.md)).
 - **Decoration**: a page or a tile kind of an extension can mark itself with two default trait
   methods, `badge` (a mark after its label or name) and `greyed` (`Some(why)`: drawn at the kit's
   `kit::DISABLED` look with `why` as tooltip, still clickable), asked every frame. The core draws
@@ -294,7 +304,8 @@ can be added without editing the core in many places.
   are public (`ui::kit`), and other crates add translations with `i18n::register`
   ([ADR-008](adr/adr-008-ui-in-the-library.md), per language since
   [ADR-013](adr/adr-013-languages-as-registered-tables.md)), tile kinds with `explorer::register_tile_kind`,
-  overlay kinds with `overlay::register_overlay_kind` and pages with `ui::run_with`.
+  overlay kinds with `overlay::register_overlay_kind`, pages with `ui::run_with` and settings
+  cards with `ui::run_with_sections`.
 - **Launch monitors**: R10 code and generic code are mixed in `engine` and `mapping`; names like
   `R10Status` are used for generic status. Left until a second device is added (issue #1).
 

@@ -77,7 +77,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
     or the player's name
   - `ui/` – **the app** (ADR-008), see below
 - `src/bin/openlaunch-connect/main.rs` – the app's binary: only `openlaunch_connect::ui::run()`
-  (another crate adds pages with `ui::run_with(pages)`)
+  (another crate adds pages with `ui::run_with(pages)`, and settings cards with `ui::run_with_sections`)
 - `src/ui/mod.rs` – **the app** (egui/eframe), styled after GSPro's in-game look
   (navy, tiles, condensed figures, status panel with READY, battery glyph). Layout base size 1000×470 (`BASE_SIZE`);
   with the interface size *Auto* (`ui_scale: None`) larger windows zoom the whole UI uniformly (`apply_window_zoom`,
@@ -91,7 +91,10 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   pages `edit`, `explorer`, `moving` and the arrangement operations). An extension's page or tile kind can mark itself
   with the default methods `badge` and `greyed` (ADR-016: a mark after the label/name, and greyed at `kit::DISABLED`
   with a tooltip, still clickable; drawn in the navigation, the tile-kind menus and the Shots page's tile title, not in
-  the tile overlays). The list `page::pages` makes the navigation
+  the tile overlays). Another crate's settings are cards on the *Settings* page behind the public trait
+  `ui::SettingsSection` (`ui/section.rs`, ADR-018), given to `ui::run_with_sections(pages, sections)`: after the
+  core's cards, two to a row, scrolling, saved by the page's SAVE (`dirty`/`save`); a section gets the settings
+  read-only and writes only its own file. The list `page::pages` makes the navigation
   (Play, Shots, Log, Overlay, Help, Settings, each extra page right after the core page its `Page::after` names,
   else after Overlay); a new core page goes there. The *Help* page
   (`ui/help.rs`) follows the README's *Troubleshooting* – change both together. Tests open a page with
@@ -114,7 +117,7 @@ Decisions and their reasons: `docs/adr/` (new decisions get an ADR in the same P
   above the middle of the text box; `caps_text` centres the capitals on `pos.y` (measured).
   Controls (buttons, toggles, segments, stepper, cards, the confirm dialog) are drawn with the painter, in the public
   module `ui::kit` (`src/ui/kit.rs`) with the palette – see `button()`, `card()`, `toggle()`, `confirm()`. Only `ui::run`,
-  `ui::run_with`, `ui::Page`, `ui::AppCtx`, `ui::kit`, the tile kind interface in `ui::explorer` (`TileKind`, `TileCtx`,
+  `ui::run_with`, `ui::run_with_sections`, `ui::Page`, `ui::AppCtx`, `ui::SettingsSection`, `ui::kit`, the tile kind interface in `ui::explorer` (`TileKind`, `TileCtx`,
   `Units`, `FlightSummary`, `register_tile_kind`), the overlay kind interface in `ui::overlay` (`OverlayKind`,
   `register_overlay_kind`, `overlay_kind`) and the re-exported `ui::egui`/`ui::eframe` are public; everything else
   stays `pub(super)`/private.
