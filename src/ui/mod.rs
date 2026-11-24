@@ -635,8 +635,8 @@ impl Page for SettingsPage {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
-        // The cards scroll; the footer (12 + 38, after the item spacing) stays below them.
-        let cards_h = (ui.available_height() - ui.spacing().item_spacing.y - 50.0).max(0.0);
+        // The cards scroll; the footer (after the item spacing) stays below them.
+        let cards_h = (ui.available_height() - ui.spacing().item_spacing.y - FOOTER_GAP - FOOTER_H).max(0.0);
         egui::ScrollArea::vertical()
             .id_salt("settings-cards")
             .max_height(cards_h)
@@ -646,15 +646,20 @@ impl Page for SettingsPage {
     }
 }
 
+/// Room between the Settings page's cards and its footer.
+const FOOTER_GAP: f32 = 12.0;
+/// Height of the Settings page's footer (RESET SHOTS VIEW, the note, SAVE).
+const FOOTER_H: f32 = 38.0;
+
 impl SettingsPage {
     /// The core's 2 × 2 cards, then the sections' cards; cards side by side share their row's height.
     fn cards(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
-        let core_h = 184.0 + 10.0 + 140.0;
+        let core_h = 184.0 + section::GAP + 140.0;
         let (all, _) = ui.allocate_exact_size(vec2(ui.available_width(), core_h + section::total_height(&self.sections)), Sense::hover());
         let area = Rect::from_min_size(all.min, vec2(all.width(), core_h));
-        let col_w = (area.width() - 10.0) / 2.0;
+        let col_w = (area.width() - section::GAP) / 2.0;
         let cell = |col: f32, top: f32, h: f32| {
-            Rect::from_min_size(pos2(area.left() + col * (col_w + 10.0), area.top() + top), vec2(col_w, h))
+            Rect::from_min_size(pos2(area.left() + col * (col_w + section::GAP), area.top() + top), vec2(col_w, h))
         };
         let (r10_device, r10_battery, r10) = state::with(|s| (s.r10_device.clone(), s.r10_battery, s.r10));
 
@@ -679,6 +684,7 @@ impl SettingsPage {
                             Some(p) => app.edit.launcher_path = Some(p),
                             None => {
                                 self.note = Some(tr("No GSPro launcher found under ~/Applications/CrossOver.").into());
+                                self.save_failed = false;
                             }
                         }
                     }
@@ -730,7 +736,7 @@ impl SettingsPage {
             });
         });
 
-        card(ui, cell(0.0, 194.0, 140.0), "R10", Icon::Signal, |ui| {
+        card(ui, cell(0.0, 184.0 + section::GAP, 140.0), "R10", Icon::Signal, |ui| {
             setting_row(ui, tr("Ball distance"), |ui| {
                 stepper(ui, &mut app.edit.tee_distance, 1.5..=4.0, 0.05, "m")
                     .on_hover_text(tr("Distance from the R10 to the ball; default 2.10 m"));
@@ -757,7 +763,7 @@ impl SettingsPage {
             });
         });
 
-        let updates_card = cell(1.0, 194.0, 140.0);
+        let updates_card = cell(1.0, 184.0 + section::GAP, 140.0);
         let check = state::with(|s| s.update_check.clone());
         card(ui, updates_card, tr("NOTIFICATIONS & UPDATES"), Icon::Bell, |ui| {
             setting_row(ui, tr("Notifications"), |ui| {
@@ -824,8 +830,8 @@ impl SettingsPage {
 
     /// Footer: RESET SHOTS VIEW, the status note and the primary save button, right-aligned.
     fn footer(&mut self, ui: &mut egui::Ui, app: &mut AppCtx<'_>) {
-        ui.add_space(12.0);
-        let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
+        ui.add_space(FOOTER_GAP);
+        let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), FOOTER_H), Sense::hover());
         let core_dirty = *app.edit != *app.settings();
         let dirty = core_dirty || section::any_dirty(&self.sections);
         let save_r = Rect::from_min_max(pos2(bar.right() - 160.0, bar.top()), bar.max);
@@ -864,6 +870,7 @@ impl SettingsPage {
             if let Some(reset) = confirm(ui.ctx(), "reset-shot-pages", tr("Reset the shots view?"), text, tr("RESET")) {
                 self.confirm_reset = false;
                 if reset {
+                    self.save_failed = false;
                     self.note = Some(match app.change_settings(|s| s.explorer = crate::settings::Explorer::default()) {
                         Ok(()) => tr("Shots view reset.").into(),
                         Err(e) => tr("Saving failed: {e}").replace("{e}", &e),

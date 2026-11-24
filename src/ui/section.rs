@@ -17,7 +17,7 @@ use super::kit::{DISABLED, Icon, card, with_badge};
 ///
 /// [`save`]: SettingsSection::save
 pub trait SettingsSection {
-    /// Unique, lower case, e.g. `"sound"`; keeps the card's controls apart from other cards'.
+    /// Unique, lower case, e.g. `"example"`; keeps the card's controls apart from other cards'.
     fn id(&self) -> &'static str;
     /// The card's heading, in capitals and translated with `tr` (a table of its own crate goes in
     /// with `i18n::register`).
@@ -351,6 +351,13 @@ mod tests {
         assert!(crate::test_util::painted_text_color(harness.output(), "Saving failed: disk full").is_some());
         assert!(crate::test_util::painted_text_color(harness.output(), "Unsaved changes").is_none());
 
+        // Another note (the shots view reset) replaces the failure: "Unsaved changes" shows again.
+        harness.state_mut().page_mut::<super::super::SettingsPage>().confirm_reset = true;
+        harness.run_steps(2);
+        harness.get_by_label("RESET").click();
+        harness.run_steps(2);
+        assert!(crate::test_util::painted_text_color(harness.output(), "Unsaved changes").is_some());
+
         // Fixed: SAVE again saves it.
         *probe_a.fail.borrow_mut() = None;
         harness.get_by_label("SAVE").click();
@@ -410,7 +417,7 @@ mod tests {
     /// cards) + 6 (spacing) + 12. Before, the footer followed the last card's content and, without
     /// an update source, covered the cards' last row.
     #[test]
-    fn without_sections_the_page_is_as_before() {
+    fn without_sections_the_core_cards_stay_and_the_footer_follows_them() {
         use egui_kittest::kittest::Queryable;
 
         let _state = crate::test_util::state_lock();
